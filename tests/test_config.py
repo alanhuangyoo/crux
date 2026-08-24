@@ -52,3 +52,25 @@ def test_harbor_passes_strings():
     cfg = build_config(step_limit="90", enable_compaction="false")
     assert cfg.step_limit == 90
     assert cfg.enable_compaction is False
+
+
+def test_salvage_returns_a_string_not_a_result():
+    """Pins the upstream contract that broke the first v2 run.
+
+    salvage_truncated_response returns (cleaned_text, has_multiple_blocks);
+    treating it as a ParseResult raised AttributeError on every trial.
+    """
+    from harbor.agents.terminus_2.terminus_xml_plain_parser import (
+        TerminusXMLPlainParser,
+    )
+
+    parser = TerminusXMLPlainParser()
+    truncated = (
+        "<response><analysis>a</analysis><plan>b</plan><commands>"
+        '<keystrokes duration="0.1">ls\n</keystrokes></commands></response>'
+        " trailing junk that never closed"
+    )
+    result = parser.salvage_truncated_response(truncated)
+    assert isinstance(result, tuple) and len(result) == 2
+    cleaned, _ = result
+    assert cleaned is None or isinstance(cleaned, str)
