@@ -58,8 +58,8 @@ Terminal-Bench 官方用 Modal 跑 CI 和榜单实验。dev 机器满足同样�
 
 ```bash
 # 本机写代码 → 同步到 dev → 在 dev 上跑
-rsync -az --delete --exclude 'jobs/' --exclude '.venv' ./ dev:~/deepterm/
-ssh dev 'cd ~/deepterm && ./scripts/smoke.sh'
+rsync -az --delete --exclude 'jobs/' --exclude '.venv' ./ dev:~/crux/
+ssh dev 'cd ~/crux && ./scripts/smoke.sh'
 ```
 
 dev 上已安装：`uv 0.12.5`、`harbor 0.22.0`。

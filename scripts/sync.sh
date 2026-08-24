@@ -7,7 +7,7 @@
 set -euo pipefail
 
 REMOTE="${REMOTE:-dev}"
-REMOTE_DIR="${REMOTE_DIR:-~/deepterm/}"
+REMOTE_DIR="${REMOTE_DIR:-~/crux/}"
 
 rsync -az --delete \
   --exclude 'jobs/' \
