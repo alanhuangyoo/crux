@@ -106,6 +106,7 @@ class TrajectoryRecorder:
         completion_tokens: int | None = None,
         cached_tokens: int | None = None,
         cost_usd: float | None = None,
+        extra: dict | None = None,
     ) -> None:
         """Record one model turn, plus the command it ran and what came back."""
         self.total_prompt_tokens += prompt_tokens or 0
@@ -154,6 +155,11 @@ class TrajectoryRecorder:
                     cached_tokens=cached_tokens,
                     cost_usd=cost_usd,
                 ),
+                # The model's own analysis and plan for the turn. The /judge
+                # pass reads trajectories to decide whether a pass was earned;
+                # stated intent is what makes a batch of commands legible.
+                extra={k: v for k, v in (extra or {}).items() if v is not None}
+                or None,
             )
         )
         self.flush()
