@@ -9,7 +9,10 @@ set -euo pipefail
 REMOTE="${REMOTE:-h20-43}"
 REMOTE_DIR="${REMOTE_DIR:-/mnt/cpfs/users/xiaohuang/projects/crux/}"
 
+# .env holds the API key and lives only on the remote. Without this exclude,
+# --delete removes it on every sync because it has no local counterpart.
 rsync -az --delete \
+  --exclude '.env' \
   --exclude 'jobs/' \
   --exclude '.venv' \
   --exclude '__pycache__' \
