@@ -43,7 +43,7 @@ def test_unknown_variant_is_rejected():
 
 
 def test_explicit_kwargs_win_over_variant():
-    cfg = build_config(variant="steps_120", step_limit=200)
+    cfg = build_config(variant="steps_60", step_limit=200)
     assert cfg.step_limit == 200
 
 
