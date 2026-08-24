@@ -24,11 +24,14 @@ class CruxConfig(BaseModel):
 
     # --- loop bounds ---------------------------------------------------
     step_limit: int = Field(
-        default=60,
+        default=150,
         description=(
-            "Model turns before giving up. With batched commands a turn does "
-            "far more than v1's single command, so this is lower than v1's 80 "
-            "while allowing strictly more work."
+            "Model turns before giving up. Set high on purpose: every task in "
+            "the first clean run hit the old limit of 60 while still making "
+            "real progress, and Harbor records an agent timeout and grades the "
+            "trial anyway rather than erroring it. So the per-task timeout is "
+            "the real governor, and a low limit only throws away work that "
+            "would have been scored."
         ),
     )
     wall_time_limit_sec: int = Field(
@@ -110,9 +113,10 @@ VARIANTS: dict[str, dict] = {
     # Is structured patching worth installing a helper, versus leaving the
     # model to edit with heredocs and sed?
     "no_apply_patch": {"enable_apply_patch": False},
-    # Are failures caused by the turn budget, or by the model being stuck?
-    # If doubling the budget does not move the score, the budget was not it.
-    "steps_120": {"step_limit": 120},
+    # The old default, kept as the control for raising it. If 60 scores the
+    # same as 150, the budget was never the constraint and the extra spend is
+    # waste; if it scores worse, the raise is paying for itself.
+    "steps_60": {"step_limit": 60},
     # A taller pane shows more state per turn but costs tokens on every turn.
     "pane_60": {"pane_height": 60},
     # Ablates both mechanisms at once: the v2 architecture with none of the
