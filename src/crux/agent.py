@@ -1,28 +1,23 @@
 """Crux agent — Harbor BaseAgent implementation.
 
-Design notes
-------------
-The loop is deliberately minimal (see docs/RESEARCH.md §5): the Tmax paper's
-finding is that architectural novelty does not move Terminal-Bench scores —
-prompt quality, tool ergonomics, and context management do. So the structure
-here stays close to mini-swe-agent's proven shape:
+The loop is deliberately minimal. The Tmax paper's finding is that
+architectural novelty does not move Terminal-Bench scores; prompt quality,
+tool ergonomics, and context management do (docs/RESEARCH.md §5). So the
+control flow stays close to mini-swe-agent's proven shape —
 
-    LLM -> bash command -> execute in environment -> feed output back
+    model -> one bash command -> execute -> feed the output back
 
-and the optimization work happens in the prompt templates and the observation
-formatting, not in the control flow.
+— and the tuning work happens in the prompt templates and in how observations
+are rendered, not in the plumbing.
 
 ``SUPPORTS_ATIF = True`` is a hard requirement for leaderboard eligibility:
-Harbor's CI rejects any submission whose passing trials lack an ATIF
-trajectory (docs/RESEARCH.md §4).
+Harbor's CI rejects submissions whose passing trials carry no ATIF trajectory.
 """
 
 from __future__ import annotations
 
-import json
 import re
 import time
-from pathlib import Path
 from typing import override
 
 from harbor.agents.base import BaseAgent
@@ -30,17 +25,42 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from crux import __version__
+from crux.model import ModelClient
+from crux.trajectory import TrajectoryRecorder
 
-# The model is asked to emit exactly one bash block per turn. Keeping the
-# contract this narrow is what keeps the parser (and the failure modes) simple.
-ACTION_RE = re.compile(r"```bash\s*\n(.*?)\n```", re.DOTALL)
+# One bash block per turn. Keeping the contract this narrow keeps the parser —
+# and the ways it can go wrong — small.
+ACTION_RE = re.compile(r"```bash\s*\n(.*?)```", re.DOTALL)
 
-# Sentinel the model prints when it considers the task finished.
+# Printed by the model when it considers the task finished.
 DONE_MARKER = "CRUX_TASK_COMPLETE"
+
+SYSTEM_PROMPT = """\
+You are a terminal agent solving a task inside a Linux container. You act by \
+running bash commands.
+
+Rules:
+- Reply with exactly ONE ```bash code block per turn. It is executed and you \
+receive its stdout, stderr, and exit code.
+- Commands are non-interactive. Never start an editor, a pager, or anything \
+that waits for input. Use non-interactive flags (-y, --no-pager, --yes).
+- Long-running commands should be given a sensible timeout so a hang does not \
+consume the whole budget.
+- Verify your work before declaring completion: re-read the file you wrote, \
+re-run the test you fixed.
+- When the task is fully complete and verified, reply with {done_marker} and \
+no bash block.
+"""
+
+INSTANCE_PROMPT = """\
+Task:
+
+{instruction}
+"""
 
 
 class CruxAgent(BaseAgent):
-    """A bash-loop terminal agent, tuned for DeepSeek models."""
+    """A bash-loop terminal agent."""
 
     SUPPORTS_ATIF: bool = True
     SUPPORTS_WINDOWS: bool = False
@@ -48,10 +68,13 @@ class CruxAgent(BaseAgent):
     def __init__(
         self,
         *args,
-        step_limit: int = 60,
+        step_limit: int = 80,
         wall_time_limit_sec: int = 0,
         command_timeout_sec: int = 300,
         max_output_chars: int = 8000,
+        max_consecutive_format_errors: int = 3,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -59,6 +82,13 @@ class CruxAgent(BaseAgent):
         self.wall_time_limit_sec = int(wall_time_limit_sec)
         self.command_timeout_sec = int(command_timeout_sec)
         self.max_output_chars = int(max_output_chars)
+        self.max_consecutive_format_errors = int(max_consecutive_format_errors)
+
+        self._client = ModelClient(
+            model_name=self.model_name or "",
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
 
         self.messages: list[dict] = []
         self.n_steps = 0
@@ -77,10 +107,10 @@ class CruxAgent(BaseAgent):
     async def setup(self, environment: BaseEnvironment) -> None:
         """Nothing to install.
 
-        The loop runs host-side and reaches into the sandbox via
+        The loop runs host-side and reaches into the sandbox through
         ``environment.exec``, so the task container stays exactly as the
         benchmark built it. That matters: mutating the environment during
-        setup is the kind of thing the /judge pass flags as harness cheating.
+        setup is what the /judge pass flags as harness cheating.
         """
         return None
 
@@ -92,71 +122,136 @@ class CruxAgent(BaseAgent):
         context: AgentContext,
     ) -> None:
         self._start_time = time.time()
+        recorder = TrajectoryRecorder(
+            logs_dir=self.logs_dir,
+            agent_name=self.name(),
+            agent_version=self.version(),
+            model_name=self.model_name,
+            session_id=self.session_id,
+        )
+
+        system_prompt = SYSTEM_PROMPT.format(done_marker=DONE_MARKER)
+        instance_prompt = INSTANCE_PROMPT.format(instruction=instruction)
         self.messages = [
-            {"role": "system", "content": self._system_prompt()},
-            {"role": "user", "content": self._instance_prompt(instruction)},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": instance_prompt},
         ]
+        recorder.record_system(system_prompt)
+        recorder.record_user(instance_prompt)
 
-        while not self._limits_exceeded():
-            self.n_steps += 1
+        exit_reason = "completed"
+        n_format_errors = 0
 
-            reply = await self._query_model()
-            self.messages.append({"role": "assistant", "content": reply})
+        try:
+            while True:
+                if 0 < self.step_limit <= self.n_steps:
+                    exit_reason = "step_limit"
+                    break
+                if 0 < self.wall_time_limit_sec <= time.time() - self._start_time:
+                    exit_reason = "wall_time_limit"
+                    break
 
-            if DONE_MARKER in reply:
-                break
+                self.n_steps += 1
+                reply = await self._client.complete(self.messages)
+                self.messages.append({"role": "assistant", "content": reply.content})
 
-            action = self._parse_action(reply)
-            if action is None:
-                self.messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "No bash block found. Reply with exactly one "
-                            "```bash``` block, or print "
-                            f"{DONE_MARKER} if the task is done."
-                        ),
-                    }
+                if DONE_MARKER in reply.content:
+                    recorder.record_agent_step(
+                        message=reply.content,
+                        reasoning_content=reply.reasoning_content,
+                        prompt_tokens=reply.usage.prompt_tokens,
+                        completion_tokens=reply.usage.completion_tokens,
+                        cached_tokens=reply.usage.cached_tokens,
+                        cost_usd=reply.usage.cost_usd,
+                    )
+                    self._publish(context, recorder)
+                    break
+
+                command = self._parse_action(reply.content)
+
+                if command is None:
+                    n_format_errors += 1
+                    if 0 < self.max_consecutive_format_errors <= n_format_errors:
+                        exit_reason = "repeated_format_error"
+                        recorder.record_agent_step(
+                            message=reply.content,
+                            reasoning_content=reply.reasoning_content,
+                            prompt_tokens=reply.usage.prompt_tokens,
+                            completion_tokens=reply.usage.completion_tokens,
+                            cached_tokens=reply.usage.cached_tokens,
+                            cost_usd=reply.usage.cost_usd,
+                        )
+                        self._publish(context, recorder)
+                        break
+                    nudge = (
+                        "No bash block found. Reply with exactly one ```bash "
+                        f"block, or {DONE_MARKER} if the task is done."
+                    )
+                    self.messages.append({"role": "user", "content": nudge})
+                    recorder.record_agent_step(
+                        message=reply.content,
+                        reasoning_content=reply.reasoning_content,
+                        output=nudge,
+                        prompt_tokens=reply.usage.prompt_tokens,
+                        completion_tokens=reply.usage.completion_tokens,
+                        cached_tokens=reply.usage.cached_tokens,
+                        cost_usd=reply.usage.cost_usd,
+                    )
+                    self._publish(context, recorder)
+                    continue
+
+                n_format_errors = 0
+                result = await environment.exec(
+                    command, timeout_sec=self.command_timeout_sec
                 )
-                continue
+                observation = self._format_observation(result)
+                self.messages.append({"role": "user", "content": observation})
 
-            result = await environment.exec(
-                action, timeout_sec=self.command_timeout_sec
-            )
-            self.messages.append(
-                {"role": "user", "content": self._format_observation(result)}
-            )
+                recorder.record_agent_step(
+                    message=reply.content,
+                    reasoning_content=reply.reasoning_content,
+                    command=command,
+                    output=observation,
+                    exit_code=result.return_code,
+                    prompt_tokens=reply.usage.prompt_tokens,
+                    completion_tokens=reply.usage.completion_tokens,
+                    cached_tokens=reply.usage.cached_tokens,
+                    cost_usd=reply.usage.cost_usd,
+                )
+                self._publish(context, recorder)
 
-        self._write_trajectory()
+        except Exception as exc:
+            exit_reason = f"error: {type(exc).__name__}"
+            raise
+        finally:
+            # Runs on the timeout/kill path too, so the trial still leaves a
+            # trajectory and usage numbers behind.
+            recorder.set_notes(f"exit_reason={exit_reason}")
+            self._publish(context, recorder, exit_reason=exit_reason)
+
+    # ---- internals -------------------------------------------------------
+
+    def _publish(
+        self,
+        context: AgentContext,
+        recorder: TrajectoryRecorder,
+        exit_reason: str | None = None,
+    ) -> None:
+        """Mirror the running totals into the AgentContext.
+
+        Updated every step rather than once at the end: if the harness kills
+        the trial, whatever was reported last is what gets recorded.
+        """
+        context.n_input_tokens = recorder.total_prompt_tokens
+        context.n_cache_tokens = recorder.total_cached_tokens
+        context.n_output_tokens = recorder.total_completion_tokens
+        context.cost_usd = recorder.total_cost_usd
         context.metadata = {
             "n_steps": self.n_steps,
             "elapsed_sec": round(time.time() - self._start_time, 1),
             "agent_version": self.version(),
+            **({"exit_reason": exit_reason} if exit_reason else {}),
         }
-
-    # ---- internals -------------------------------------------------------
-
-    def _limits_exceeded(self) -> bool:
-        if 0 < self.step_limit <= self.n_steps:
-            return True
-        if 0 < self.wall_time_limit_sec <= (time.time() - self._start_time):
-            return True
-        return False
-
-    def _system_prompt(self) -> str:
-        # TODO(phase-3): this is the single highest-leverage file in the repo.
-        return (
-            "You are a terminal agent. You solve tasks by running bash "
-            "commands in a Linux container.\n\n"
-            "Reply with exactly one ```bash``` code block per turn. The block "
-            "is executed and you receive its stdout, stderr and exit code.\n"
-            "Commands are non-interactive: never launch an editor, pager, or "
-            "anything that waits for input.\n"
-            f"When the task is fully complete, reply with {DONE_MARKER}."
-        )
-
-    def _instance_prompt(self, instruction: str) -> str:
-        return f"Task:\n\n{instruction}"
 
     def _parse_action(self, reply: str) -> str | None:
         match = ACTION_RE.search(reply)
@@ -165,9 +260,9 @@ class CruxAgent(BaseAgent):
     def _format_observation(self, result) -> str:
         """Render an ExecResult back to the model.
 
-        Long outputs are truncated in the middle — the head carries the
-        command's intent and the tail carries the error, and it is the middle
-        that is safe to drop.
+        Long output is truncated in the middle: the head carries what the
+        command was doing and the tail carries how it ended, and the middle is
+        the part that can be dropped without losing the thread.
         """
         parts = [f"exit_code: {result.return_code}"]
         for label, stream in (("stdout", result.stdout), ("stderr", result.stderr)):
@@ -183,23 +278,3 @@ class CruxAgent(BaseAgent):
                 )
             parts.append(f"{label}:\n{text}")
         return "\n\n".join(parts)
-
-    async def _query_model(self) -> str:
-        """Call the model.
-
-        TODO(phase-1): wire to litellm against ``self.model_name`` and record
-        token counts + cost into AgentContext.
-        """
-        raise NotImplementedError(
-            "Model client not wired yet — see Phase 1 in README.md"
-        )
-
-    def _write_trajectory(self) -> None:
-        """Emit the ATIF trajectory Harbor's CI requires.
-
-        TODO(phase-2): build a proper ``harbor.models.trajectories.Trajectory``
-        (Step/ToolCall/Observation) instead of this raw message dump.
-        """
-        self.logs_dir.mkdir(parents=True, exist_ok=True)
-        path = Path(self.logs_dir) / "messages.json"
-        path.write_text(json.dumps(self.messages, indent=2, ensure_ascii=False))
