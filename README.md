@@ -30,7 +30,7 @@ Evaluation runs on the x86-64 dev machine, not this Mac; see docs/ENVIRONMENT.md
 
 - [x] Harbor installed, Docker verified, oracle smoke test green on dev
 - [ ] Phase 1 — baseline: existing agent + DeepSeek, small subset
-- [ ] Phase 2 — Crux v1: model client + ATIF trajectory emission
+- [x] Phase 2 — Crux v1: model client + ATIF trajectory emission
 - [ ] Phase 3 — iterate on prompts / tools / context management
 - [ ] Phase 4 — full run (all tasks x >=5 trials), `--upload`, submit PR
 
@@ -41,6 +41,16 @@ src/crux/agent.py   the agent — a bash loop, Harbor BaseAgent
 scripts/smoke.sh        oracle run; verifies the harness, not the agent
 scripts/baseline.sh     Phase 1 baseline against an existing agent
 docs/RESEARCH.md        competitive landscape, submission rules, red lines
+```
+
+## Tests
+
+The ATIF trajectory is the artifact Harbor's CI validates a submission
+against, so it is covered by tests that run Harbor's own validator:
+
+```bash
+HARBOR_SP=$(dirname $(dirname $(readlink -f $(which harbor))))/lib/python3.14/site-packages
+PYTHONPATH="src:$HARBOR_SP" .venv/bin/python -m pytest tests/ -q
 ```
 
 ## Quickstart
