@@ -124,3 +124,34 @@ errored trial 按 **reward 0** 计且不允许剔除，所以**当前分数上�
 
 正式提交前必须解决这一项——4 分在榜单上不是小数目。可行路径是等训练结束后，
 或换一台 GPU 空闲的节点，单独把这 4 个任务补跑。
+
+## Docker 存储驱动：必须用 btrfs，不能用 overlayfs
+
+第一次全量跑（70 任务）**全部失败**，mean 0.000。67 个 trial 抛 RuntimeError，
+只有 4 个真正执行到 agent。两类症状：
+
+```
+45 个: apt-get 构建失败 —— GPG error: At least one invalid signature was encountered
+22 个: Failed to start tmux session
+```
+
+两者是同一个根因。tmux 不在任务镜像里，`TmuxSession` 会自己用 apt 装 ——
+所以 apt 一坏，tmux 也装不上。
+
+真凶是 **`/scratch` 是 btrfs，而 Docker 默认用 overlayfs 驱动**。
+overlayfs 叠在 btrfs 上会破坏写入内容，apt 下载的 InRelease 签名文件因此校验失败。
+时钟正常、无代理残留、磁盘和内存都充裕，全都排除掉之后才定位到这里。
+
+```json
+{ "data-root": "/scratch/docker", "storage-driver": "btrfs" }
+```
+
+改用原生 btrfs 驱动后：GPG 错误 0，`apt-get install tmux` 成功。
+
+⚠️ **换驱动会丢弃已有镜像**（存储布局不同），首次运行需重新拉取和构建。
+
+### 一段弯路
+
+定位过程中我一度以为是自己加的 privoxy 代理导致的（它确实是可疑对象——
+全局代理有可能破坏下载）。撤掉代理后 GPG 错误依旧，才继续往下查到文件系统。
+代理最终也没保留：它只为 1 个 fedora 任务而设，风险面却覆盖全部任务，不划算。
