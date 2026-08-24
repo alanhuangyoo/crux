@@ -25,9 +25,10 @@ own data shows a **17%** swing for one model between two harnesses.
 
 ## Status
 
-Phase 0 — harness verified, agent skeleton in place. Not yet running end-to-end.
+Phase 0 complete — harness verified on the dev box (oracle 2/2, mean 1.000).
+Evaluation runs on the x86-64 dev machine, not this Mac; see docs/ENVIRONMENT.md.
 
-- [x] Harbor installed, Docker verified, oracle smoke test
+- [x] Harbor installed, Docker verified, oracle smoke test green on dev
 - [ ] Phase 1 — baseline: existing agent + DeepSeek, small subset
 - [ ] Phase 2 — DeepTerm v1: model client + ATIF trajectory emission
 - [ ] Phase 3 — iterate on prompts / tools / context management
