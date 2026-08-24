@@ -1,4 +1,4 @@
-"""DeepTerm agent — Harbor BaseAgent implementation.
+"""Crux agent — Harbor BaseAgent implementation.
 
 Design notes
 ------------
@@ -29,17 +29,17 @@ from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
-from deepterm import __version__
+from crux import __version__
 
 # The model is asked to emit exactly one bash block per turn. Keeping the
 # contract this narrow is what keeps the parser (and the failure modes) simple.
 ACTION_RE = re.compile(r"```bash\s*\n(.*?)\n```", re.DOTALL)
 
 # Sentinel the model prints when it considers the task finished.
-DONE_MARKER = "DEEPTERM_TASK_COMPLETE"
+DONE_MARKER = "CRUX_TASK_COMPLETE"
 
 
-class DeepTermAgent(BaseAgent):
+class CruxAgent(BaseAgent):
     """A bash-loop terminal agent, tuned for DeepSeek models."""
 
     SUPPORTS_ATIF: bool = True
@@ -67,7 +67,7 @@ class DeepTermAgent(BaseAgent):
     @staticmethod
     @override
     def name() -> str:
-        return "deepterm"
+        return "crux"
 
     @override
     def version(self) -> str:
