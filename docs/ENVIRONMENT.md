@@ -104,3 +104,23 @@ Docker 通过两处配置使用它——缺一不可，前者管运行期容器�
 
 **验证**：修复后 `mirrors.fedoraproject.org` 容器内 6/6 可达，`dnf install` 通过，
 apt 无回归，`retro-console-soc` 从 error 变为 reward 1.0。
+
+## GPU 任务：当前被结构性阻断
+
+74 个任务里有 4 个声明 `gpus=1`：`exam-pdf-eval`、`fp8-rmsnorm-gemm`、
+`jax-speedrun-gpu`、`math-eval-grader`。Docker 未配置 nvidia runtime，这些任务在
+环境校验阶段就抛 RuntimeError：
+
+```
+Task requires 1 GPU(s) but EnvironmentType.DOCKER environment does not
+support GPU allocation.
+```
+
+errored trial 按 **reward 0** 计且不允许剔除，所以**当前分数上限是 70/74 = 94.6%**。
+
+这不是疏忽，是权衡的结果。h20-43 的 8 张卡正被训练任务占满（h20-44/45 同样），
+装上 nvidia-container-toolkit 并让评测任务申请 GPU，会直接和训练抢卡。
+在训练让出卡之前，宁可让这 4 个任务记 0 分。
+
+正式提交前必须解决这一项——4 分在榜单上不是小数目。可行路径是等训练结束后，
+或换一台 GPU 空闲的节点，单独把这 4 个任务补跑。
