@@ -35,7 +35,12 @@ class CruxConfig(BaseModel):
         default=0, description="Wall-clock cap; 0 disables. The harness has its own."
     )
     max_consecutive_format_errors: int = Field(
-        default=3, description="Unparseable replies in a row before giving up."
+        default=6,
+        description=(
+            "Unparseable replies in a row before giving up. Lenient on "
+            "purpose: abandoning a trial scores zero, while another nudge only "
+            "costs a turn out of a bounded budget."
+        ),
     )
 
     # --- terminal ------------------------------------------------------

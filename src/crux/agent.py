@@ -19,6 +19,7 @@ Harbor's CI rejects submissions whose passing trials carry no ATIF trajectory.
 from __future__ import annotations
 
 import time
+import re
 from pathlib import Path
 from typing import override
 
@@ -288,17 +289,65 @@ class CruxAgent(BaseAgent):
         )
         self.logger.info("compacted context (#%d)", self.n_compactions)
 
-    def _parse(self, response: str):
-        """Parse a reply, salvaging one that was cut off mid-XML.
+    @staticmethod
+    def _close_commands(response: str) -> str:
+        """Close a <commands> block the model closed with the wrong tag.
 
-        A response truncated by the output limit still usually carries valid
+        Observed in every v2 run: the block opens correctly, the keystrokes are
+        valid, and then it closes with </jobs> or </tasks>, or with nothing at
+        all. Tag drift over a long generation is not something prompting
+        reliably fixes, and the commands themselves are fine.
+        """
+        if "<commands>" not in response or "</commands>" in response:
+            return response
+        idx = response.rfind("</keystrokes>")
+        if idx == -1:
+            return response
+        cut = idx + len("</keystrokes>")
+        # Drop the mis-named closer, if one is there, before inserting the real one.
+        tail = re.sub(r"^\s*</[A-Za-z_][\w.-]*>", "", response[cut:], count=1)
+        return response[:cut] + "\n</commands>" + tail
+
+    @staticmethod
+    def _normalize(response: str) -> str:
+        """Restore the <response> envelope when the model omits it.
+
+        Dropping an outer wrapper while producing every section correctly is
+        one of the most common things models do with nested-tag formats, and it
+        was the dominant failure in v2's first run: every turn carried valid
+        analysis, plan and commands, and every turn was thrown away for want of
+        eleven characters. Rejecting those replies teaches the model nothing —
+        it just reproduces them — so repair here rather than spend turns
+        scolding.
+        """
+        response = CruxAgent._close_commands(response)
+        if "<response>" in response or "<commands>" not in response:
+            return response
+        start = response.find("<analysis>")
+        if start == -1:
+            start = response.find("<commands>")
+        end = response.rfind("</task_complete>")
+        end = end + len("</task_complete>") if end != -1 else len(response)
+        end = max(end, response.rfind("</commands>") + len("</commands>"))
+        return f"<response>{response[start:end]}</response>"
+
+    def _parse(self, response: str):
+        """Parse a reply, repairing a missing envelope or a truncated tail.
+
+        A response cut off by the output limit still usually carries valid
         commands; discarding it would waste the turn and, worse, teach nothing
         — the model would likely produce the same too-long reply again.
         """
+        response = self._normalize(response)
         result = self._parser.parse_response(response)
-        if result.error:
-            salvaged = self._parser.salvage_truncated_response(response)
-            if salvaged is not None and not salvaged.error and salvaged.commands:
+        if not result.error:
+            return result
+        # salvage_truncated_response hands back a cleaned string, not a result,
+        # so it has to go through the parser again.
+        cleaned, _multiple = self._parser.salvage_truncated_response(response)
+        if cleaned:
+            salvaged = self._parser.parse_response(cleaned)
+            if not salvaged.error and salvaged.commands:
                 return salvaged
         return result
 

@@ -28,6 +28,9 @@ What you will run next and what you expect each command to produce.
 <task_complete>false</task_complete>
 </response>
 
+Wrap every reply in <response>...</response>. A reply that carries the inner \
+sections without the outer tag is the single most common formatting mistake here.
+
 Rules for <keystrokes>:
 - Text is sent to the terminal verbatim. Do NOT XML-escape anything: write \
 `<`, `>`, `&`, and quotes directly.
@@ -38,6 +41,11 @@ more for genuinely slow ones (make, training scripts). Prefer too short over \
 too long — you can always wait again with an empty \
 <keystrokes duration="10.0"></keystrokes>. Never wait more than 60 seconds at once.
 - Ctrl keys go alone in their own block: <keystrokes>C-c</keystrokes>.
+- Heredocs are the usual way to hang this shell: the closing delimiter needs \
+its own line ending in a newline, or the terminal sits at a `>` prompt \
+swallowing everything you send next. Put the whole heredoc, terminator \
+included, in one <keystrokes> block. If you do end up at a `>` prompt, send \
+C-c before anything else.
 
 How to work efficiently:
 - **Batch aggressively.** Send every command whose output you do not need to \
