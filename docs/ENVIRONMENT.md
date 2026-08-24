@@ -63,3 +63,44 @@ ssh dev 'cd ~/crux && ./scripts/smoke.sh'
 ```
 
 dev 上已安装：`uv 0.12.5`、`harbor 0.22.0`。
+
+## h20-43 的容器出网
+
+H20 子网到 Fedora 的镜像管理服务完全不通，而 jump 主机完全通得上：
+
+```
+mirrors.fedoraproject.org/metalink 可达率
+  h20-43   0/10      h20-44  0/6      h20-45  0/6
+  jump    10/10      B300-1  6/6      B300-7  6/6
+```
+
+这不是我们能忽略的：任务 `retro-console-soc` 的镜像基于 `fedora:42`，构建时
+`dnf install` 直接失败，整个 trial 记为 error —— 而 error 按 **reward 0** 计且
+不允许剔除。在 12 任务的交叉验证里，dev 拿到 12/12 而 h20-43 只有 11/12，
+差的就是这一个。
+
+**解法**：只把 `.fedoraproject.org` 的流量经 jump 转发，其余保持直连——
+让所有流量都走 jump 会把镜像拉取挤到单点上。
+
+```
+容器 → privoxy (172.17.0.1:8888) ─┬─ .fedoraproject.org → SOCKS(127.0.0.1:1080) → jump
+                                  └─ 其它一切          → 直连
+```
+
+两个 systemd 单元，均 `Restart=always`：
+
+| 单元 | 作用 |
+|---|---|
+| `crux-jump-socks` | `ssh -N -D 127.0.0.1:1080` 到 jump，提供 SOCKS 出口 |
+| `crux-proxy` | privoxy，按域名分流；容器侧入口 `172.17.0.1:8888` |
+
+Docker 通过两处配置使用它——缺一不可，前者管运行期容器，后者管 `docker build`：
+
+- `/etc/docker/daemon.json` 的 `proxies`
+- `/root/.docker/config.json` 的 `proxies`（BuildKit 从这里取构建期代理）
+
+用了 privoxy 而非 tinyproxy：Ubuntu 24.04 的 tinyproxy 1.11.1 只支持
+`upstream http`，无法把上游指向 SOCKS 隧道。
+
+**验证**：修复后 `mirrors.fedoraproject.org` 容器内 6/6 可达，`dnf install` 通过，
+apt 无回归，`retro-console-soc` 从 error 变为 reward 1.0。
