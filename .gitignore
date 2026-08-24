@@ -1,0 +1,21 @@
+# Harbor job outputs (large, regenerated)
+jobs/
+runs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets — never commit API keys
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
