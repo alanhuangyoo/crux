@@ -37,6 +37,12 @@
 # empty and a cache hit is indistinguishable from a quiet engine -- measured
 # over 24 sessions, turn 1 took 5.81s and turns 2+ took 3.08s, which is
 # obviously the cache working, but "obviously" is not a number.
+# The chat template is a patched copy of the checkpoint's own. Qwen3.5 accepts
+# reasoning_effort in low/medium/xhigh and raises on anything else; every
+# OpenAI-shaped client sends minimal/low/medium/high. Codex's default of "high"
+# therefore 400s before the model runs. The copy maps high->xhigh and
+# minimal/none->low ahead of the original validation, which is left intact so a
+# genuine typo still fails loudly.
 set -euo pipefail
 CARDS="${1:?usage: sgl3.sh <card,card> <port>}"
 PORT="${2:?usage: sgl3.sh <card,card> <port>}"
@@ -64,6 +70,7 @@ exec $B/envs/sglang/bin/python -m sglang.launch_server \
   --mem-fraction-static 0.88 \
   --cuda-graph-max-bs-decode 64 \
   --enable-cache-report \
+  --chat-template $B/models/qwen3.8-27b-openai-effort.jinja \
   --reasoning-parser qwen3 \
   --tool-call-parser qwen3_coder \
   --api-key sk-crux-iM-eVeNJmh1_crsLPfiBInwFaU410pNM
