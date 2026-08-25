@@ -128,3 +128,30 @@ def test_no_placeholder_markers_survive_rendering():
     for variant in VARIANTS:
         body = rendered(variant)
         assert "__" not in body.replace("__init__", ""), f"{variant} has a raw marker"
+
+
+def test_model_kwargs_carry_retries_into_the_container():
+    """The agent runs inside the task container with its own litellm.
+
+    A 429 there ends the trial outright — reward 0, not excludable — and host
+    -side retry logic never sees those calls. One run lost
+    torch-pipeline-parallelism to exactly this.
+    """
+    cfg = to_mini_config(build_config())
+    kwargs = cfg["model"]["model_kwargs"]
+    assert kwargs["num_retries"] >= 5
+    assert kwargs["timeout"] >= 300
+    # drop_params is upstream's; losing it breaks models that reject unknown
+    # sampling parameters.
+    assert kwargs["drop_params"] is True
+
+
+def test_stock_keeps_the_retry_settings():
+    """`stock` ablates the prompt, not the harness.
+
+    Leaving the baseline to die on rate limits would make it look worse for a
+    reason that has nothing to do with what is being compared.
+    """
+    assert to_mini_config(build_config(variant="stock"))["model"]["model_kwargs"][
+        "num_retries"
+    ] >= 5
