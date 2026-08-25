@@ -77,6 +77,15 @@ class CruxConfig(BaseModel):
         default=600,
         description="Per-call timeout. Long enough that a slow provider is waited out.",
     )
+    max_tokens: int = Field(
+        default=8192,
+        description=(
+            "Output budget per call. Reasoning models spend it on the think "
+            "block before writing anything, so a small budget returns "
+            "finish_reason=length with content=None -- a turn that did nothing "
+            "and reads to the agent as a format error."
+        ),
+    )
 
 
 VARIANTS: dict[str, dict] = {
@@ -116,6 +125,7 @@ def to_mini_config(cfg: CruxConfig) -> dict:
                 "drop_params": True,
                 "num_retries": cfg.num_retries,
                 "timeout": cfg.request_timeout,
+                "max_tokens": cfg.max_tokens,
             }
         },
         "agent": {

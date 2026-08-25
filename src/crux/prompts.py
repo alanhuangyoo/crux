@@ -138,6 +138,25 @@ runnable check is allowed but proves nothing.
 """
 
 SURVIVAL_SECTION = """\
+## Turns are the scarcest resource
+
+Every task has a wall-clock limit, and each turn costs a full model round trip.
+Across a full evaluation, running out of time was the single largest cause of
+failure -- larger than getting anything wrong -- and it held for fast hosted
+models as much as slow ones, so it is turn count that binds, not tokens per
+second.
+
+One action per reply is the format, but an action may chain commands with `&&`.
+Use that whenever you do not need to read one result before deciding the next:
+
+```mswea_bash_command
+cd /app && ls -la && cat README.md 2>/dev/null | head -40 && python -V
+```
+
+Orient in one turn instead of four. Verify a fix and re-run the test in the
+same turn. Split a chain only where the next command genuinely depends on what
+you read.
+
 ## Staying alive
 
 The container has a memory cap, and exceeding it does not raise an error you \\

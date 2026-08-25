@@ -155,3 +155,14 @@ def test_stock_keeps_the_retry_settings():
     assert to_mini_config(build_config(variant="stock"))["model"]["model_kwargs"][
         "num_retries"
     ] >= 5
+
+
+def test_output_budget_survives_a_reasoning_block():
+    """Reasoning models spend max_tokens on thinking before writing anything.
+
+    Measured on the self-hosted Qwen3.8: max_tokens=10 returns
+    finish_reason=length with content=None -- a turn that did nothing, which
+    the agent reads as a format error.
+    """
+    kwargs = to_mini_config(build_config())["model"]["model_kwargs"]
+    assert kwargs["max_tokens"] >= 4096
