@@ -8,7 +8,7 @@ changing it changes scores.
 
 import pytest
 
-from crux.cli import GPU_TASKS, build_parser, cmd_prompt
+from crux.cli import GPU_TASKS, VARIANTS as CLI_VARIANTS, build_parser, cmd_prompt
 
 
 def parse(argv):
@@ -65,3 +65,28 @@ def test_prompt_yaml_is_the_whole_config(capsys):
 def test_unknown_variant_is_rejected_at_parse_time():
     with pytest.raises(SystemExit):
         parse(["bench", "--variant", "typo"])
+
+
+def test_cli_variant_list_matches_config():
+    """cli.py hardcodes the names so `report` needs no pydantic; keep them in sync."""
+    from crux.config import VARIANTS
+
+    assert set(CLI_VARIANTS) == set(VARIANTS)
+
+
+def test_report_does_not_need_pydantic(monkeypatch, tmp_path):
+    """`crux report` only reads job dirs and must work where config cannot import."""
+    import subprocess
+    import sys
+
+    src = str(pathlib.Path(__file__).resolve().parent.parent / "src")
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.modules['pydantic'] = None; "
+         "from crux.analysis import load_job; print('ok')"],
+        capture_output=True, text=True, env={"PYTHONPATH": src, "PATH": "/usr/bin:/bin"},
+    )
+    assert "ok" in result.stdout, result.stderr
+
+
+import pathlib  # noqa: E402

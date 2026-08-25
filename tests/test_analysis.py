@@ -227,3 +227,41 @@ def test_a_real_suite_is_still_trusted(tmp_path):
     trial = load_job(tmp_path).trials[0]
     assert trial.completion_source == "pytest"
     assert trial.completion == 0.9
+
+
+def write_native_trajectory(trial_dir, exit_status):
+    (trial_dir / "agent" / "mini-swe-agent.trajectory.json").write_text(
+        json.dumps({"info": {"exit_status": exit_status}, "messages": []})
+    )
+
+
+def test_native_exit_status_is_read(tmp_path):
+    """Harbor's ATIF conversion drops mini-swe-agent's own outcome.
+
+    Reading only the converted notes made every trial look like out_of_turns —
+    the category that says nothing about what to fix.
+    """
+    d = write_trial(tmp_path, "alpha__x", reward=0.0)
+    write_native_trajectory(d, "Submitted")
+    assert load_job(tmp_path).trials[0].category == "false_completion"
+
+
+def test_killed_is_distinct_from_giving_up(tmp_path):
+    """An empty status means the process died before recording one."""
+    d = write_trial(tmp_path, "alpha__x", reward=0.0)
+    write_native_trajectory(d, "")
+    trial = load_job(tmp_path).trials[0]
+    assert trial.exit_reason == "killed"
+    assert trial.category == "killed"
+
+
+def test_native_format_error_maps_across(tmp_path):
+    d = write_trial(tmp_path, "alpha__x", reward=0.0)
+    write_native_trajectory(d, "RepeatedFormatError")
+    assert load_job(tmp_path).trials[0].category == "format_error"
+
+
+def test_solved_still_wins_over_native_status(tmp_path):
+    d = write_trial(tmp_path, "alpha__x", reward=1.0)
+    write_native_trajectory(d, "Submitted")
+    assert load_job(tmp_path).trials[0].category == "solved"
