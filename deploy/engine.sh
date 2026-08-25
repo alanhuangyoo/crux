@@ -14,6 +14,22 @@
 # it instead of loading a separate draft model. topk=1 keeps the draft a linear
 # chain, which is all a single MTP layer can support; a tree needs more layers.
 #
+# --enable-linear-replayssm-spec is what makes any of this pay off, and the
+# reason is the architecture: 48 of the 64 layers are gated-delta-net linear
+# attention, not softmax attention. Rejecting a draft token in a KV model means
+# dropping cache entries; in a recurrent one it means restoring SSM state, so
+# the default verify path snapshots the full state per draft step. Measured at
+# batch 32 that was 116 live mamba states for 32 requests -- ~3.6 copies each,
+# across 48 layers, every decode step.
+#
+# The cost is not draft quality. Accept length measured 2.6-3.1 of 4 at an
+# accept rate of 0.53-0.67, which is a good head; the engine was still 2.5x
+# slower than no speculation at all, because state management ate the gain and
+# then some. ReplaySSM replaces those snapshots with a per-slot raw-input
+# window and recomputes instead of copying. It requires the linear draft chain
+# above, and is mutually exclusive with --enable-linear-replayssm (same ring
+# storage, incompatible cursor protocol).
+#
 # Two memory notes, both learned by watching this OOM at 0.85. MTP captures a
 # second set of CUDA graphs -- draft and verify on top of target -- so it needs
 # noticeably more room outside the KV pool than the plain engine does. And the
@@ -74,4 +90,5 @@ exec $B/envs/sglang/bin/python -m sglang.launch_server \
   --speculative-num-steps 3 \
   --speculative-eagle-topk 1 \
   --speculative-num-draft-tokens 4 \
+  --enable-linear-replayssm-spec \
   --api-key sk-crux-iM-eVeNJmh1_crsLPfiBInwFaU410pNM
