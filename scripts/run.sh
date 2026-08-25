@@ -15,6 +15,7 @@ MODEL="${MODEL:-deepseek/deepseek-v4-flash}"
 N_TASKS="${N_TASKS:-}"
 N_ATTEMPTS="${N_ATTEMPTS:-1}"
 N_CONCURRENT="${N_CONCURRENT:-24}"
+VARIANT="${VARIANT:-default}"
 
 # These four declare gpus=1. Docker here has no nvidia runtime, and wiring one
 # up would contend with the training job that owns all eight cards. Excluding
@@ -30,13 +31,15 @@ export PYTHONPATH="$(pwd)/src:${SP}"
 echo "dataset : ${DATASET}"
 echo "model   : ${MODEL}"
 echo "jobs    : ${JOBS_DIR}"
+echo "variant : ${VARIANT}"
 echo "concur  : ${N_CONCURRENT}   attempts: ${N_ATTEMPTS}"
 echo "excluded: ${GPU_TASKS} (need GPU)"
 echo
 
 harbor run \
   --dataset "${DATASET}" \
-  --agent-import-path "crux.agent:CruxAgent" \
+  --agent "crux.agent:CruxAgent" \
+  --ak "variant=${VARIANT}" \
   --model "${MODEL}" \
   ${N_TASKS:+--n-tasks "${N_TASKS}"} \
   --n-attempts "${N_ATTEMPTS}" \

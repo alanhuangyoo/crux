@@ -1,40 +1,74 @@
-"""Variants are the unit of the ablation set, so their contract is pinned here.
+"""Variants are the unit of the ablation set, so their contract is pinned.
 
-A typo in a variant name silently running `default` would produce a sweep whose
-rows all look the same and mean nothing.
+The one that matters most is `stock`: it renders upstream's own prompt, and if
+Crux cannot beat that number it has no reason to exist.
 """
 
 import pytest
+import yaml
 
-from crux.config import VARIANTS, CruxConfig, build_config
+from crux.config import VARIANTS, CruxConfig, build_config, to_mini_config
+from crux.prompts import APPLY_PATCH_SECTION, GRADING_SECTION
 
 
-def test_default_variant():
+def rendered(variant="default"):
+    return to_mini_config(build_config(variant=variant))["agent"]["instance_template"]
+
+
+def test_default_enables_both_changes():
     cfg = build_config()
-    assert cfg.variant == "default"
-    assert cfg.enable_compaction is True
-    assert cfg.enable_apply_patch is True
+    assert cfg.grading_section is True and cfg.apply_patch is True
+    body = rendered()
+    assert "all or nothing" in body
+    assert "apply_patch <<'PATCH'" in body
+
+
+def test_stock_variant_is_upstream_prompt():
+    body = rendered("stock")
+    assert GRADING_SECTION not in body
+    assert APPLY_PATCH_SECTION not in body
+    # Upstream's format contract must survive: its parser depends on both.
+    assert "```mswea_bash_command" in body
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in body
 
 
 @pytest.mark.parametrize("name", sorted(VARIANTS))
-def test_every_variant_builds(name):
-    cfg = build_config(variant=name)
-    assert cfg.variant == name
+def test_every_variant_renders_valid_config(name):
+    cfg = to_mini_config(build_config(variant=name))
+    # The dict is serialized to YAML and written into the container; a template
+    # that breaks the dump would fail at trial time, not here.
+    assert yaml.safe_load(yaml.safe_dump(cfg, sort_keys=False)) == cfg
+    agent = cfg["agent"]
+    assert agent["system_template"] and agent["instance_template"]
+
+
+@pytest.mark.parametrize("name", sorted(VARIANTS))
+def test_format_contract_survives_every_variant(name):
+    body = rendered(name)
+    assert "```mswea_bash_command" in body
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in body
+    assert "{{task}}" in body
 
 
 def test_variants_differ_from_default():
-    """A variant that changes nothing would waste a full run to prove nothing."""
+    """A variant identical to default would spend a full run proving nothing."""
     default = build_config()
     for name in VARIANTS:
         if name == "default":
             continue
         cfg = build_config(variant=name)
-        differing = {
-            f
+        assert any(
+            getattr(cfg, f) != getattr(default, f)
             for f in CruxConfig.model_fields
-            if f != "variant" and getattr(cfg, f) != getattr(default, f)
-        }
-        assert differing, f"variant {name!r} is identical to default"
+            if f != "variant"
+        ), f"variant {name!r} is identical to default"
+
+
+def test_ablations_isolate_one_section_each():
+    assert GRADING_SECTION not in rendered("no_grading")
+    assert APPLY_PATCH_SECTION in rendered("no_grading")
+    assert APPLY_PATCH_SECTION not in rendered("no_apply_patch")
+    assert GRADING_SECTION in rendered("no_apply_patch")
 
 
 def test_unknown_variant_is_rejected():
@@ -42,35 +76,6 @@ def test_unknown_variant_is_rejected():
         build_config(variant="typo")
 
 
-def test_explicit_kwargs_win_over_variant():
-    cfg = build_config(variant="steps_60", step_limit=200)
-    assert cfg.step_limit == 200
-
-
 def test_harbor_passes_strings():
-    """Harbor forwards --ak values as strings; they must coerce."""
-    cfg = build_config(step_limit="90", enable_compaction="false")
-    assert cfg.step_limit == 90
-    assert cfg.enable_compaction is False
-
-
-def test_salvage_returns_a_string_not_a_result():
-    """Pins the upstream contract that broke the first v2 run.
-
-    salvage_truncated_response returns (cleaned_text, has_multiple_blocks);
-    treating it as a ParseResult raised AttributeError on every trial.
-    """
-    from harbor.agents.terminus_2.terminus_xml_plain_parser import (
-        TerminusXMLPlainParser,
-    )
-
-    parser = TerminusXMLPlainParser()
-    truncated = (
-        "<response><analysis>a</analysis><plan>b</plan><commands>"
-        '<keystrokes duration="0.1">ls\n</keystrokes></commands></response>'
-        " trailing junk that never closed"
-    )
-    result = parser.salvage_truncated_response(truncated)
-    assert isinstance(result, tuple) and len(result) == 2
-    cleaned, _ = result
-    assert cleaned is None or isinstance(cleaned, str)
+    cfg = build_config(step_limit="90", apply_patch="false")
+    assert cfg.step_limit == 90 and cfg.apply_patch is False
