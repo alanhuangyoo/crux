@@ -27,6 +27,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 
 # Two independent limits, whichever binds first (pi's design). Lines alone let
@@ -266,6 +267,8 @@ def _print_todo(items):
     for i, item in enumerate(items, start=1):
         mark = "x" if item["done"] else " "
         print(f"  {i}. [{mark}] {item['text']}")
+        if item.get("verify") and not item["done"]:
+            print(f"        check: {item['verify']}")
     remaining = sum(1 for i in items if not i["done"])
     if remaining:
         print(f"— {remaining} of {len(items)} still open")
@@ -280,7 +283,7 @@ def cmd_todo(args):
         if not args.text:
             _fail("todo add needs at least one item")
         for text in args.text:
-            items.append({"text": text, "done": False})
+            items.append({"text": text, "done": False, "verify": args.verify})
         _save_todo(items)
     elif args.action == "done":
         if not args.text:
@@ -292,8 +295,46 @@ def cmd_todo(args):
                 _fail(f"not an item number: {raw!r}")
             if not 0 <= index < len(items):
                 _fail(f"no item {raw} (list has {len(items)})")
-            items[index]["done"] = True
+            item = items[index]
+            verify = item.get("verify")
+            if verify:
+                # Re-run the check now rather than trusting that it passed when
+                # the item was written. Later edits break earlier requirements
+                # constantly, and this is the whole point of binding a command
+                # to the item: closing it is an observation, not a claim.
+                result = subprocess.run(
+                    verify, shell=True, capture_output=True, text=True
+                )
+                if result.returncode != 0:
+                    output = (result.stdout + result.stderr).strip()[:600]
+                    _fail(
+                        f"item {raw} not closed: its check still fails "
+                        f"(exit {result.returncode})\n"
+                        f"--- {verify} ---\n{output}"
+                    )
+            item["done"] = True
         _save_todo(items)
+    elif args.action == "verify":
+        # Re-check everything at once. Edits made for one requirement routinely
+        # break another, and the model has no other way to notice before it
+        # submits.
+        failed = []
+        for i, item in enumerate(items, start=1):
+            check = item.get("verify")
+            if not check:
+                continue
+            result = subprocess.run(check, shell=True, capture_output=True, text=True)
+            status = "pass" if result.returncode == 0 else "FAIL"
+            print(f"  {i}. [{status}] {item['text']}")
+            if result.returncode != 0:
+                failed.append((i, check, (result.stdout + result.stderr).strip()[:300]))
+        if failed:
+            print(f"\n{len(failed)} check(s) failing:")
+            for i, check, output in failed:
+                print(f"  item {i}: {check}\n    {output}")
+            sys.exit(2)
+        print("all checks pass")
+        return
     elif args.action == "clear":
         items = []
         _save_todo(items)
@@ -338,8 +379,15 @@ def main():
     p.set_defaults(func=cmd_write)
 
     p = sub.add_parser("todo", help="track the task's requirements")
-    p.add_argument("action", choices=["add", "done", "list", "clear"])
+    p.add_argument("action", choices=["add", "done", "list", "clear", "verify"])
     p.add_argument("text", nargs="*", help="items to add, or numbers to close")
+    p.add_argument(
+        "--verify",
+        help=(
+            "shell command that proves this item holds. Re-run when the item "
+            "is closed, and by `todo verify`; a non-zero exit refuses the close."
+        ),
+    )
     p.set_defaults(func=cmd_todo)
 
     args = parser.parse_args()
