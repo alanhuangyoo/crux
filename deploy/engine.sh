@@ -22,12 +22,26 @@
 # lower static fraction costs ~300K tokens of KV, out of 1.85M against a P99
 # context of 113K; the batch-size cap costs nothing at all.
 #
-# --speculative-adaptive matters more here than the step count. Speculation is
-# a bet on idle compute: it wins when the GPU is waiting on memory bandwidth
-# (one user, batch of 1) and loses when the batch is already saturating it,
-# because every rejected draft token is compute spent for nothing. Benchmark
-# runs swing between both extremes, so num_steps has to follow the accept rate
-# rather than being pinned to whatever looked good on an idle box.
+# --speculative-adaptive is deliberately NOT set, and that is a compromise.
+#
+# Speculation is a bet on idle compute: it wins when the GPU is stalled on
+# memory bandwidth (one user, batch of 1) and loses once the batch already
+# saturates compute, because every rejected draft token is work spent for
+# nothing. Adaptive stepping is the principled answer -- follow the live accept
+# rate instead of pinning num_steps to whatever looked good on an idle box.
+#
+# It does not run on sglang 0.5.18. The adaptive controller builds a second
+# target graph runner that asks the shared logits buffer for twice the rows it
+# was allocated:
+#
+#   eagle_worker_v2.build_adaptive_runtime_state -> decode_cuda_graph_runner
+#   AssertionError: shared logits buffer holds 192 rows but caller needs 384
+#
+# The ratio is fixed, so shrinking the graph batch size does not help -- the
+# buffer is sized before the controller asks. Until that is fixed upstream,
+# num_steps stays pinned and the high-concurrency cost has to be measured
+# rather than designed around: see deploy/abtest.py, which reports TTFT and
+# per-stream decode separately at concurrency on both sides of saturation.
 set -euo pipefail
 CARDS="${1:?usage: sgl3.sh <card,card> <port>}"
 PORT="${2:?usage: sgl3.sh <card,card> <port>}"
@@ -60,5 +74,4 @@ exec $B/envs/sglang/bin/python -m sglang.launch_server \
   --speculative-num-steps 3 \
   --speculative-eagle-topk 1 \
   --speculative-num-draft-tokens 4 \
-  --speculative-adaptive \
   --api-key sk-crux-iM-eVeNJmh1_crsLPfiBInwFaU410pNM
