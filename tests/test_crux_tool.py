@@ -340,3 +340,51 @@ def test_verify_passes_when_everything_holds(tmp_path):
 def test_list_shows_the_pending_check(tmp_path):
     todo(["add", "tests pass", "--verify", "pytest -q"], tmp_path)
     assert "check: pytest -q" in todo(["list"], tmp_path).stdout
+
+
+# ---- submit gate ------------------------------------------------------------
+
+def crux(args, tmp_path, stdin=""):
+    import os
+
+    env = dict(os.environ, CRUX_TODO_PATH=str(tmp_path / "todo.json"))
+    return subprocess.run(
+        [sys.executable, str(TOOL), *args],
+        input=stdin, capture_output=True, text=True, cwd=tmp_path, env=env,
+    )
+
+
+def test_submit_refuses_while_items_are_open(tmp_path):
+    todo(["add", "still to do"], tmp_path)
+    r = crux(["submit"], tmp_path)
+    assert r.returncode == 1
+    assert "1 item(s) still open" in r.stderr
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" not in r.stdout
+
+
+def test_submit_rechecks_closed_items(tmp_path):
+    """The regression case: an item passed earlier, a later edit broke it."""
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    todo(["done", "1"], tmp_path)
+    (tmp_path / "a.txt").unlink()
+
+    r = crux(["submit"], tmp_path)
+    assert r.returncode == 1
+    assert "passed earlier now fail" in r.stderr
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" not in r.stdout
+
+
+def test_submit_emits_the_sentinel_when_everything_holds(tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    todo(["done", "1"], tmp_path)
+    r = crux(["submit"], tmp_path)
+    assert r.returncode == 0
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in r.stdout
+
+
+def test_submit_refuses_an_empty_checklist(tmp_path):
+    """Submitting without having enumerated anything proves nothing."""
+    r = crux(["submit"], tmp_path)
+    assert r.returncode == 1 and "checklist is empty" in r.stderr

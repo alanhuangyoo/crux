@@ -45,9 +45,11 @@ can express as one. Across a full evaluation this agent declared itself \
 finished 28 times and was right 3 times: not from dishonesty, but from having \
 done most of the work and lost track of the rest.
 
-**Run `crux todo verify` immediately before you finish.** If it exits \
-non-zero, you are not finished, whatever your recollection says — go fix what \
-it reports and run it again.
+**Finish with `crux submit`, not with the echo.** It re-runs every bound check \
+and only then emits the completion sentinel; if anything is open or has \
+regressed it refuses and tells you what. That makes finishing a command that \
+observes, rather than a judgement you make about yourself — which is the \
+judgement this agent gets wrong most often.
 """
 
 # apply_patch is offered instead of sed because it measurably works better.
