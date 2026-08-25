@@ -4,9 +4,24 @@ After=network-online.target
 
 [Service]
 Type=exec
+# A router that outlives its unit -- one started by hand, or one whose parent
+# systemd lost track of -- keeps holding :30080 and :30090, and every restart
+# then dies on "Address already in use" while the stale instance goes on
+# serving a stale view of which workers are healthy. That is worse than being
+# down: requests succeed, but route to an engine list nobody is updating.
+# This ran up 113 failed restarts before anyone noticed. Clear the ports first
+# and the unit is always the only router.
+ExecStartPre=-/usr/bin/pkill -9 -f sglang::router
+ExecStartPre=-/usr/bin/pkill -9 -f launch_router
+ExecStartPre=/bin/sleep 2
 ExecStart=/mnt/cpfs/users/xiaohuang/router.sh
 Restart=always
 RestartSec=5
+# Give up rather than spin forever: a router that cannot bind is a config
+# problem, not a transient one, and a failed unit is visible where a restart
+# loop is not.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 # The router polls its workers and waits rather than failing, so it can start
 # before them; this only has to outlast a cold engine boot.
 TimeoutStartSec=2400
