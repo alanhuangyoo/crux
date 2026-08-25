@@ -166,3 +166,16 @@ def test_output_budget_survives_a_reasoning_block():
     """
     kwargs = to_mini_config(build_config())["model"]["model_kwargs"]
     assert kwargs["max_tokens"] >= 4096
+
+
+def test_turn_budget_guidance_is_in_default_not_stock():
+    """Running out of time was the largest single cause of failure.
+
+    It held for fast hosted models as much as slow ones, so the binding
+    constraint is turn count, not tokens per second -- and chaining with && is
+    the one lever the format already allows.
+    """
+    body = rendered()
+    assert "scarcest resource" in body
+    assert "&&" in body
+    assert "scarcest resource" not in rendered("stock")
