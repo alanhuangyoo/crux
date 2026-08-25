@@ -21,10 +21,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-import yaml
-
 from crux import __version__
-from crux.config import VARIANTS, build_config, to_mini_config
+
+# config and yaml are imported lazily by the commands that need them. `report`
+# only reads job directories, and requiring pydantic to do that means it fails
+# on any box where the analysis would otherwise work fine.
+VARIANTS = ('default', 'no_apply_patch', 'no_grading', 'no_toolkit', 'stock')
 
 RESOURCES = Path(__file__).parent / "resources"
 HELPERS = {"apply_patch": "apply_patch.py", "crux-tools": "crux_tool.py"}
@@ -45,6 +47,10 @@ GPU_TASKS = (
 
 def _write_config(cfg) -> Path:
     """Materialize the mini-swe-agent config this variant implies."""
+    import yaml
+
+    from crux.config import to_mini_config
+
     path = Path(tempfile.mkdtemp(prefix="crux-")) / "config.yaml"
     path.write_text(yaml.safe_dump(to_mini_config(cfg), sort_keys=False))
     return path
@@ -75,6 +81,8 @@ def cmd_solve(args) -> int:
             file=sys.stderr,
         )
         return 1
+
+    from crux.config import build_config
 
     cfg = build_config(variant=args.variant)
     config_path = _write_config(cfg)
@@ -197,6 +205,10 @@ def cmd_report(args) -> int:
 
 def cmd_prompt(args) -> int:
     """Print the prompt a variant produces, for review or diffing."""
+    import yaml
+
+    from crux.config import build_config, to_mini_config
+
     cfg = build_config(variant=args.variant)
     config = to_mini_config(cfg)
     if args.yaml:

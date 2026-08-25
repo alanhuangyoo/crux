@@ -34,6 +34,7 @@ from pathlib import Path
 # bad prompt.
 FAILURE_ORDER = [
     "environment",
+    "killed",
     "agent_timeout",
     "context_exceeded",
     "format_error",
@@ -41,6 +42,16 @@ FAILURE_ORDER = [
     "out_of_turns",
     "solved",
 ]
+
+# mini-swe-agent's own exit statuses, mapped onto this module's vocabulary.
+# An empty status means the process was killed before it could write one --
+# a timeout or an OOM, not a decision the agent made.
+_NATIVE_EXIT_STATUS = {
+    "Submitted": "completed",
+    "LimitsExceeded": "step_limit",
+    "RepeatedFormatError": "repeated_format_error",
+    "": "killed",
+}
 
 # Exception types that mean the harness or the box failed, not the agent.
 ENVIRONMENT_EXCEPTIONS = {
@@ -80,6 +91,10 @@ class Trial:
             return "solved"
         if self.exit_reason == "repeated_format_error":
             return "format_error"
+        # Killed before it could record an outcome: the harness timeout or the
+        # kernel. Distinct from the agent giving up, and fixed differently.
+        if self.exit_reason == "killed":
+            return "killed"
         # The agent said it was done and the verifier disagreed. Distinct from
         # running out of turns: one is a judgement failure, the other a budget
         # one, and they call for opposite fixes.
@@ -194,10 +209,19 @@ def load_trial(trial_dir: Path) -> Trial | None:
     trial.variant = (metadata.get("config") or {}).get("variant")
     trial.cost_usd = agent_result.get("cost_usd") or 0.0
 
+    # mini-swe-agent records its own outcome in info.exit_status, and Harbor's
+    # ATIF conversion does not carry it across. Reading only the ATIF notes
+    # made every mini-swe-agent trial look like "out_of_turns", which is the
+    # category that says nothing.
+    native = _read_json(trial_dir / "agent" / "mini-swe-agent.trajectory.json")
+    if native:
+        status = (native.get("info") or {}).get("exit_status") or ""
+        trial.exit_reason = _NATIVE_EXIT_STATUS.get(status, status or "killed")
+
     trajectory = _read_json(trial_dir / "agent" / "trajectory.json")
     if trajectory:
         notes = trajectory.get("notes") or ""
-        if notes.startswith("exit_reason="):
+        if not trial.exit_reason and notes.startswith("exit_reason="):
             trial.exit_reason = notes.split("=", 1)[1]
         if not trial.n_steps:
             trial.n_steps = len(trajectory.get("steps") or [])
