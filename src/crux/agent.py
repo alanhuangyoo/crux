@@ -29,8 +29,27 @@ from harbor.environments.base import BaseEnvironment
 from crux import __version__
 from crux.config import CruxConfig, build_config, to_mini_config
 
-APPLY_PATCH_SRC = Path(__file__).parent / "resources" / "apply_patch.py"
-APPLY_PATCH_DEST = "/usr/local/bin/apply_patch"
+RESOURCES = Path(__file__).parent / "resources"
+
+# (source, destination, probe, expected substring). The probe matters because
+# the prompt already describes these tools: if one were missing, the model
+# would spend turns on command-not-found before falling back to sed.
+HELPERS = [
+    (
+        "apply_patch.py",
+        "/usr/local/bin/apply_patch",
+        "/usr/local/bin/apply_patch '*** Begin Patch\n*** End Patch'",
+        # An empty patch is rejected on purpose; reaching that specific
+        # complaint proves the interpreter ran the script.
+        "no file operations",
+    ),
+    (
+        "crux_tool.py",
+        "/usr/local/bin/crux",
+        "/usr/local/bin/crux read /nonexistent-probe-path",
+        "no such file",
+    ),
+]
 
 
 class CruxAgent(MiniSweAgent):
@@ -54,35 +73,42 @@ class CruxAgent(MiniSweAgent):
         # YAML and written into the container as mini-swe-agent's config.
         kwargs.setdefault("config", to_mini_config(self.crux_config))
         super().__init__(*args, **kwargs)
-        self._apply_patch_ready = False
+        self.helpers_ready: dict[str, bool] = {}
 
     @override
     async def install(self, environment: BaseEnvironment) -> None:
         await super().install(environment)
-        if self.crux_config.apply_patch:
-            self._apply_patch_ready = await self._install_apply_patch(environment)
-
-    async def _install_apply_patch(self, environment: BaseEnvironment) -> bool:
-        """Copy the helper in and confirm it runs.
-
-        Task images vary and a few have no usable python3. The probe matters
-        because the prompt already describes the tool: if it were missing, the
-        model would spend turns on command-not-found before falling back to sed.
-        """
-        try:
-            await environment.upload_file(APPLY_PATCH_SRC, APPLY_PATCH_DEST)
-            await environment.exec(f"chmod +x {APPLY_PATCH_DEST}")
-            probe = await environment.exec(
-                f"{APPLY_PATCH_DEST} '*** Begin Patch\n*** End Patch' 2>&1 || true"
+        wanted = {
+            "apply_patch": self.crux_config.apply_patch,
+            "crux": self.crux_config.toolkit,
+        }
+        for source, dest, probe, expected in HELPERS:
+            name = Path(dest).name
+            if not wanted.get(name):
+                continue
+            self.helpers_ready[name] = await self._install_helper(
+                environment, source, dest, probe, expected
             )
-            output = (probe.stdout or "") + (probe.stderr or "")
-            # An empty patch is rejected on purpose; reaching that specific
-            # complaint proves the interpreter ran the script.
-            if "no file operations" in output:
+
+    async def _install_helper(
+        self,
+        environment: BaseEnvironment,
+        source: str,
+        dest: str,
+        probe: str,
+        expected: str,
+    ) -> bool:
+        """Copy a helper in and confirm it actually runs in this image."""
+        try:
+            await environment.upload_file(RESOURCES / source, dest)
+            await environment.exec(f"chmod +x {dest}")
+            result = await environment.exec(f"{probe} 2>&1 || true")
+            output = (result.stdout or "") + (result.stderr or "")
+            if expected in output:
                 return True
             self.logger.warning(
-                "apply_patch unusable in this image: %s", output[:200]
+                "%s unusable in this image: %s", Path(dest).name, output[:200]
             )
         except Exception as exc:
-            self.logger.warning("apply_patch install failed: %s", exc)
+            self.logger.warning("%s install failed: %s", Path(dest).name, exc)
         return False

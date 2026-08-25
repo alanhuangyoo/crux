@@ -88,6 +88,45 @@ adds. Give about three lines of context on each side, and use \
 relative. A failed patch changes nothing, so it is safe to correct and retry.
 """
 
+# A shell-only agent reads with `sed -n`, searches with `grep`, and edits with
+# `sed -i`. Each has a failure mode the model cannot see: reads come back
+# without line numbers to refer to, an unbounded `cat` evicts the context it
+# needed, and a sed edit that matches the wrong line reports success. These
+# tools are the same set the mature terminal agents converge on (opencode, pi,
+# Codex), delivered through the only channel available here.
+TOOLKIT_SECTION = """\
+### File tools — prefer these over cat/grep/sed
+
+`crux read <path> [--offset N] [--limit N]` — print with line numbers, \
+paginated. Output is capped and tells you what you have not seen and how to \
+continue, so it will not flood your context. Also lists directories.
+
+`crux grep <pattern> [path] [--include '*.py']` — regex search reporting \
+`path:line: text`. Skips .git, node_modules and other noise.
+
+`crux files '<glob>' [path]` — find files by name.
+
+`crux edit <path>` — exact-text replacement, edits given as JSON on stdin:
+
+```mswea_bash_command
+crux edit src/app.py <<'JSON'
+{"edits": [
+  {"old": "    return None", "new": "    return build_response()"},
+  {"old": "DEBUG = True", "new": "DEBUG = False"}
+]}
+JSON
+```
+
+Each `old` must occur **exactly once** in the file. That is the point of the \
+tool: an anchor matching twice is exactly when `sed -i` edits the wrong line \
+and reports success. If it is not unique, extend it with surrounding lines. \
+Nothing is written unless every edit in the batch resolves, so a failure never \
+leaves the file half-changed.
+
+`crux write <path>` — write stdin to a file, creating parent directories.
+
+"""
+
 # Upstream's instance template, with the grading section inserted before the
 # workflow and apply_patch added to the command examples. Everything else,
 # including the submit sentinel, is upstream's.
@@ -152,8 +191,8 @@ print(hello)
 EOF
 ```
 
-__APPLY_PATCH_SECTION__
-### Edit files with sed:
+__TOOLKIT_SECTION____APPLY_PATCH_SECTION__
+### Edit files with sed__SED_CAVEAT__:
 
 ```mswea_bash_command
 # Replace all occurrences
@@ -178,7 +217,9 @@ anything
 """
 
 
-def build_instance_template(*, grading: bool, apply_patch: bool) -> str:
+def build_instance_template(
+    *, grading: bool, apply_patch: bool, toolkit: bool = True
+) -> str:
     """Assemble the instance template for a variant.
 
     Sections are inserted or omitted rather than reworded, so an ablation
@@ -187,8 +228,17 @@ def build_instance_template(*, grading: bool, apply_patch: bool) -> str:
     # Substituted rather than .format()-ed: the template is Jinja2, and
     # str.format collapses its `{{task}}` placeholders into `{task}`, which
     # would break the prompt inside the container rather than here.
-    return INSTANCE_TEMPLATE.replace(
-        "__GRADING_SECTION__", GRADING_SECTION + "\n" if grading else ""
-    ).replace(
-        "__APPLY_PATCH_SECTION__", APPLY_PATCH_SECTION + "\n" if apply_patch else ""
+    return (
+        INSTANCE_TEMPLATE.replace(
+            "__GRADING_SECTION__", GRADING_SECTION + "\n" if grading else ""
+        )
+        .replace("__TOOLKIT_SECTION__", TOOLKIT_SECTION if toolkit else "")
+        # The caveat only makes sense when the tool it points at is installed;
+        # `stock` must not reference something that is not there.
+        .replace(
+            "__SED_CAVEAT__", " (last resort — prefer `crux edit`)" if toolkit else ""
+        )
+        .replace(
+            "__APPLY_PATCH_SECTION__", APPLY_PATCH_SECTION + "\n" if apply_patch else ""
+        )
     )
