@@ -349,6 +349,61 @@ def cmd_todo(args):
         sys.exit(2)
 
 
+SUBMIT_SENTINEL = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
+
+
+def cmd_submit(args):
+    """Print the submit sentinel, but only if every bound check passes.
+
+    Finishing is the judgement this agent gets wrong most often: it submits
+    work that does not pass, having done most of it and lost track of the rest.
+    A checklist it ticks off itself does not help, because ticking is the same
+    judgement. This makes the last step mechanical — the sentinel is emitted by
+    a command that has just re-run the checks, not by the model deciding it is
+    done.
+    """
+    items = _load_todo()
+    open_items = [i for i in items if not i["done"]]
+    if open_items:
+        print("not submitting: %d item(s) still open" % len(open_items), file=sys.stderr)
+        for i, item in enumerate(items, start=1):
+            if not item["done"]:
+                print(f"  {i}. {item['text']}", file=sys.stderr)
+        sys.exit(1)
+
+    failures = []
+    for i, item in enumerate(items, start=1):
+        check = item.get("verify")
+        if not check:
+            continue
+        result = subprocess.run(check, shell=True, capture_output=True, text=True)
+        if result.returncode != 0:
+            failures.append((i, item["text"], check,
+                             (result.stdout + result.stderr).strip()[:300]))
+
+    if failures:
+        print(
+            "not submitting: %d check(s) that passed earlier now fail"
+            % len(failures),
+            file=sys.stderr,
+        )
+        for i, text, check, output in failures:
+            print(f"  {i}. {text}\n     {check}\n     {output}", file=sys.stderr)
+        sys.exit(1)
+
+    if not items:
+        print(
+            "not submitting: the checklist is empty. List the task's "
+            "requirements first — submitting without having enumerated them is "
+            "how most of these tasks are lost.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(f"all {len(items)} item(s) verified")
+    print(SUBMIT_SENTINEL)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="crux", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -377,6 +432,11 @@ def main():
     p = sub.add_parser("write", help="write stdin to a file")
     p.add_argument("path")
     p.set_defaults(func=cmd_write)
+
+    p = sub.add_parser(
+        "submit", help="finish the task, if every check still passes"
+    )
+    p.set_defaults(func=cmd_submit)
 
     p = sub.add_parser("todo", help="track the task's requirements")
     p.add_argument("action", choices=["add", "done", "list", "clear", "verify"])
