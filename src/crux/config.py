@@ -94,7 +94,7 @@ class CruxConfig(BaseModel):
         description="Per-call timeout. Long enough that a slow provider is waited out.",
     )
     max_tokens: int = Field(
-        default=32768,
+        default=16384,
         description=(
             "Output budget per call. Reasoning models spend it on the think "
             "block before writing anything, so a small budget returns "
