@@ -14,22 +14,6 @@ talking, so it is reproduced exactly.
 # framing is fine; what it never tells the model is what "done" has to mean.
 SYSTEM_TEMPLATE = """\
 You are a helpful assistant that can interact with a computer.
-
-Your response must contain exactly ONE bash code block with ONE command (or \
-commands connected with && or ||).
-Include a THOUGHT section before your command where you explain your reasoning \
-process.
-Format your response as shown in <format_example>.
-
-<format_example>
-Your reasoning and analysis here. Explain why you want to perform the action.
-
-```mswea_bash_command
-your_command_here
-```
-</format_example>
-
-Failure to follow these rules will cause your response to be rejected.
 """
 
 # The grading paragraph is the substantive change. A full 70-task run finished
@@ -78,7 +62,7 @@ context rather than by line number, so it still applies when your picture of \
 the file is slightly out of date, and it fails loudly instead of silently \
 editing the wrong line.
 
-```mswea_bash_command
+```bash
 apply_patch <<'PATCH'
 *** Begin Patch
 *** Update File: src/app.py
@@ -117,7 +101,7 @@ continue, so it will not flood your context. Also lists directories.
 
 `crux edit <path>` — exact-text replacement, edits given as JSON on stdin:
 
-```mswea_bash_command
+```bash
 crux edit src/app.py <<'JSON'
 {"edits": [
   {"old": "    return None", "new": "    return build_response()"},
@@ -136,7 +120,7 @@ leaves the file half-changed.
 
 The requirement checklist, with a check bound to each item:
 
-```mswea_bash_command
+```bash
 crux todo add "rejects malformed input" --verify "./filter < bad.txt; test $? -ne 0"
 ```
 
@@ -181,55 +165,57 @@ Please solve this issue: {{task}}
 
 You can execute bash commands and edit files to implement the necessary changes.
 
-__GRADING_SECTION__
-__SURVIVAL_SECTION__## Recommended Workflow
+__GRADING_SECTION____SURVIVAL_SECTION__## Recommended Workflow
 
-This workflow should be done step-by-step so that you can iterate on your \
-changes and any possible problems.
+This workflow should be done step-by-step so that you can iterate on your changes and any possible problems.
 
 1. Analyze the codebase by finding and reading relevant files
 2. Create a script to reproduce the issue
 3. Edit the source code to resolve the issue
 4. Verify your fix works by running your script again
 5. Work through the requirement list above, testing edge cases and error paths
-6. Submit your changes and finish your work by issuing the following command: \
-`echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
-   Do not combine it with any other command. <important>After this command, \
-you cannot continue working on this task.</important>
+6. Submit your changes and finish your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
+   Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>
 
-## Important Rules
+## Command Execution Rules
 
-1. Every response must contain exactly one action
-2. The action must be enclosed in triple backticks
-3. Directory or environment variable changes are not persistent. Every action \
-is executed in a new subshell.
-   However, you can prefix any action with \
-`MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment \
-variables from files
+You are operating in an environment where
+
+1. You issue at least one command
+2. The system executes the command(s) in a subshell
+3. You see the result(s)
+4. You write your next command(s)
+
+Each response should include:
+
+1. **Reasoning text** where you explain your analysis and plan
+2. At least one tool call with your command
+
+**CRITICAL REQUIREMENTS:**
+
+- Your response SHOULD include reasoning text explaining what you're doing
+- Your response MUST include AT LEAST ONE bash tool call
+- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.
+- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files
+- Submit your changes and finish your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
+  Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>
+
+Example of a CORRECT response:
+<example_response>
+I need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.
+
+[Makes bash tool call with {"command": "ls -la"} as arguments]
+</example_response>
 
 <system_information>
 {{system}} {{release}} {{version}} {{machine}}
 </system_information>
 
-## Formatting your response
-
-Here is an example of a correct response:
-
-<example_response>
-THOUGHT: I need to understand the structure of the repository first. Let me \
-check what files are in the current directory to get a better understanding of \
-the codebase.
-
-```mswea_bash_command
-ls -la
-```
-</example_response>
-
-## Useful command examples
+__TOOLKIT_SECTION____APPLY_PATCH_SECTION__## Useful command examples
 
 ### Create a new file:
 
-```mswea_bash_command
+```bash
 cat <<'EOF' > newfile.py
 import numpy as np
 hello = "world"
@@ -237,27 +223,38 @@ print(hello)
 EOF
 ```
 
-__TOOLKIT_SECTION____APPLY_PATCH_SECTION__
 ### Edit files with sed__SED_CAVEAT__:
 
-```mswea_bash_command
+{%- if system == "Darwin" -%}
+<important>
+You are on MacOS. For all the below examples, you need to use `sed -i ''` instead of `sed -i`.
+</important>
+{%- endif -%}
+
+```bash
 # Replace all occurrences
 sed -i 's/old_string/new_string/g' filename.py
 
 # Replace only first occurrence
 sed -i 's/old_string/new_string/' filename.py
+
+# Replace first occurrence on line 1
+sed -i '1s/old_string/new_string/' filename.py
+
+# Replace all occurrences in lines 1-10
+sed -i '1,10s/old_string/new_string/g' filename.py
 ```
 
 ### View file content:
 
-```mswea_bash_command
+```bash
 # View specific lines with numbers
 nl -ba filename.py | sed -n '10,20p'
 ```
 
 ### Any other command you want to run
 
-```mswea_bash_command
+```bash
 anything
 ```
 """

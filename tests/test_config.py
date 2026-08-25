@@ -28,7 +28,7 @@ def test_stock_variant_is_upstream_prompt():
     assert GRADING_SECTION not in body
     assert APPLY_PATCH_SECTION not in body
     # Upstream's format contract must survive: its parser depends on both.
-    assert "```mswea_bash_command" in body
+    assert "bash tool call" in body
     assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in body
 
 
@@ -45,7 +45,7 @@ def test_every_variant_renders_valid_config(name):
 @pytest.mark.parametrize("name", sorted(VARIANTS))
 def test_format_contract_survives_every_variant(name):
     body = rendered(name)
-    assert "```mswea_bash_command" in body
+    assert "bash tool call" in body
     assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in body
     assert "{{task}}" in body
 
