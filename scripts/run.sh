@@ -13,6 +13,8 @@ fi
 # 2.1 is where the published leaderboard numbers live; @latest is Terminal-Bench 3,
 # the frontier set, which is deliberately harder and not comparable to them.
 DATASET="${DATASET:-terminal-bench/terminal-bench-2-1}"
+# The full run is the confirmation step, so it keeps the paid model. Anything
+# being developed should go through scripts/quick.sh on the free one first.
 MODEL="${MODEL:-deepseek/deepseek-v4-flash}"
 N_TASKS="${N_TASKS:-}"
 N_ATTEMPTS="${N_ATTEMPTS:-1}"
