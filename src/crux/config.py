@@ -39,6 +39,15 @@ class CruxConfig(BaseModel):
             "matching the wrong line."
         ),
     )
+    toolkit: bool = Field(
+        default=True,
+        description=(
+            "Install the crux file tools and prefer them over cat/grep/sed. "
+            "Line-numbered paginated reads, bounded output, and edits whose "
+            "anchor must be unique — the last of which turns sed's silent "
+            "wrong-line edit into an error message."
+        ),
+    )
     step_limit: int = Field(
         default=0,
         description="Upstream default of 0 means unbounded; the harness times out.",
@@ -52,10 +61,11 @@ VARIANTS: dict[str, dict] = {
     "default": {},
     # The base agent as upstream ships it. This is the number Crux has to beat
     # to justify existing at all.
-    "stock": {"grading_section": False, "apply_patch": False},
+    "stock": {"grading_section": False, "apply_patch": False, "toolkit": False},
     # Isolates each addition against default.
     "no_grading": {"grading_section": False},
     "no_apply_patch": {"apply_patch": False},
+    "no_toolkit": {"toolkit": False},
 }
 
 
@@ -74,7 +84,9 @@ def to_mini_config(cfg: CruxConfig) -> dict:
         "agent": {
             "system_template": SYSTEM_TEMPLATE,
             "instance_template": build_instance_template(
-                grading=cfg.grading_section, apply_patch=cfg.apply_patch
+                grading=cfg.grading_section,
+                apply_patch=cfg.apply_patch,
+                toolkit=cfg.toolkit,
             ),
             "step_limit": cfg.step_limit,
             "cost_limit": cfg.cost_limit,

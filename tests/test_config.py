@@ -79,3 +79,26 @@ def test_unknown_variant_is_rejected():
 def test_harbor_passes_strings():
     cfg = build_config(step_limit="90", apply_patch="false")
     assert cfg.step_limit == 90 and cfg.apply_patch is False
+
+
+def test_toolkit_section_present_by_default():
+    body = rendered()
+    assert "crux read" in body and "crux edit" in body
+    # sed stays available but is demoted rather than removed: some edits are
+    # genuinely easier as a regex over many lines.
+    assert "last resort" in body
+
+
+def test_stock_has_no_crux_tools():
+    """`stock` must be upstream's prompt, or it is not a baseline."""
+    body = rendered("stock")
+    assert "crux read" not in body
+    assert "crux edit" not in body
+    assert "apply_patch" not in body
+
+
+def test_no_toolkit_variant_keeps_the_other_changes():
+    body = rendered("no_toolkit")
+    assert "crux read" not in body
+    assert "all or nothing" in body
+    assert "apply_patch <<'PATCH'" in body
