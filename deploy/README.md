@@ -9,10 +9,33 @@ card 2,3 ──> engine B :30001 ─┘
 ```
 
 ```bash
-./engine.sh 0,1 30000
-./engine.sh 2,3 30001
-./router.sh
+systemctl start crux-engine@a crux-engine@b crux-router crux-tunnel
 ```
+
+Card assignment lives in `engines/<name>.env` (`CARDS=0,1`, `PORT=30000`), not
+in the unit name -- systemd escapes commas in instance names and `0,1` is the
+natural way to write a card pair.
+
+## Reaching it
+
+| from | url |
+|---|---|
+| inside the cluster | `http://192.168.21.45:30080/v1` |
+| public | `http://8.210.147.108:18077/v1` |
+
+Both need `Authorization: Bearer <key>`. The router rejects anything else --
+verified: 401 with no key, 401 with a wrong one, 200 with the right one. That
+check matters because the public path terminates at the router, so the key is
+the only thing standing in front of the GPUs.
+
+The public path is `:18077 -> socat -> jump 127.0.0.1:18078 -> reverse ssh
+tunnel -> :30080`. The socat hop exists because sshd binds `-R` forwards to
+loopback unless `GatewayPorts` is on, and turning that on would expose every
+future forward on that box rather than just this one.
+
+`ServerAliveInterval` on the tunnel is not optional. Without it the tunnel
+stays "up" on the cluster side long after the jump box has dropped it from its
+NAT table, and the public endpoint blackholes instead of reconnecting.
 
 ## Why two TP=2 engines and not four TP=1 replicas
 
@@ -79,6 +102,15 @@ nothing. Benchmark runs swing between both extremes within a single job, so
 `num_steps` has to track the live acceptance rate instead of being pinned to
 whatever looked good on an idle box.
 
+## Why systemd and not `nohup`
+
+A backgrounded ssh child dies with its parent shell -- silently, and at the
+worst possible moment. Worse, when the scheduler hits an OOM it SIGQUITs
+itself, so the failure mode is not a crash loop anyone would notice but simply
+no engine, with the port closed and clients timing out. `Restart=on-failure`
+turns both into a blip. For something other people are meant to depend on, that
+is the difference between a service and a demo.
+
 ## Things that broke on the way here
 
 - **`ninja` not on PATH.** SGLang shells out to it when compiling CUDA graphs;
@@ -87,3 +119,10 @@ whatever looked good on an idle box.
   so they belong on node-local `/scratch`, not cpfs.
 - **Thinking chain leaking into `content`.** Needs `--reasoning-parser qwen3`.
 - **Wrong tool parser name.** vLLM calls it `qwen3_xml`, SGLang `qwen3_coder`.
+- **OOM during CUDA graph capture, at a `mem-fraction-static` the plain engine
+  was happy with.** MTP captures a second set of graphs -- draft and verify on
+  top of target -- and the scheduler had settled on `max_running_requests=48`
+  while still capturing decode graphs up to batch 256, i.e. memory spent on
+  shapes that never run. Capping decode graphs at 64 and dropping the static
+  fraction to 0.78 fixed it; the KV pool gives up ~300K tokens out of 1.85M,
+  against a P99 context of 113K.
