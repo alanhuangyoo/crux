@@ -55,6 +55,12 @@ Then prove each item with a command whose output demonstrates it: feed the \
 adversarial input, re-read the file you wrote, re-run the test, check the exit \
 code. Do not rely on remembering that you did something earlier — show that it \
 holds now.
+
+Keep that list in `crux todo` rather than in your head. Across a full \
+evaluation this agent declared itself finished 28 times and was right 3 times: \
+not from dishonesty, but from having done most of the work and lost track of \
+the rest. Run `crux todo list` before you finish; it exits non-zero while \
+anything is still open.
 """
 
 # apply_patch is offered instead of sed because it measurably works better.
@@ -124,6 +130,13 @@ Nothing is written unless every edit in the batch resolves, so a failure never \
 leaves the file half-changed.
 
 `crux write <path>` — write stdin to a file, creating parent directories.
+
+`crux todo add "<item>" ...` / `crux todo done <n>` / `crux todo list` — the \
+requirement checklist. Start the task by putting every requirement from the \
+statement into it, including the implicit ones about bad input and edge cases, \
+and close each one only when a command has shown it holds. `crux todo list` \
+exits non-zero while anything is open, so it is a check you can run rather \
+than a note to yourself.
 
 """
 

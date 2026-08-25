@@ -234,6 +234,80 @@ def cmd_write(args):
     print(f"{args.path}: wrote {len(content.splitlines())} lines")
 
 
+# ---- todo ------------------------------------------------------------------
+#
+# Ported from the plan/todo tools in Claude Code and Codex, and aimed at the
+# failure this project measured: across 70 tasks the agent declared completion
+# 28 times and was right 3 times. It was not lying — it had done most of the
+# work and lost track of the rest, and scoring is per-task all-or-nothing, so
+# the requirement it forgot cost the whole task. A list it writes down and has
+# to check off turns "I think I'm done" into something checkable.
+
+TODO_PATH = os.environ.get("CRUX_TODO_PATH", "/tmp/.crux-todo.json")
+
+
+def _load_todo():
+    try:
+        with open(TODO_PATH) as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def _save_todo(items):
+    with open(TODO_PATH, "w") as fh:
+        json.dump(items, fh)
+
+
+def _print_todo(items):
+    if not items:
+        print("todo list is empty")
+        return
+    for i, item in enumerate(items, start=1):
+        mark = "x" if item["done"] else " "
+        print(f"  {i}. [{mark}] {item['text']}")
+    remaining = sum(1 for i in items if not i["done"])
+    if remaining:
+        print(f"— {remaining} of {len(items)} still open")
+    else:
+        print(f"— all {len(items)} done")
+
+
+def cmd_todo(args):
+    items = _load_todo()
+
+    if args.action == "add":
+        if not args.text:
+            _fail("todo add needs at least one item")
+        for text in args.text:
+            items.append({"text": text, "done": False})
+        _save_todo(items)
+    elif args.action == "done":
+        if not args.text:
+            _fail("todo done needs an item number")
+        for raw in args.text:
+            try:
+                index = int(raw) - 1
+            except ValueError:
+                _fail(f"not an item number: {raw!r}")
+            if not 0 <= index < len(items):
+                _fail(f"no item {raw} (list has {len(items)})")
+            items[index]["done"] = True
+        _save_todo(items)
+    elif args.action == "clear":
+        items = []
+        _save_todo(items)
+    elif args.action != "list":
+        _fail(f"unknown todo action {args.action!r}")
+
+    _print_todo(items)
+
+    # Exit non-zero when anything is still open, so the model cannot read a
+    # `todo list` as confirmation that it is finished.
+    if args.action == "list" and any(not i["done"] for i in items):
+        sys.exit(2)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="crux", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -262,6 +336,11 @@ def main():
     p = sub.add_parser("write", help="write stdin to a file")
     p.add_argument("path")
     p.set_defaults(func=cmd_write)
+
+    p = sub.add_parser("todo", help="track the task's requirements")
+    p.add_argument("action", choices=["add", "done", "list", "clear"])
+    p.add_argument("text", nargs="*", help="items to add, or numbers to close")
+    p.set_defaults(func=cmd_todo)
 
     args = parser.parse_args()
     args.func(args)

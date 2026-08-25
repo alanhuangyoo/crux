@@ -200,3 +200,82 @@ def test_every_subcommand_has_help(command):
         [sys.executable, str(TOOL), command, "--help"], capture_output=True, text=True
     )
     assert r.returncode == 0 and r.stdout
+
+
+# ---- todo ------------------------------------------------------------------
+
+def todo(args, tmp_path, stdin=""):
+    """Run a todo subcommand against a list scoped to this test."""
+    import os
+
+    env = dict(os.environ, CRUX_TODO_PATH=str(tmp_path / "todo.json"))
+    return subprocess.run(
+        [sys.executable, str(TOOL), "todo", *args],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=env,
+    )
+
+
+def test_todo_add_and_list(tmp_path):
+    todo(["add", "block XSS", "preserve clean HTML"], tmp_path)
+    r = todo(["list"], tmp_path)
+    assert "1. [ ] block XSS" in r.stdout
+    assert "2. [ ] preserve clean HTML" in r.stdout
+    assert "2 of 2 still open" in r.stdout
+
+
+def test_todo_list_exits_nonzero_while_work_remains(tmp_path):
+    """So `crux todo list` cannot be read as confirmation of being finished."""
+    todo(["add", "one thing"], tmp_path)
+    assert todo(["list"], tmp_path).returncode == 2
+
+    todo(["done", "1"], tmp_path)
+    r = todo(["list"], tmp_path)
+    assert r.returncode == 0
+    assert "all 1 done" in r.stdout
+
+
+def test_todo_done_marks_the_item(tmp_path):
+    todo(["add", "a", "b"], tmp_path)
+    todo(["done", "2"], tmp_path)
+    out = todo(["list"], tmp_path).stdout
+    assert "1. [ ] a" in out and "2. [x] b" in out
+
+
+def test_todo_done_accepts_several_numbers(tmp_path):
+    todo(["add", "a", "b", "c"], tmp_path)
+    todo(["done", "1", "3"], tmp_path)
+    out = todo(["list"], tmp_path).stdout
+    assert "1. [x] a" in out and "2. [ ] b" in out and "3. [x] c" in out
+
+
+def test_todo_rejects_an_out_of_range_number(tmp_path):
+    todo(["add", "only one"], tmp_path)
+    r = todo(["done", "5"], tmp_path)
+    assert r.returncode == 1 and "no item 5" in r.stderr
+
+
+def test_todo_rejects_a_non_number(tmp_path):
+    todo(["add", "x"], tmp_path)
+    r = todo(["done", "first"], tmp_path)
+    assert r.returncode == 1 and "not an item number" in r.stderr
+
+
+def test_todo_persists_across_invocations(tmp_path):
+    todo(["add", "survives"], tmp_path)
+    assert "survives" in todo(["list"], tmp_path).stdout
+
+
+def test_todo_clear(tmp_path):
+    todo(["add", "a", "b"], tmp_path)
+    todo(["clear"], tmp_path)
+    r = todo(["list"], tmp_path)
+    assert "empty" in r.stdout and r.returncode == 0
+
+
+def test_empty_todo_list_is_not_an_error(tmp_path):
+    r = todo(["list"], tmp_path)
+    assert r.returncode == 0 and "empty" in r.stdout
