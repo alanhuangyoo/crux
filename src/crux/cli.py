@@ -164,13 +164,15 @@ QUICK_CANARIES = (
     "pypi-server",
     "regex-log",
 )
+# The four never solved across ten runs, plus two that fail close to the line.
+# Tasks already solved consistently belong in the canary set, not here.
 QUICK_CONTESTED = (
-    "kv-store-grpc",
-    "extract-elf",
-    "torch-tensor-parallelism",
-    "dna-assembly",
+    "qemu-alpine-ssh",
+    "torch-pipeline-parallelism",
     "filter-js-from-html",
-    "build-pov-ray",
+    "gpt2-codegolf",
+    "extract-elf",
+    "kv-store-grpc",
 )
 
 
