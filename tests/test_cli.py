@@ -90,3 +90,22 @@ def test_report_does_not_need_pydantic(monkeypatch, tmp_path):
 
 
 import pathlib  # noqa: E402
+
+
+def test_quick_slice_mixes_canaries_and_contested():
+    """Canaries catch regressions; contested tasks show improvement.
+
+    A slice of only-failing tasks would hide a change that gains one and
+    breaks two, which is the failure this set exists to catch.
+    """
+    from crux.cli import QUICK_CANARIES, QUICK_CONTESTED
+
+    assert QUICK_CANARIES and QUICK_CONTESTED
+    assert not set(QUICK_CANARIES) & set(QUICK_CONTESTED)
+    # Small enough to iterate against, or it is just the full run again.
+    assert len(QUICK_CANARIES) + len(QUICK_CONTESTED) <= 14
+
+
+def test_quick_defaults():
+    args = parse(["quick"])
+    assert args.variant == "default" and args.concurrent == 10

@@ -154,6 +154,60 @@ def cmd_bench(args) -> int:
     return subprocess.call(command, env=env)
 
 
+# A fixed slice for development. Canaries are solved consistently, so one of
+# them failing means the change broke something -- which matters more than any
+# gain. Contested tasks failed close to the line, so a real improvement shows
+# up there first. A full run is 85 tasks and hours; this is ten and minutes.
+QUICK_CANARIES = (
+    "log-summary-date-ranges",
+    "openssl-selfsigned-cert",
+    "pypi-server",
+    "regex-log",
+)
+QUICK_CONTESTED = (
+    "kv-store-grpc",
+    "extract-elf",
+    "torch-tensor-parallelism",
+    "dna-assembly",
+    "filter-js-from-html",
+    "build-pov-ray",
+)
+
+
+def cmd_quick(args) -> int:
+    """Run the development slice rather than the whole benchmark."""
+    if shutil.which("harbor") is None:
+        print("harbor is not installed.", file=sys.stderr)
+        return 1
+
+    jobs_dir = "/scratch/crux-jobs" if Path("/scratch").is_dir() else "jobs"
+    command = [
+        "harbor", "run",
+        "--dataset", DEFAULT_DATASET,
+        "--agent", "crux.agent:CruxAgent",
+        "--ak", f"variant={args.variant}",
+        "--model", args.model,
+        "--n-concurrent", str(args.concurrent),
+        "--jobs-dir", jobs_dir,
+        "--env", "docker",
+        "--yes",
+    ]
+    for task in QUICK_CANARIES + QUICK_CONTESTED:
+        command += ["--include-task-name", f"terminal-bench/{task}"]
+    if Path(".env").exists():
+        command += ["--env-file", ".env"]
+
+    src = str(Path(__file__).resolve().parent.parent)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = f"{src}{os.pathsep}{env.get('PYTHONPATH', '')}"
+
+    print(f"variant={args.variant}  model={args.model}")
+    print(f"canaries  {', '.join(QUICK_CANARIES)}")
+    print(f"contested {', '.join(QUICK_CONTESTED)}")
+    print()
+    return subprocess.call(command, env=env)
+
+
 def cmd_report(args) -> int:
     """Summarize a run, or diff two."""
     from crux.analysis import compare, completion_histogram, load_job
@@ -266,6 +320,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not skip the four GPU tasks (needs an nvidia runtime)",
     )
     p.set_defaults(func=cmd_bench)
+
+    p = sub.add_parser(
+        "quick",
+        help="run the fast iteration slice (canaries + contested tasks)",
+    )
+    p.add_argument("--variant", default="default", choices=sorted(VARIANTS))
+    p.add_argument("-m", "--model", default=DEFAULT_MODEL)
+    p.add_argument("-c", "--concurrent", type=int, default=10)
+    p.set_defaults(func=cmd_quick)
 
     p = sub.add_parser("report", help="summarize a run, or diff two")
     p.add_argument("job")
