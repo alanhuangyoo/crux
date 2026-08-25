@@ -44,6 +44,7 @@ from crux.prompts import (
     INSTANCE_PROMPT,
     SYSTEM_PROMPT,
     TIMEOUT_PROMPT,
+    VERIFY_PROMPT,
 )
 from crux.trajectory import TrajectoryRecorder
 
@@ -173,6 +174,7 @@ class CruxAgent(BaseAgent):
 
         exit_reason = "completed"
         n_format_errors = 0
+        n_verify_rounds = 0
 
         try:
             while True:
@@ -188,6 +190,7 @@ class CruxAgent(BaseAgent):
                     self.messages,
                     self.config.compaction_threshold_tokens,
                     self.config.max_input_tokens,
+                    self.config.context_window_cap,
                 ):
                     await self._compact(instruction, system_prompt, recorder)
 
@@ -225,7 +228,31 @@ class CruxAgent(BaseAgent):
                     commands=parsed.commands,
                 )
 
-                if parsed.is_task_complete:
+                if not parsed.is_task_complete:
+                    # The model went back to work rather than re-asserting, so
+                    # a later claim is a fresh one and earns a fresh challenge.
+                    # This must not reset while a challenge is in flight: the
+                    # reply to one carries verifying commands of its own, and
+                    # resetting on those would re-challenge forever.
+                    n_verify_rounds = 0
+                else:
+                    # A completion claim is challenged, not taken at face
+                    # value: most of them were wrong. Accept it only once the
+                    # model has been asked for evidence and stood by it.
+                    if (
+                        self.config.verify_before_complete
+                        and n_verify_rounds < self.config.max_verify_rounds
+                    ):
+                        n_verify_rounds += 1
+                        challenge = VERIFY_PROMPT.format(
+                            instruction=instruction, terminal_state=terminal_state
+                        )
+                        self.messages.append({"role": "user", "content": challenge})
+                        self._publish(context, recorder)
+                        continue
+                    exit_reason = (
+                        "completed_verified" if n_verify_rounds else "completed"
+                    )
                     self._publish(context, recorder)
                     break
 

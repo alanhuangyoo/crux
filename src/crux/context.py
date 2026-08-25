@@ -63,17 +63,25 @@ before building on it.
 """
 
 
-def max_input_tokens(model_name: str, fallback: int) -> int:
-    """Context window for a model, from litellm's map when it knows it."""
+def max_input_tokens(model_name: str, fallback: int, cap: int | None = None) -> int:
+    """Context window for a model, from litellm's map when it knows it.
+
+    The result is capped because the map cannot always be trusted: it puts
+    deepseek-v4-flash at 1M tokens, which made a free-space threshold
+    unreachable and let a trial die on ContextWindowExceededError rather than
+    compact. Treating the reported figure as an upper bound rather than a fact
+    costs nothing when it is right.
+    """
+    window = fallback
     try:
         info = litellm.get_model_info(model_name)
         value = info.get("max_input_tokens") or info.get("max_tokens")
         if value:
-            return int(value)
+            window = int(value)
     except Exception:
         # Unknown or custom model; the configured fallback is the best guess.
         pass
-    return fallback
+    return min(window, cap) if cap else window
 
 
 def count_tokens(model_name: str, messages: list[dict]) -> int:
@@ -88,10 +96,14 @@ def count_tokens(model_name: str, messages: list[dict]) -> int:
 
 
 def should_compact(
-    model_name: str, messages: list[dict], threshold: int, fallback_window: int
+    model_name: str,
+    messages: list[dict],
+    threshold: int,
+    fallback_window: int,
+    cap: int | None = None,
 ) -> bool:
     used = count_tokens(model_name, messages)
-    window = max_input_tokens(model_name, fallback_window)
+    window = max_input_tokens(model_name, fallback_window, cap)
     free = window - used
     if free < threshold:
         logger.info(

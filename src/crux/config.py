@@ -77,6 +77,36 @@ class CruxConfig(BaseModel):
             "from litellm's model map when it knows the model."
         ),
     )
+    context_window_cap: int = Field(
+        default=200000,
+        description=(
+            "Upper bound on the window used for the compaction decision, "
+            "whatever the model map reports. litellm puts deepseek-v4-flash at "
+            "1M tokens, so a threshold measured as free-space-remaining never "
+            "fired and one trial died on ContextWindowExceededError instead. "
+            "Capping the assumed window makes compaction trigger on a sane "
+            "conversation length rather than on a number we cannot trust."
+        ),
+    )
+
+    # --- completion gating ----------------------------------------------
+    verify_before_complete: bool = Field(
+        default=True,
+        description=(
+            "Challenge a completion claim before accepting it. In the first "
+            "full run the agent declared completion 28 times and passed the "
+            "verifier 3 times; a claim costs the model nothing to make, so it "
+            "has to be paid for with evidence."
+        ),
+    )
+    max_verify_rounds: int = Field(
+        default=2,
+        description=(
+            "How many times a completion claim can be challenged. Bounded so "
+            "a model that keeps re-asserting cannot spend the whole budget "
+            "arguing with itself."
+        ),
+    )
 
     # --- tools ---------------------------------------------------------
     enable_apply_patch: bool = Field(
@@ -110,6 +140,9 @@ VARIANTS: dict[str, dict] = {
     # Does compaction actually buy anything, or do tasks finish inside one
     # context anyway?
     "no_compaction": {"enable_compaction": False},
+    # The single biggest lever found so far: 25 of 28 completion claims in the
+    # first full run were false. This measures what challenging them is worth.
+    "no_verify_gate": {"verify_before_complete": False},
     # Is structured patching worth installing a helper, versus leaving the
     # model to edit with heredocs and sed?
     "no_apply_patch": {"enable_apply_patch": False},

@@ -126,3 +126,31 @@ Current terminal state:
 
 {terminal_state}
 """
+
+
+# Sent when the model claims completion. In the first full run it declared the
+# task done 28 times and passed the verifier on 3 of them -- an 89% false
+# positive rate, and far more costly than the turn budget. The claim is cheap
+# to make and the model has every incentive to make it, so it has to be paid
+# for with evidence.
+VERIFY_PROMPT = """\
+You claimed the task is complete. Before that is accepted, prove it.
+
+Original task:
+
+{instruction}
+
+Go through the task's requirements one at a time. For each, run a command \
+whose output demonstrates it is satisfied — read back the file you wrote, run \
+the test, check the exit code, query the service. Do not rely on remembering \
+that you did something earlier; show it is true now.
+
+If everything checks out, reply <task_complete>true</task_complete> again with \
+the verifying commands included. If anything does not, fix it and continue \
+working — a wrong claim of completion scores the same as not finishing, so \
+there is nothing to lose by finding the gap now.
+
+Current terminal state:
+
+{terminal_state}
+"""
