@@ -102,3 +102,29 @@ def test_no_toolkit_variant_keeps_the_other_changes():
     assert "crux read" not in body
     assert "all or nothing" in body
     assert "apply_patch <<'PATCH'" in body
+
+
+def test_stock_is_exactly_upstream_with_nothing_added():
+    """The baseline must carry none of Crux's sections.
+
+    Each of these leaked into `stock` at least once while being added. A
+    baseline contaminated by the thing it is measuring is worse than no
+    baseline, because it looks like a result.
+    """
+    body = rendered("stock")
+    for marker in (
+        "all or nothing",      # grading
+        "Staying alive",       # survival
+        "crux read",           # toolkit
+        "crux todo",           # todo
+        "apply_patch",         # patch tool
+        "last resort",         # the sed caveat
+    ):
+        assert marker not in body, f"{marker!r} leaked into the baseline prompt"
+
+
+def test_no_placeholder_markers_survive_rendering():
+    """An unreplaced __MARKER__ would ship to the model as literal text."""
+    for variant in VARIANTS:
+        body = rendered(variant)
+        assert "__" not in body.replace("__init__", ""), f"{variant} has a raw marker"
