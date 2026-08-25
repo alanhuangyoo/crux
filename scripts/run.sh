@@ -10,7 +10,9 @@ if [ -z "${JOBS_DIR:-}" ]; then
   if [ -d /scratch ]; then JOBS_DIR=/scratch/crux-jobs; else JOBS_DIR=jobs; fi
 fi
 
-DATASET="${DATASET:-terminal-bench/terminal-bench@latest}"
+# 2.1 is where the published leaderboard numbers live; @latest is Terminal-Bench 3,
+# the frontier set, which is deliberately harder and not comparable to them.
+DATASET="${DATASET:-terminal-bench/terminal-bench-2-1}"
 MODEL="${MODEL:-deepseek/deepseek-v4-flash}"
 N_TASKS="${N_TASKS:-}"
 N_ATTEMPTS="${N_ATTEMPTS:-1}"

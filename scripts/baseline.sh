@@ -12,7 +12,7 @@ if [ -z "${JOBS_DIR:-}" ]; then
 fi
 
 AGENT="${AGENT:-terminus-2}"
-DATASET="${DATASET:-terminal-bench/terminal-bench@latest}"
+DATASET="${DATASET:-terminal-bench/terminal-bench-2-1}"
 MODEL="${MODEL:-deepseek/deepseek-v4-flash}"
 N_TASKS="${N_TASKS:-12}"
 N_CONCURRENT="${N_CONCURRENT:-12}"

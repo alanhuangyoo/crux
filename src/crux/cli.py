@@ -31,7 +31,12 @@ VARIANTS = ('default', 'no_apply_patch', 'no_grading', 'no_toolkit', 'stock')
 RESOURCES = Path(__file__).parent / "resources"
 HELPERS = {"apply_patch": "apply_patch.py", "crux-tools": "crux_tool.py"}
 
-DEFAULT_DATASET = "terminal-bench/terminal-bench@latest"
+# terminal-bench@latest is Terminal-Bench 3, the frontier set, and it is
+# deliberately harder than 2.1. The public leaderboard figures everyone quotes
+# — mini-SWE-agent at 76.2%, Claude Code at 83.8% — are on 2.1, so that is the
+# dataset to measure against unless the frontier set is the explicit target.
+DEFAULT_DATASET = "terminal-bench/terminal-bench-2-1"
+FRONTIER_DATASET = "terminal-bench/terminal-bench@latest"
 DEFAULT_MODEL = "deepseek/deepseek-v4-flash"
 
 # These declare gpus=1. Without an nvidia runtime the validation error does not
