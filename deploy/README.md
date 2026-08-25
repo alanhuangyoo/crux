@@ -21,7 +21,21 @@ natural way to write a card pair.
 | from | url |
 |---|---|
 | inside the cluster | `http://192.168.21.45:30080/v1` |
+| a laptop, over ssh | `http://127.0.0.1:30080/v1` (see below) |
 | public | `http://8.210.147.108:18077/v1` |
+
+`local-tunnel.sh` forwards `localhost:30080` to the router. The jump box cannot
+reach the GPU subnet itself, so it hops through h20-43 -- `~/.ssh/config`
+already routes that via `ProxyJump jump`, so both hops are implicit. Install it
+as a login agent with:
+
+```bash
+cp deploy/com.crux.tunnel.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.crux.tunnel.plist
+```
+
+`KeepAlive` reconnects it after a laptop sleep; `launchctl unload` removes it.
+Measured from the laptop: 0.77s to `/v1/models`, 1.16s to first token.
 
 Both need `Authorization: Bearer <key>`. The router rejects anything else --
 verified: 401 with no key, 401 with a wrong one, 200 with the right one. That
