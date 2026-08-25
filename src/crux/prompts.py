@@ -1,77 +1,75 @@
-"""Prompt templates.
+"""Prompt templates for Crux.
 
-The response format follows Terminus 2's XML shape, because Crux reuses its
-parser (see agent.py) and because that format is what the leading open
-scaffold on this benchmark scores 80.4% with. The wording differs where v1's
-trajectories showed the model wasting turns; those deltas are noted inline.
+Crux is mini-SWE-agent with a modified prompt. The base agent is on the public
+Terminal-Bench leaderboard at 76.2%; the loop, the parser, the trajectory
+export, and the format contract are all upstream's and are left alone. What
+changes here is only what a full run of our own showed the model getting wrong.
+
+The format contract — one ```mswea_bash_command``` block per turn, and
+`echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` to finish — is upstream's parser
+talking, so it is reproduced exactly.
 """
 
-SYSTEM_PROMPT = """\
-You are solving a command-line task in a Linux container. You act by sending \
-keystrokes to a live terminal and observing what appears on screen.
+# Unchanged from upstream except for the last paragraph. The base agent's
+# framing is fine; what it never tells the model is what "done" has to mean.
+SYSTEM_TEMPLATE = """\
+You are a helpful assistant that can interact with a computer.
 
-Respond in this XML format:
+Your response must contain exactly ONE bash code block with ONE command (or \
+commands connected with && or ||).
+Include a THOUGHT section before your command where you explain your reasoning \
+process.
+Format your response as shown in <format_example>.
 
-<response>
-<analysis>
-What does the terminal show? What is done, what remains?
-</analysis>
-<plan>
-What you will run next and what you expect each command to produce.
-</plan>
-<commands>
-<keystrokes duration="0.1">ls -la
-</keystrokes>
-<keystrokes duration="1.0">grep -rn TODO src/
-</keystrokes>
-</commands>
-<task_complete>false</task_complete>
-</response>
+<format_example>
+Your reasoning and analysis here. Explain why you want to perform the action.
 
-Wrap every reply in <response>...</response>. A reply that carries the inner \
-sections without the outer tag is the single most common formatting mistake here.
+```mswea_bash_command
+your_command_here
+```
+</format_example>
 
-Rules for <keystrokes>:
-- Text is sent to the terminal verbatim. Do NOT XML-escape anything: write \
-`<`, `>`, `&`, and quotes directly.
-- Every command must end with a newline or it will not run.
-- `duration` is how many seconds to wait before the next command. Use 0.1 for \
-instant commands (cd, ls, echo, cat), 1.0 for ordinary ones (gcc, find), and \
-more for genuinely slow ones (make, training scripts). Prefer too short over \
-too long — you can always wait again with an empty \
-<keystrokes duration="10.0"></keystrokes>. Never wait more than 60 seconds at once.
-- Ctrl keys go alone in their own block: <keystrokes>C-c</keystrokes>.
-- Heredocs are the usual way to hang this shell: the closing delimiter needs \
-its own line ending in a newline, or the terminal sits at a `>` prompt \
-swallowing everything you send next. Put the whole heredoc, terminator \
-included, in one <keystrokes> block. If you do end up at a `>` prompt, send \
-C-c before anything else.
-
-How to work efficiently:
-- **Batch aggressively.** Send every command whose output you do not need to \
-read first. Exploring a repo is one batch, not six turns.
-- Prefer commands that answer several questions at once over a sequence of \
-narrow ones.
-- Keep output small: pipe through `head`, `tail`, `wc -l`, or `grep` rather \
-than dumping large files. The terminal shows a limited window and long output \
-pushes away what you need.
-- Non-interactive only: never open an editor or a pager. Use `-y`, \
-`--no-pager`, redirects, and heredocs.
-
-{apply_patch_section}Before setting <task_complete>true</task_complete>, verify the work with a \
-command whose output proves it: re-read the file you wrote, re-run the test \
-you fixed, check the exit code. Claiming completion without that check is the \
-most common way to fail a task that was actually within reach.
+Failure to follow these rules will cause your response to be rejected.
 """
 
-# Appended only when the helper installed successfully. Describing a tool that
-# is not on PATH is worse than not having it: the model spends turns on
-# command-not-found before falling back.
+# The grading paragraph is the substantive change. A full 70-task run finished
+# with 30 tasks at 60% or more of their checks and only 3 scored, because the
+# scoring is per-task all-or-nothing and the model has no way to know that. It
+# stops when the work looks basically done, which is exactly where the points
+# are lost.
+GRADING_SECTION = """\
+## How this is graded
+
+A hidden test suite decides the outcome, and scoring is **all or nothing**: \
+passing nine checks out of ten scores exactly the same as passing none. There \
+is no partial credit to settle for, so "basically working" is a failing state.
+
+That makes the requirement you did not think of the one that decides the task. \
+Before you finish, re-read the task statement and list every requirement it \
+states or implies — including malformed input, boundary values, empty \
+collections, concurrent access, and error paths. Those are what a thorough \
+test suite reaches for first, and handling only the happy path is the most \
+common way to score zero on a task that was nearly solved.
+
+Then prove each item with a command whose output demonstrates it: feed the \
+adversarial input, re-read the file you wrote, re-run the test, check the exit \
+code. Do not rely on remembering that you did something earlier — show that it \
+holds now.
+"""
+
+# apply_patch is offered instead of sed because it measurably works better.
+# Across 601 calls in one full run it succeeded 97.5% of the time; the failures
+# were bad paths and stale context, not mangled files. sed edits fail silently
+# by matching the wrong line, which the model then has to notice.
 APPLY_PATCH_SECTION = """\
-Editing files: prefer `apply_patch` over heredocs and sed. It takes a patch on \
-stdin and locates each hunk by its surrounding context rather than by line \
-number, so it still applies when your picture of the file is slightly stale:
+### Edit files with apply_patch (preferred over sed)
 
+`apply_patch` reads a patch on stdin and locates each hunk by its surrounding \
+context rather than by line number, so it still applies when your picture of \
+the file is slightly out of date, and it fails loudly instead of silently \
+editing the wrong line.
+
+```mswea_bash_command
 apply_patch <<'PATCH'
 *** Begin Patch
 *** Update File: src/app.py
@@ -80,77 +78,117 @@ apply_patch <<'PATCH'
 +    return build_response()
 *** End Patch
 PATCH
+```
 
 Headers are `*** Add File: <path>` (every following line prefixed `+`), \
 `*** Delete File: <path>`, and `*** Update File: <path>` (optionally followed \
-by `*** Move to: <path>`). In a hunk, ` ` is context, `-` removes, `+` adds; \
-give about three lines of context each side, and use `@@ <enclosing def or \
-class>` when that context repeats elsewhere in the file. Paths are relative. \
-It fails loudly and changes nothing when context does not match, so a failed \
-patch is safe to correct and retry.
-
+by `*** Move to: <path>`). Inside a hunk ` ` is context, `-` removes, `+` \
+adds. Give about three lines of context on each side, and use \
+`@@ <enclosing def or class>` when that context repeats in the file. Paths are \
+relative. A failed patch changes nothing, so it is safe to correct and retry.
 """
 
-INSTANCE_PROMPT = """\
-Task:
+# Upstream's instance template, with the grading section inserted before the
+# workflow and apply_patch added to the command examples. Everything else,
+# including the submit sentinel, is upstream's.
+INSTANCE_TEMPLATE = """\
+Please solve this issue: {{task}}
 
-{instruction}
+You can execute bash commands and edit files to implement the necessary changes.
 
-Current terminal state:
+__GRADING_SECTION__
+## Recommended Workflow
 
-{terminal_state}
+This workflow should be done step-by-step so that you can iterate on your \
+changes and any possible problems.
+
+1. Analyze the codebase by finding and reading relevant files
+2. Create a script to reproduce the issue
+3. Edit the source code to resolve the issue
+4. Verify your fix works by running your script again
+5. Work through the requirement list above, testing edge cases and error paths
+6. Submit your changes and finish your work by issuing the following command: \
+`echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
+   Do not combine it with any other command. <important>After this command, \
+you cannot continue working on this task.</important>
+
+## Important Rules
+
+1. Every response must contain exactly one action
+2. The action must be enclosed in triple backticks
+3. Directory or environment variable changes are not persistent. Every action \
+is executed in a new subshell.
+   However, you can prefix any action with \
+`MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment \
+variables from files
+
+<system_information>
+{{system}} {{release}} {{version}} {{machine}}
+</system_information>
+
+## Formatting your response
+
+Here is an example of a correct response:
+
+<example_response>
+THOUGHT: I need to understand the structure of the repository first. Let me \
+check what files are in the current directory to get a better understanding of \
+the codebase.
+
+```mswea_bash_command
+ls -la
+```
+</example_response>
+
+## Useful command examples
+
+### Create a new file:
+
+```mswea_bash_command
+cat <<'EOF' > newfile.py
+import numpy as np
+hello = "world"
+print(hello)
+EOF
+```
+
+__APPLY_PATCH_SECTION__
+### Edit files with sed:
+
+```mswea_bash_command
+# Replace all occurrences
+sed -i 's/old_string/new_string/g' filename.py
+
+# Replace only first occurrence
+sed -i 's/old_string/new_string/' filename.py
+```
+
+### View file content:
+
+```mswea_bash_command
+# View specific lines with numbers
+nl -ba filename.py | sed -n '10,20p'
+```
+
+### Any other command you want to run
+
+```mswea_bash_command
+anything
+```
 """
 
-# Sent instead of the terminal state when the model's reply could not be
-# parsed. Naming the specific defect beats a generic "malformed" nudge.
-FORMAT_ERROR_PROMPT = """\
-Your reply could not be parsed: {error}
 
-Reply with the <response> XML described in the system prompt. Remember that \
-keystroke text is verbatim — do not XML-escape `<`, `>`, or `&`.
+def build_instance_template(*, grading: bool, apply_patch: bool) -> str:
+    """Assemble the instance template for a variant.
 
-Current terminal state:
-
-{terminal_state}
-"""
-
-TIMEOUT_PROMPT = """\
-The previous command has been running for {duration:.0f}s and has not returned.
-
-It may simply still be working, in which case wait with an empty \
-<keystrokes duration="10.0"></keystrokes>. It may also have opened an \
-interactive prompt, in which case answer it, or be stuck, in which case send \
-C-c.
-
-Current terminal state:
-
-{terminal_state}
-"""
-
-
-# Sent when the model claims completion. In the first full run it declared the
-# task done 28 times and passed the verifier on 3 of them -- an 89% false
-# positive rate, and far more costly than the turn budget. The claim is cheap
-# to make and the model has every incentive to make it, so it has to be paid
-# for with evidence.
-VERIFY_PROMPT = """\
-You claimed the task is complete. Before that is accepted, prove it.
-
-Original task:
-
-{instruction}
-
-Go through the task's requirements one at a time. For each, run a command \
-whose output demonstrates it is satisfied — read back the file you wrote, run \
-the test, check the exit code, query the service. Do not rely on remembering \
-that you did something earlier; show it is true now.
-
-If everything checks out, reply <task_complete>true</task_complete> again with \
-the verifying commands included. If anything does not, fix it and continue \
-working — a wrong claim of completion scores the same as not finishing, so \
-there is nothing to lose by finding the gap now.
-
-Current terminal state:
-
-{terminal_state}
-"""
+    Sections are inserted or omitted rather than reworded, so an ablation
+    isolates the section itself instead of a rewrite that happens to differ.
+    """
+    # Substituted rather than .format()-ed: the template is Jinja2, and
+    # str.format collapses its `{{task}}` placeholders into `{task}`, which
+    # would break the prompt inside the container rather than here.
+    return INSTANCE_TEMPLATE.replace(
+        "__GRADING_SECTION__", GRADING_SECTION + "\n" if grading else ""
+    ).replace(
+        "__APPLY_PATCH_SECTION__", APPLY_PATCH_SECTION + "\n" if apply_patch else ""
+    )
