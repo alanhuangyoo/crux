@@ -3,7 +3,7 @@ name = "crux"
 version = "0.1.0"
 description = "A terminal agent scaffold targeting Terminal-Bench, optimized for DeepSeek models."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"  # harbor needs 3.12; ">=3.11" made the dep set unsolvable
 dependencies = [
     "harbor>=0.22.0",
     "pydantic>=2.0",

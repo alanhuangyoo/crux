@@ -12,6 +12,8 @@ interpretable without knowing which configuration produced it.
 
 from __future__ import annotations
 
+from typing import Literal, Optional
+
 from pydantic import BaseModel, Field
 
 from crux.prompts import SYSTEM_TEMPLATE, build_instance_template
@@ -73,6 +75,20 @@ class CruxConfig(BaseModel):
             "exceptional."
         ),
     )
+    reasoning_effort: Optional[Literal["low", "medium", "xhigh"]] = Field(
+        default=None,
+        description=(
+            "Qwen3.5's chat template accepts low / medium / xhigh, defaulting "
+            "to xhigh. Left unset here so the model's own default applies and "
+            "hosted models that know nothing about the parameter are "
+            "unaffected. Worth setting because running out of time is the "
+            "single largest cause of failure and reasoning tokens are most of "
+            "a turn: measured on one prompt, low spent 134 thinking tokens "
+            "against xhigh's 198. Note that turning thinking off entirely is "
+            "not the cheap end of the same axis -- it moves the reasoning into "
+            "the visible answer, which came out longer, not shorter."
+        ),
+    )
     request_timeout: int = Field(
         default=600,
         description="Per-call timeout. Long enough that a slow provider is waited out.",
@@ -116,17 +132,25 @@ def build_config(**kwargs) -> CruxConfig:
 
 def to_mini_config(cfg: CruxConfig) -> dict:
     """Render a CruxConfig as a mini-swe-agent config dict."""
+    model_kwargs = {
+        "drop_params": True,
+        "num_retries": cfg.num_retries,
+        "timeout": cfg.request_timeout,
+        "max_tokens": cfg.max_tokens,
+    }
+    if cfg.reasoning_effort is not None:
+        # chat_template_kwargs is not an OpenAI parameter, so it has to ride in
+        # extra_body -- litellm passes that through untouched, where drop_params
+        # would otherwise discard an unrecognised top-level key.
+        model_kwargs["extra_body"] = {
+            "chat_template_kwargs": {"reasoning_effort": cfg.reasoning_effort}
+        }
     return {
         # mini-swe-agent's own litellm settings. The agent runs inside the task
         # container, so retry behaviour has to be configured here — anything
         # host-side never sees its calls.
         "model": {
-            "model_kwargs": {
-                "drop_params": True,
-                "num_retries": cfg.num_retries,
-                "timeout": cfg.request_timeout,
-                "max_tokens": cfg.max_tokens,
-            }
+            "model_kwargs": model_kwargs,
         },
         "agent": {
             "system_template": SYSTEM_TEMPLATE,
