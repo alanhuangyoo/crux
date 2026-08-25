@@ -15,7 +15,9 @@
 set -euo pipefail
 
 CANARIES="${CANARIES:-log-summary-date-ranges openssl-selfsigned-cert pypi-server regex-log}"
-CONTESTED="${CONTESTED:-kv-store-grpc extract-elf torch-tensor-parallelism dna-assembly filter-js-from-html build-pov-ray}"
+# The four that have never been solved across ten runs, plus two that fail
+# close to the line. Optimizing against tasks already solved teaches nothing.
+CONTESTED="${CONTESTED:-qemu-alpine-ssh torch-pipeline-parallelism filter-js-from-html gpt2-codegolf extract-elf kv-store-grpc}"
 
 if [ -z "${JOBS_DIR:-}" ]; then
   if [ -d /scratch ]; then JOBS_DIR=/scratch/crux-jobs; else JOBS_DIR=jobs; fi
