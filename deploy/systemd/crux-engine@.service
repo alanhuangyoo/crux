@@ -1,0 +1,30 @@
+# One unit per engine, instanced by name: crux-engine@a, crux-engine@b.
+# Cards and port come from /mnt/cpfs/users/xiaohuang/engines/<name>.env rather
+# than the instance string, because systemd escapes commas in instance names
+# and "0,1" is the natural way to write a card pair.
+#
+# systemd rather than nohup/setsid because this is a service other people
+# depend on. A backgrounded ssh child dies with its parent shell, silently and
+# at the worst moment; and when the scheduler hits an OOM it SIGQUITs itself,
+# which leaves no engine and no one to notice. Restart=on-failure turns both
+# into a blip instead of an outage.
+[Unit]
+Description=Crux SGLang engine %i
+After=network-online.target
+
+[Service]
+Type=exec
+EnvironmentFile=/mnt/cpfs/users/xiaohuang/engines/%i.env
+ExecStart=/bin/bash -c '/mnt/cpfs/users/xiaohuang/sgl3.sh "$CARDS" "$PORT"'
+Restart=on-failure
+RestartSec=15
+# Model load plus CUDA graph capture runs well past the default 90s.
+TimeoutStartSec=2400
+TimeoutStopSec=60
+KillMode=mixed
+StandardOutput=append:/mnt/cpfs/users/xiaohuang/logs/engine-%i.log
+StandardError=inherit
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

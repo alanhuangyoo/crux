@@ -14,6 +14,14 @@
 # it instead of loading a separate draft model. topk=1 keeps the draft a linear
 # chain, which is all a single MTP layer can support; a tree needs more layers.
 #
+# Two memory notes, both learned by watching this OOM at 0.85. MTP captures a
+# second set of CUDA graphs -- draft and verify on top of target -- so it needs
+# noticeably more room outside the KV pool than the plain engine does. And the
+# scheduler settles on max_running_requests=48, which makes every decode graph
+# captured above that batch size memory spent on a shape that never runs. The
+# lower static fraction costs ~300K tokens of KV, out of 1.85M against a P99
+# context of 113K; the batch-size cap costs nothing at all.
+#
 # --speculative-adaptive matters more here than the step count. Speculation is
 # a bet on idle compute: it wins when the GPU is waiting on memory bandwidth
 # (one user, batch of 1) and loses when the batch is already saturating it,
@@ -44,7 +52,8 @@ exec $B/envs/sglang/bin/python -m sglang.launch_server \
   --tp 2 \
   --context-length 262144 \
   --chunked-prefill-size 8192 \
-  --mem-fraction-static 0.85 \
+  --mem-fraction-static 0.78 \
+  --cuda-graph-max-bs-decode 64 \
   --reasoning-parser qwen3 \
   --tool-call-parser qwen3_coder \
   --speculative-algorithm NEXTN \
