@@ -78,6 +78,7 @@ class CruxAgent(MiniSweAgent):
     @override
     async def install(self, environment: BaseEnvironment) -> None:
         await super().install(environment)
+        await self._repair_python_too_old(environment)
         wanted = {
             "apply_patch": self.crux_config.apply_patch,
             "crux": self.crux_config.toolkit,
@@ -89,6 +90,42 @@ class CruxAgent(MiniSweAgent):
             self.helpers_ready[name] = await self._install_helper(
                 environment, source, dest, probe, expected
             )
+
+    async def _repair_python_too_old(self, environment: BaseEnvironment) -> None:
+        """Reinstall against a newer interpreter when the image's is too old.
+
+        Upstream installs with a bare `uv tool install mini-swe-agent`, which
+        resolves against whatever python3 the task image ships. Several ship
+        3.10, where a dependency's `from typing import NotRequired` fails at
+        import — the agent never starts and the trial is lost outright, which
+        counts as reward 0 and cannot be excluded from a submission.
+
+        Only runs when the probe fails, so images with a usable interpreter
+        pay nothing and keep the version upstream chose.
+        """
+        probe = await self.exec_as_agent(
+            environment,
+            command='if [ -f "$HOME/.local/bin/env" ]; then . "$HOME/.local/bin/env"; '
+            'else export PATH="$HOME/.local/bin:$PATH"; fi; '
+            "mini --help >/dev/null 2>&1 && echo CRUX_MINI_OK || echo CRUX_MINI_BROKEN",
+        )
+        output = (getattr(probe, "stdout", "") or "") + (
+            getattr(probe, "stderr", "") or ""
+        )
+        if "CRUX_MINI_BROKEN" not in output:
+            return
+
+        self.logger.warning(
+            "mini-swe-agent will not start on this image's python; "
+            "reinstalling against a pinned interpreter"
+        )
+        await self.exec_as_agent(
+            environment,
+            command='if [ -f "$HOME/.local/bin/env" ]; then . "$HOME/.local/bin/env"; '
+            'else export PATH="$HOME/.local/bin:$PATH"; fi; '
+            "uv tool install --force --python 3.12 mini-swe-agent "
+            "--with litellm --with orjson --with fastapi && mini --help >/dev/null",
+        )
 
     async def _install_helper(
         self,
