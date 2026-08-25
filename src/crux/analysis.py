@@ -33,6 +33,7 @@ from pathlib import Path
 # agent, and counting it as an agent failure is how a broken box looks like a
 # bad prompt.
 FAILURE_ORDER = [
+    "solved",
     "environment",
     "killed",
     "agent_timeout",
@@ -40,7 +41,6 @@ FAILURE_ORDER = [
     "format_error",
     "false_completion",
     "out_of_turns",
-    "solved",
 ]
 
 # mini-swe-agent's own exit statuses, mapped onto this module's vocabulary.
@@ -81,14 +81,19 @@ class Trial:
 
     @property
     def category(self) -> str:
+        # Solved wins over everything the agent did on the way there. Harbor
+        # records an agent timeout and runs the verifier anyway, so a trial can
+        # be cut off and still pass — ranking the timeout first hid two solved
+        # tasks in the first pi/crux comparison and made the counts disagree
+        # with the solved list printed beside them.
+        if self.solved:
+            return "solved"
         if self.exception in ENVIRONMENT_EXCEPTIONS:
             return "environment"
         if self.exception == "AgentTimeoutError":
             return "agent_timeout"
         if self.exception == "ContextWindowExceededError":
             return "context_exceeded"
-        if self.solved:
-            return "solved"
         if self.exit_reason == "repeated_format_error":
             return "format_error"
         # Killed before it could record an outcome: the harness timeout or the

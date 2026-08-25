@@ -265,3 +265,24 @@ def test_solved_still_wins_over_native_status(tmp_path):
     d = write_trial(tmp_path, "alpha__x", reward=1.0)
     write_native_trajectory(d, "Submitted")
     assert load_job(tmp_path).trials[0].category == "solved"
+
+
+def test_solved_wins_over_a_timeout(tmp_path):
+    """Harbor records an agent timeout and runs the verifier anyway.
+
+    Ranking the timeout first hid two solved tasks in the first pi/crux
+    comparison, so the category counts disagreed with the solved list printed
+    next to them.
+    """
+    write_trial(tmp_path, "alpha__x", reward=1.0, exception="AgentTimeoutError")
+    job = load_job(tmp_path)
+    assert job.trials[0].category == "solved"
+    assert job.score == 1.0
+
+
+def test_category_counts_match_the_solved_list(tmp_path):
+    write_trial(tmp_path, "a__x", reward=1.0, exception="AgentTimeoutError")
+    write_trial(tmp_path, "b__y", reward=1.0)
+    write_trial(tmp_path, "c__z", reward=0.0)
+    job = load_job(tmp_path)
+    assert job.by_category()["solved"] == sum(1 for t in job.trials if t.solved) == 2
