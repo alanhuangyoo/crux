@@ -279,3 +279,64 @@ def test_todo_clear(tmp_path):
 def test_empty_todo_list_is_not_an_error(tmp_path):
     r = todo(["list"], tmp_path)
     assert r.returncode == 0 and "empty" in r.stdout
+
+
+# ---- todo with bound checks -------------------------------------------------
+
+def test_closing_an_item_reruns_its_check(tmp_path):
+    """Closing is an observation, not a claim."""
+    todo(["add", "file exists", "--verify", "test -f target.txt"], tmp_path)
+    r = todo(["done", "1"], tmp_path)
+    assert r.returncode == 1
+    assert "its check still fails" in r.stderr
+    assert "[ ] file exists" in todo(["list"], tmp_path).stdout
+
+    (tmp_path / "target.txt").write_text("x")
+    assert todo(["done", "1"], tmp_path).returncode == 0
+    assert "[x] file exists" in todo(["list"], tmp_path).stdout
+
+
+def test_a_failing_check_shows_its_output(tmp_path):
+    """"It failed" is not actionable; the command's own output is."""
+    todo(["add", "grep works", "--verify", "grep NOPE missing.txt"], tmp_path)
+    r = todo(["done", "1"], tmp_path)
+    assert "grep NOPE missing.txt" in r.stderr
+
+
+def test_items_without_a_check_still_close(tmp_path):
+    """Not every requirement has a one-line command behind it."""
+    todo(["add", "reviewed the spec"], tmp_path)
+    assert todo(["done", "1"], tmp_path).returncode == 0
+
+
+def test_verify_reruns_every_check(tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    todo(["add", "b exists", "--verify", "test -f b.txt"], tmp_path)
+    r = todo(["verify"], tmp_path)
+    assert r.returncode == 2
+    assert "[pass] a exists" in r.stdout
+    assert "[FAIL] b exists" in r.stdout
+
+
+def test_verify_catches_a_regression_from_a_later_edit(tmp_path):
+    """The case this exists for: fixing one requirement breaks another."""
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    assert todo(["done", "1"], tmp_path).returncode == 0
+
+    (tmp_path / "a.txt").unlink()
+    r = todo(["verify"], tmp_path)
+    assert r.returncode == 2 and "[FAIL] a exists" in r.stdout
+
+
+def test_verify_passes_when_everything_holds(tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    r = todo(["verify"], tmp_path)
+    assert r.returncode == 0 and "all checks pass" in r.stdout
+
+
+def test_list_shows_the_pending_check(tmp_path):
+    todo(["add", "tests pass", "--verify", "pytest -q"], tmp_path)
+    assert "check: pytest -q" in todo(["list"], tmp_path).stdout

@@ -56,11 +56,14 @@ adversarial input, re-read the file you wrote, re-run the test, check the exit \
 code. Do not rely on remembering that you did something earlier — show that it \
 holds now.
 
-Keep that list in `crux todo` rather than in your head. Across a full \
-evaluation this agent declared itself finished 28 times and was right 3 times: \
-not from dishonesty, but from having done most of the work and lost track of \
-the rest. Run `crux todo list` before you finish; it exits non-zero while \
-anything is still open.
+Keep that list in `crux todo`, with a `--verify` command on every item you \
+can express as one. Across a full evaluation this agent declared itself \
+finished 28 times and was right 3 times: not from dishonesty, but from having \
+done most of the work and lost track of the rest.
+
+**Run `crux todo verify` immediately before you finish.** If it exits \
+non-zero, you are not finished, whatever your recollection says — go fix what \
+it reports and run it again.
 """
 
 # apply_patch is offered instead of sed because it measurably works better.
@@ -131,12 +134,20 @@ leaves the file half-changed.
 
 `crux write <path>` — write stdin to a file, creating parent directories.
 
-`crux todo add "<item>" ...` / `crux todo done <n>` / `crux todo list` — the \
-requirement checklist. Start the task by putting every requirement from the \
-statement into it, including the implicit ones about bad input and edge cases, \
-and close each one only when a command has shown it holds. `crux todo list` \
-exits non-zero while anything is open, so it is a check you can run rather \
-than a note to yourself.
+The requirement checklist, with a check bound to each item:
+
+```mswea_bash_command
+crux todo add "rejects malformed input" --verify "./filter < bad.txt; test $? -ne 0"
+```
+
+`crux todo done <n>` re-runs that command and **refuses to close the item if \
+it fails**, so closing one is an observation rather than a claim. \
+`crux todo verify` re-runs every check at once — edits made for one \
+requirement break another constantly, and this is the only way to notice \
+before submitting. `crux todo list` exits non-zero while anything is open.
+
+Write the check first, watch it fail, then make it pass. An item with no \
+runnable check is allowed but proves nothing.
 
 """
 
