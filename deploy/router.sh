@@ -13,9 +13,18 @@
 # cache_aware keeps a per-worker prefix tree and sends a request to whichever
 # engine already holds the longest match, falling back to load balancing when
 # the match is weak (cache-threshold) or when one engine has fallen far enough
-# behind the other (balance-*-threshold). Affinity is the default, not a lock:
-# a queue that is 64 requests deeper AND 1.5x longer overrides it, so one
-# heavy user cannot pin everyone else behind their own cache.
+# behind the other (balance-*-threshold).
+#
+# The balance thresholds are far below their defaults (64 / 1.5) because the
+# defaults do not fire in practice. Measured at 96 concurrent requests over a
+# shared prefix: 203 requests to one engine, 2 to the other, while the idle
+# card sat there and aggregate throughput matched a single engine exactly.
+# Both conditions have to hold to trigger balancing, so a 64-request absolute
+# gap is a very high bar when each engine only runs 48 at a time -- the queue
+# has to be deeper than the engine before affinity ever yields.
+#
+# 16 and 1.25 keep affinity for real prefix hits while making it structurally
+# impossible for one engine to idle through a backlog on the other.
 set -euo pipefail
 B=/mnt/cpfs/users/xiaohuang
 export PATH="$B/envs/sglang/bin:$PATH"
@@ -25,8 +34,8 @@ exec $B/envs/sglang/bin/python -m sglang_router.launch_router \
   --worker-urls http://127.0.0.1:30000 http://127.0.0.1:30001 \
   --policy cache_aware \
   --cache-threshold 0.3 \
-  --balance-abs-threshold 64 \
-  --balance-rel-threshold 1.5 \
+  --balance-abs-threshold 16 \
+  --balance-rel-threshold 1.25 \
   --max-payload-size 536870912 \
   --request-timeout-secs 3600 \
   --worker-startup-timeout-secs 1800 \

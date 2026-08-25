@@ -13,7 +13,7 @@ of agent traffic (shared system prompt + transcript, few hundred new tokens)
 and it is also what makes prefix caching and MTP accept rates realistic. A
 random-prompt benchmark would understate both.
 """
-import argparse, asyncio, json, statistics, sys, time
+import argparse, asyncio, concurrent.futures, json, statistics, sys, time
 import urllib.request
 
 KEY = "sk-crux-iM-eVeNJmh1_crsLPfiBInwFaU410pNM"
@@ -86,7 +86,20 @@ async def one(session_id: int, url: str, model: str, out_tokens: int):
 
 
 async def sweep(url: str, model: str, conc: int, out_tokens: int):
-    res = await asyncio.gather(*(one(i, url, model, out_tokens) for i in range(conc)))
+    # Every request is a blocking urllib call handed to the default executor,
+    # which sizes itself at min(32, cpu_count + 4). On any real box that is 32
+    # -- so without this, asking for 96 concurrent requests measures 32, and
+    # throughput appears to plateau at whatever 32 streams can pull. It looks
+    # exactly like server saturation and it is entirely client-side.
+    loop = asyncio.get_running_loop()
+    prev = getattr(loop, "_default_executor", None)
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=conc + 8)
+    loop.set_default_executor(pool)
+    try:
+        res = await asyncio.gather(*(one(i, url, model, out_tokens) for i in range(conc)))
+    finally:
+        loop.set_default_executor(prev) if prev else None
+        pool.shutdown(wait=False)
     good = [r for r in res if r["ok"]]
     if not good:
         errs = {r["err"] for r in res}
