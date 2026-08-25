@@ -83,24 +83,54 @@ Affinity is a default, not a lock. When one engine falls 64 requests *and* 1.5x
 behind the other, the balance thresholds override cache affinity, so a single
 heavy user cannot pin everyone else behind their own cache.
 
-## Why MTP
+## Why MTP is off
 
-Speculative decoding does not make the GPU faster. It makes one forward pass
-emit more than one token when the draft head guesses right, which converts
-memory-bandwidth stalls into tokens.
+The checkpoint ships `mtp.safetensors` and declares `mtp_num_hidden_layers=1`,
+so a trained draft head is right there and `--speculative-algorithm NEXTN`
+reuses it without loading a second model. It was worth trying. It loses.
 
-This checkpoint ships `mtp.safetensors` and declares `mtp_num_hidden_layers=1`,
-so the draft head was trained against these exact weights -- `--speculative-
-algorithm NEXTN` reuses it rather than loading a separate draft model.
-`--speculative-eagle-topk 1` keeps the draft a linear chain, which is all one
-MTP layer supports; tree verification needs more layers.
+Same hardware, same weights, 256 output tokens per request, prompts sharing a
+long prefix the way agent traffic does. Decode is per stream; throughput is
+aggregate:
 
-`--speculative-adaptive` matters more than the step count. Speculation is a bet
-on idle compute: it wins at batch size 1 and loses once the batch already
-saturates the GPU, because every rejected draft token is compute spent for
-nothing. Benchmark runs swing between both extremes within a single job, so
-`num_steps` has to track the live acceptance rate instead of being pinned to
-whatever looked good on an idle box.
+| concurrency | no MTP | MTP | MTP + ReplaySSM |
+|---|---|---|---|
+| 1 | **96.7 tok/s** | 77.5 | 76.3 |
+| 8 | **88.2 tok/s** | 59.4 | 65.9 |
+| 32 | **68.7 tok/s** | 33.3 | 35.3 |
+| 64 | **70.2 tok/s** | 28.7 | 30.6 |
+
+The draft head is good. Accept length measured 2.9 of 4 draft tokens at an
+accept rate of 0.65 -- speculation is guessing right two thirds of the time.
+It still runs at half speed, and the arithmetic says why:
+
+| | per cycle | tokens | rate |
+|---|---|---|---|
+| plain decode | 10.3 ms | 1 | 96.7/s |
+| speculative | 38.5 ms | 2.94 | 76.3/s |
+
+A verify cycle is one target forward plus three single-layer draft passes, so
+it should cost about what a plain forward costs -- call it 11 ms for 2.94
+tokens, roughly 267 tok/s. It costs 38.5 ms. **Around 28 ms per cycle is not
+model forward time at all.**
+
+That gap is the architecture. 48 of the 64 layers are gated-delta-net linear
+attention, not softmax attention. Rejecting a draft token in a KV model means
+dropping cache entries; in a recurrent model it means restoring SSM state, so
+the verify path snapshots full state per draft step -- 116 live mamba states
+for 32 requests, across 48 layers, every step.
+`--enable-linear-replayssm-spec` exists precisely to replace those snapshots
+with a raw-input window, and it recovered only 6-11%.
+
+Lowering `num_steps` does not rescue it either: the 28 ms is largely fixed per
+cycle, so cutting the draft chain to 1 keeps most of the overhead while
+dropping the yield from 2.94 tokens to about 1.6.
+
+`engine.sh` carries the exact flags to re-test this after an sglang upgrade.
+Two things to know before doing so: MTP captures a second set of CUDA graphs
+and OOMs at `mem-fraction-static 0.88`, and `--speculative-adaptive` asserts
+outright on 0.5.18 (`shared logits buffer holds 192 rows but caller needs
+384`).
 
 ## Why systemd and not `nohup`
 
