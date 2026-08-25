@@ -34,13 +34,30 @@ Evaluation runs on the x86-64 dev machine, not this Mac; see docs/ENVIRONMENT.md
 - [ ] Phase 3 — iterate on prompts / tools / context management
 - [ ] Phase 4 — full run (all tasks x >=5 trials), `--upload`, submit PR
 
+## What this is
+
+Crux is **mini-SWE-agent with a modified prompt and a better file-editing
+tool**, not a new agent. The base sits on the public leaderboard at 76.2%; its
+loop, parser, trajectory export and format contract are upstream's. Writing
+that machinery from scratch was tried first and reached 4.62% — the gap is the
+iterations already baked into a mature agent, not prompt tuning.
+
+Around it is the part that actually drives the work: a pipeline that turns a
+run into an answer to *why did we score that*. Every change in this repo came
+from a distinction the leaderboard number does not make.
+
 ## Layout
 
 ```
-src/crux/agent.py   the agent — a bash loop, Harbor BaseAgent
-scripts/smoke.sh        oracle run; verifies the harness, not the agent
-scripts/baseline.sh     Phase 1 baseline against an existing agent
-docs/RESEARCH.md        competitive landscape, submission rules, red lines
+src/crux/agent.py      CruxAgent — subclasses Harbor's MiniSweAgent
+src/crux/prompts.py    the modified templates; upstream's format contract intact
+src/crux/config.py     knobs and ablation variants (`stock` = upstream prompt)
+src/crux/analysis.py   job dir -> scores, failure taxonomy, completion fractions
+scripts/analyze.py     report on one run, or diff two
+scripts/provision.sh   set up an eval node (every setting has a run behind it)
+scripts/run.sh         run Crux; scripts/smoke.sh runs oracle to check the box
+docs/ENVIRONMENT.md    what broke and why — btrfs, address pools, GPU tasks
+docs/ABLATION.md       the questions each variant answers
 ```
 
 ## Tests
