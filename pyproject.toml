@@ -5,14 +5,19 @@ description = "A terminal agent scaffold targeting Terminal-Bench, optimized for
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "harbor[modal]>=0.22.0",
-    "jinja2>=3.1",
-    "litellm>=1.0",
+    "harbor>=0.22.0",
     "pydantic>=2.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
+# `crux solve` shells out to mini-swe-agent's runner; the benchmark path
+# installs it into the task container instead and does not need it here.
+local = ["mini-swe-agent>=1.0"]
+
+[project.scripts]
+crux = "crux.cli:main"
 
 [build-system]
 requires = ["hatchling"]
