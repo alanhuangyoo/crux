@@ -94,12 +94,17 @@ class CruxConfig(BaseModel):
         description="Per-call timeout. Long enough that a slow provider is waited out.",
     )
     max_tokens: int = Field(
-        default=8192,
+        default=32768,
         description=(
             "Output budget per call. Reasoning models spend it on the think "
             "block before writing anything, so a small budget returns "
             "finish_reason=length with content=None -- a turn that did nothing "
-            "and reads to the agent as a format error."
+            "and reads to the agent as a format error. 8192 was not enough: on "
+            "the ten-task slice it produced two RepeatedFormatError trials that "
+            "never emitted a single command, and burned 4 more turns inside a "
+            "trial that then timed out at 66.7% complete. A truncated turn "
+            "costs a full round trip and returns nothing, so the budget is "
+            "cheaper raised than spent."
         ),
     )
 

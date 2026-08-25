@@ -39,7 +39,7 @@ done
 SP=$(ls -d "$HOME"/.local/share/uv/tools/harbor/lib/python3.*/site-packages | head -1)
 export PYTHONPATH="$(pwd)/src:${SP}"
 
-echo "agent   : ${AGENT}  variant=${VARIANT}"
+echo "agent   : ${AGENT}  variant=${VARIANT}${AK_EXTRA:+  extra=${AK_EXTRA}}"
 echo "model   : ${MODEL}"
 echo "canary  : ${CANARIES}"
 echo "contest : ${CONTESTED}"
@@ -49,6 +49,12 @@ AK=""
 case "${AGENT}" in
   crux.agent:CruxAgent) AK="--ak variant=${VARIANT}" ;;
 esac
+# Any further agent kwargs, space separated, e.g. AK_EXTRA="reasoning_effort=low".
+# Kept out of VARIANT because a variant is a named, reproducible configuration
+# and a one-off A/B is not; mixing the two makes past scores unreadable.
+for kv in ${AK_EXTRA:-}; do
+  AK="${AK} --ak ${kv}"
+done
 
 harbor run \
   --dataset "${DATASET}" \
