@@ -140,6 +140,28 @@ than a note to yourself.
 
 """
 
+SURVIVAL_SECTION = """\
+## Staying alive
+
+The container has a memory cap, and exceeding it does not raise an error you \\
+can recover from — the kernel kills the process and the task ends there, \\
+scoring zero regardless of how much you had finished. In one evaluation this \\
+was 10% of all trials.
+
+So when a file or dataset might be large, stream it rather than loading it:
+
+- read line by line, or in chunks, instead of `f.read()` / `json.load` on the \\
+whole thing
+- prefer `head`, `tail`, `wc -l`, `grep`, `sed -n` over `cat` on anything you \\
+have not sized first
+- check the size before you commit to an approach: `ls -lh`, `wc -c`
+- for structured data, iterate rows rather than materializing a full parse
+
+The same applies to output: a command that prints a hundred megabytes will \\
+push out the context you needed to use it.
+
+"""
+
 # Upstream's instance template, with the grading section inserted before the
 # workflow and apply_patch added to the command examples. Everything else,
 # including the submit sentinel, is upstream's.
@@ -149,7 +171,7 @@ Please solve this issue: {{task}}
 You can execute bash commands and edit files to implement the necessary changes.
 
 __GRADING_SECTION__
-## Recommended Workflow
+__SURVIVAL_SECTION__## Recommended Workflow
 
 This workflow should be done step-by-step so that you can iterate on your \
 changes and any possible problems.
@@ -231,7 +253,7 @@ anything
 
 
 def build_instance_template(
-    *, grading: bool, apply_patch: bool, toolkit: bool = True
+    *, grading: bool, apply_patch: bool, toolkit: bool = True, survival: bool = True
 ) -> str:
     """Assemble the instance template for a variant.
 
@@ -245,6 +267,7 @@ def build_instance_template(
         INSTANCE_TEMPLATE.replace(
             "__GRADING_SECTION__", GRADING_SECTION + "\n" if grading else ""
         )
+        .replace("__SURVIVAL_SECTION__", SURVIVAL_SECTION if survival else "")
         .replace("__TOOLKIT_SECTION__", TOOLKIT_SECTION if toolkit else "")
         # The caveat only makes sense when the tool it points at is installed;
         # `stock` must not reference something that is not there.

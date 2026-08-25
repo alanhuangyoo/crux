@@ -39,6 +39,14 @@ class CruxConfig(BaseModel):
             "matching the wrong line."
         ),
     )
+    survival: bool = Field(
+        default=True,
+        description=(
+            "Warn about the container memory cap. Exceeding it is a SIGKILL, "
+            "not a catchable error, and the trial scores zero -- 10% of trials "
+            "in one evaluation."
+        ),
+    )
     toolkit: bool = Field(
         default=True,
         description=(
@@ -61,7 +69,12 @@ VARIANTS: dict[str, dict] = {
     "default": {},
     # The base agent as upstream ships it. This is the number Crux has to beat
     # to justify existing at all.
-    "stock": {"grading_section": False, "apply_patch": False, "toolkit": False},
+    "stock": {
+        "grading_section": False,
+        "apply_patch": False,
+        "toolkit": False,
+        "survival": False,
+    },
     # Isolates each addition against default.
     "no_grading": {"grading_section": False},
     "no_apply_patch": {"apply_patch": False},
@@ -87,6 +100,7 @@ def to_mini_config(cfg: CruxConfig) -> dict:
                 grading=cfg.grading_section,
                 apply_patch=cfg.apply_patch,
                 toolkit=cfg.toolkit,
+                survival=cfg.survival,
             ),
             "step_limit": cfg.step_limit,
             "cost_limit": cfg.cost_limit,
