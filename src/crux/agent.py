@@ -92,32 +92,47 @@ class CruxAgent(MiniSweAgent):
             )
 
     async def _repair_python_too_old(self, environment: BaseEnvironment) -> None:
-        """Reinstall against a pinned interpreter, unconditionally.
+        """Reinstall against a newer interpreter only when the image's is too old.
 
         Upstream installs with a bare `uv tool install mini-swe-agent`, which
-        resolves against whatever python3 the task image ships. Several ship
-        3.10, where a dependency's `from typing import NotRequired` fails at
-        import: the agent never starts and the trial is lost outright, scoring
-        zero and not excludable from a submission. Three of twenty tasks in one
-        run went this way.
+        resolves against whatever python3 the image ships. Several ship 3.10,
+        where a dependency's `from typing import NotRequired` fails at import:
+        the agent never starts and the trial is lost outright.
 
-        An earlier version probed first and only reinstalled on failure, and
-        the error kept appearing — the probe was reporting healthy on images
-        where the run then failed. Reinstalling every time costs one uv step
-        per trial and removes a whole class of lost runs, which is a trade
-        worth making without needing to know why the probe was wrong.
+        The check is the interpreter's own version rather than a probe of the
+        installed entry point. An earlier version probed `mini --help` and
+        reported healthy on images that then failed at run time; the version
+        number cannot be wrong that way.
+
+        It also has to be a check rather than an unconditional reinstall,
+        because agent setup has its own 360s budget and downloading an
+        interpreter into every container spends enough of it to blow that
+        budget on slow images -- trading one class of lost trial for another.
         """
+        probe = await self.exec_as_agent(
+            environment,
+            command=(
+                "python3 -c 'import sys; "
+                'print("CRUX_PY_OK" if sys.version_info >= (3, 11) '
+                "else \"CRUX_PY_OLD\")' 2>/dev/null || echo CRUX_PY_OLD"
+            ),
+        )
+        output = (getattr(probe, "stdout", "") or "") + (
+            getattr(probe, "stderr", "") or ""
+        )
+        if "CRUX_PY_OLD" not in output:
+            return
+
+        self.logger.warning(
+            "task image ships python < 3.11; reinstalling mini-swe-agent "
+            "against a pinned interpreter"
+        )
         await self.exec_as_agent(
             environment,
             command='if [ -f "$HOME/.local/bin/env" ]; then . "$HOME/.local/bin/env"; '
             'else export PATH="$HOME/.local/bin:$PATH"; fi; '
-            "uv python install 3.12 >/dev/null 2>&1; "
             "uv tool install --force --python 3.12 mini-swe-agent "
-            "--with litellm --with orjson --with fastapi >/dev/null 2>&1; "
-            # Confirm the interpreter it actually resolved to, so a failure here
-            # is visible in the setup log rather than at run time.
-            "mini-swe-agent --help >/dev/null 2>&1 "
-            "&& echo CRUX_MINI_OK || echo CRUX_MINI_STILL_BROKEN",
+            "--with litellm --with orjson --with fastapi",
         )
 
     async def _install_helper(
