@@ -32,6 +32,11 @@
 # graphs and OOMs at 0.88. Note --speculative-adaptive still asserts on 0.5.18
 # ("shared logits buffer holds 192 rows but caller needs 384").
 
+# --enable-cache-report is the only way to know whether the prefix cache is
+# actually being reused. Without it usage.prompt_tokens_details comes back
+# empty and a cache hit is indistinguishable from a quiet engine -- measured
+# over 24 sessions, turn 1 took 5.81s and turns 2+ took 3.08s, which is
+# obviously the cache working, but "obviously" is not a number.
 set -euo pipefail
 CARDS="${1:?usage: sgl3.sh <card,card> <port>}"
 PORT="${2:?usage: sgl3.sh <card,card> <port>}"
@@ -58,6 +63,7 @@ exec $B/envs/sglang/bin/python -m sglang.launch_server \
   --chunked-prefill-size 8192 \
   --mem-fraction-static 0.88 \
   --cuda-graph-max-bs-decode 64 \
+  --enable-cache-report \
   --reasoning-parser qwen3 \
   --tool-call-parser qwen3_coder \
   --api-key sk-crux-iM-eVeNJmh1_crsLPfiBInwFaU410pNM
