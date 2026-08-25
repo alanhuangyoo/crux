@@ -52,7 +52,7 @@ def test_prompt_renders_every_variant(variant, capsys):
     assert cmd_prompt(parse(["prompt", "--variant", variant])) == 0
     out = capsys.readouterr().out
     # Upstream's format contract has to survive whatever the variant changes.
-    assert "```mswea_bash_command" in out
+    assert "bash tool call" in out
     assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in out
 
 
