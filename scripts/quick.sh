@@ -24,7 +24,9 @@ if [ -z "${JOBS_DIR:-}" ]; then
 fi
 
 DATASET="${DATASET:-terminal-bench/terminal-bench-2-1}"
-MODEL="${MODEL:-deepseek/deepseek-v4-flash}"
+# Free model by default: iterating on a paid one is how ~470 CNY went on runs
+# that mostly re-confirmed known failures.
+MODEL="${MODEL:-openrouter/stealth/ox-alpha}"
 VARIANT="${VARIANT:-default}"
 AGENT="${AGENT:-crux.agent:CruxAgent}"
 N_CONCURRENT="${N_CONCURRENT:-10}"

@@ -37,7 +37,12 @@ HELPERS = {"apply_patch": "apply_patch.py", "crux-tools": "crux_tool.py"}
 # dataset to measure against unless the frontier set is the explicit target.
 DEFAULT_DATASET = "terminal-bench/terminal-bench-2-1"
 FRONTIER_DATASET = "terminal-bench/terminal-bench@latest"
-DEFAULT_MODEL = "deepseek/deepseek-v4-flash"
+# Iteration runs on a free model. A development loop that costs real money per
+# turn is a loop nobody runs often enough, and most of what we needed to learn
+# came from failure modes that any competent model reproduces. Confirm a result
+# on the paid model before believing the number.
+DEFAULT_MODEL = "openrouter/stealth/ox-alpha"
+CONFIRM_MODEL = "deepseek/deepseek-v4-flash"
 
 # These declare gpus=1. Without an nvidia runtime the validation error does not
 # just fail those trials — it propagates and aborts the whole job, taking every
