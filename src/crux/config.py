@@ -63,6 +63,20 @@ class CruxConfig(BaseModel):
     cost_limit: float = Field(
         default=0.0, description="0 disables mini-swe-agent's own cost cap."
     )
+    num_retries: int = Field(
+        default=8,
+        description=(
+            "litellm retries per model call, inside the container where the "
+            "agent actually runs. A 429 there ends the trial outright -- which "
+            "scores zero and cannot be excluded -- and under the concurrency a "
+            "benchmark run needs, rate limits are routine rather than "
+            "exceptional."
+        ),
+    )
+    request_timeout: int = Field(
+        default=600,
+        description="Per-call timeout. Long enough that a slow provider is waited out.",
+    )
 
 
 VARIANTS: dict[str, dict] = {
@@ -94,6 +108,16 @@ def build_config(**kwargs) -> CruxConfig:
 def to_mini_config(cfg: CruxConfig) -> dict:
     """Render a CruxConfig as a mini-swe-agent config dict."""
     return {
+        # mini-swe-agent's own litellm settings. The agent runs inside the task
+        # container, so retry behaviour has to be configured here — anything
+        # host-side never sees its calls.
+        "model": {
+            "model_kwargs": {
+                "drop_params": True,
+                "num_retries": cfg.num_retries,
+                "timeout": cfg.request_timeout,
+            }
+        },
         "agent": {
             "system_template": SYSTEM_TEMPLATE,
             "instance_template": build_instance_template(
