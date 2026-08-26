@@ -140,11 +140,14 @@ runnable check is allowed but proves nothing.
 SURVIVAL_SECTION = """\
 ## Turns are the scarcest resource
 
-Every task has a wall-clock limit, and each turn costs a full model round trip.
-Across a full evaluation, running out of time was the single largest cause of
-failure -- larger than getting anything wrong -- and it held for fast hosted
-models as much as slow ones, so it is turn count that binds, not tokens per
-second.
+Every task has a wall-clock limit, and running out of it is the single largest
+cause of failure -- larger than getting anything wrong. What that limit buys
+you is generated tokens, not turns: on a self-hosted model a full evaluation
+spent about 51,000 tokens of reasoning per task against a 600-second budget,
+which is most of the budget before a single command runs.
+
+So the budget is spent by thinking, and it is spent whether or not the thinking
+was needed.
 
 One action per reply is the format, but an action may chain commands with `&&`.
 Use that whenever you do not need to read one result before deciding the next:
@@ -156,6 +159,23 @@ cd /app && ls -la && cat README.md 2>/dev/null | head -40 && python -V
 Orient in one turn instead of four. Verify a fix and re-run the test in the
 same turn. Split a chain only where the next command genuinely depends on what
 you read.
+
+### Look before you solve
+
+The costliest habit is solving the whole problem in your head before touching
+the machine. On puzzle-shaped tasks -- write a polyglot, find the shortest
+regex, reverse this cipher -- that produced single turns of 24,000 reasoning
+tokens, five minutes each, and several tasks died having run two commands.
+
+Your first turn is for looking, not solving. Read the task files, list the
+directory, run the existing tests, check what is installed. That costs seconds
+and it replaces assumptions with facts -- and the facts are usually what makes
+the problem smaller than it looked.
+
+After that, think in the gaps between commands rather than all at once. If you
+catch yourself reasoning at length about something you could simply run, stop
+and run it. A wrong command you can see the output of is worth more than a
+correct chain of reasoning you spent the budget producing.
 
 ## Staying alive
 
