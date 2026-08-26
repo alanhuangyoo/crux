@@ -31,6 +31,9 @@ from pathlib import Path
 
 from harbor.agents.terminus_2.terminus_2 import Terminus2
 from harbor.environments.base import BaseEnvironment
+from harbor.llms.chat import Chat
+from harbor.llms.base import LLMResponse
+from harbor.agents.terminus_2.tmux_session import TmuxSession
 from typing_extensions import override
 
 _RESOURCES = Path(__file__).parent / "resources"
@@ -80,3 +83,56 @@ class CruxTerminusAgent(Terminus2):
             target_path="/usr/local/bin/crux",
         )
         await environment.exec("chmod +x /usr/local/bin/crux")
+
+    @override
+    async def _query_llm(
+        self,
+        chat: Chat,
+        prompt: str,
+        original_instruction: str = "",
+        session: TmuxSession | None = None,
+    ) -> LLMResponse:
+        """Retry a length-truncated turn with thinking switched off.
+
+        Upstream handles truncation by telling the model it exceeded the output
+        limit and asking it to "break the request into chunks", then reissuing
+        the same call unchanged. That advice assumes the model ran long while
+        writing commands. Here it runs long while *thinking*: on puzzle-shaped
+        tasks this model produced single turns of 17,000-23,000 completion
+        tokens that never reached the `<response>` block at all, so there is
+        nothing to chunk and nothing for the salvage path to recover.
+
+        Reissuing under identical conditions then reproduces the spiral. One
+        trial spent 17 minutes on such a turn, 29 minutes on the retry, and
+        executed zero commands across both -- out of a 3600s budget.
+
+        So the retry drops `enable_thinking`. The model has already done the
+        reasoning; what it failed to do is emit a command. Forcing a direct
+        answer turns a wasted turn into a cheap one, and the transcript still
+        carries the truncated reasoning for the turn after.
+        """
+        # Upstream recurses into _query_llm to retry a truncated turn, so this
+        # override is re-entered for the retry. Depth is what distinguishes the
+        # two: the first entry is the ordinary call, anything deeper is a retry
+        # after truncation.
+        depth = getattr(self, "_crux_truncation_depth", 0)
+        saved = dict(self._llm_call_kwargs)
+        if depth:
+            body = dict(saved.get("extra_body") or {})
+            template_kwargs = dict(body.get("chat_template_kwargs") or {})
+            template_kwargs["enable_thinking"] = False
+            body["chat_template_kwargs"] = template_kwargs
+            self._llm_call_kwargs["extra_body"] = body
+
+        self._crux_truncation_depth = depth + 1
+        try:
+            return await super()._query_llm(
+                chat=chat,
+                prompt=prompt,
+                original_instruction=original_instruction,
+                session=session,
+            )
+        finally:
+            self._crux_truncation_depth = depth
+            self._llm_call_kwargs.clear()
+            self._llm_call_kwargs.update(saved)
