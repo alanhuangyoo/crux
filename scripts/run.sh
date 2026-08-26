@@ -32,6 +32,14 @@ for t in ${GPU_TASKS}; do EXCLUDE="${EXCLUDE} --exclude-task-name terminal-bench
 SP=$(ls -d "$HOME"/.local/share/uv/tools/harbor/lib/python3.*/site-packages | head -1)
 export PYTHONPATH="$(pwd)/src:${SP}"
 
+AGENT="${AGENT:-crux.agent:CruxAgent}"
+AK=""
+case "${AGENT}" in
+  crux.*) AK="--ak variant=${VARIANT}" ;;
+esac
+for kv in ${AK_EXTRA:-}; do AK="${AK} --ak ${kv}"; done
+
+echo "agent   : ${AGENT}"
 echo "dataset : ${DATASET}"
 echo "model   : ${MODEL}"
 echo "jobs    : ${JOBS_DIR}"
@@ -42,8 +50,8 @@ echo
 
 harbor run \
   --dataset "${DATASET}" \
-  --agent "crux.agent:CruxAgent" \
-  --ak "variant=${VARIANT}" \
+  --agent "${AGENT}" \
+  ${AK} \
   --model "${MODEL}" \
   ${N_TASKS:+--n-tasks "${N_TASKS}"} \
   --n-attempts "${N_ATTEMPTS}" \
