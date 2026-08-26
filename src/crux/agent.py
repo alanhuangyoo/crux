@@ -79,9 +79,19 @@ class CruxAgent(MiniSweAgent):
     async def install(self, environment: BaseEnvironment) -> None:
         await super().install(environment)
         await self._repair_python_too_old(environment)
+        # The grading section tells the agent to finish with `crux submit`
+        # whether or not the toolkit section is present, so gating the binary
+        # on `toolkit` alone left 26 of 89 tasks in one evaluation running a
+        # command that did not exist. Install it whenever any enabled section
+        # names it.
+        needs_crux = (
+            self.crux_config.toolkit
+            or self.crux_config.file_tools
+            or self.crux_config.grading_section
+        )
         wanted = {
             "apply_patch": self.crux_config.apply_patch,
-            "crux": self.crux_config.toolkit,
+            "crux": needs_crux,
         }
         for source, dest, probe, expected in HELPERS:
             name = Path(dest).name

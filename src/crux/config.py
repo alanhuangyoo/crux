@@ -49,6 +49,16 @@ class CruxConfig(BaseModel):
             "in one evaluation."
         ),
     )
+    file_tools: bool = Field(
+        default=True,
+        description=(
+            "Describe the crux file tools (read/grep/edit/write) and prefer "
+            "them over cat/sed. Off by default in lean variants because the "
+            "model does not take them up: over 206 tool calls in one "
+            "evaluation, read/grep/edit/write together accounted for under 2%, "
+            "while the prompt describing them was resent every turn."
+        ),
+    )
     toolkit: bool = Field(
         default=True,
         description=(
@@ -117,12 +127,17 @@ VARIANTS: dict[str, dict] = {
         "grading_section": False,
         "apply_patch": False,
         "toolkit": False,
+        "file_tools": False,
         "survival": False,
     },
     # Isolates each addition against default.
     "no_grading": {"grading_section": False},
     "no_apply_patch": {"apply_patch": False},
-    "no_toolkit": {"toolkit": False},
+    "no_toolkit": {"toolkit": False, "file_tools": False},
+    # Drops the file tools the model never picked up while keeping the
+    # checklist and `crux submit`, which is what turns "I think I am done"
+    # into a re-run of every bound check.
+    "lean": {"file_tools": False},
 }
 
 
@@ -163,6 +178,7 @@ def to_mini_config(cfg: CruxConfig) -> dict:
                 grading=cfg.grading_section,
                 apply_patch=cfg.apply_patch,
                 toolkit=cfg.toolkit,
+                file_tools=cfg.file_tools,
                 survival=cfg.survival,
             ),
             "step_limit": cfg.step_limit,
