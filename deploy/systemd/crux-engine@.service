@@ -14,10 +14,29 @@ After=network-online.target
 
 [Service]
 Type=exec
+# An engine started by hand outlives its unit and keeps its cards, so every
+# restart of the unit then OOMs against the copy already resident -- and
+# because Restart=on-failure never gives up, that becomes an invisible loop:
+# 683 failed restarts here, while the hand-started copy went on serving and
+# every health check said the service was fine. Clear the cards for this
+# instance's own card pair before starting, so the unit is always the only
+# engine on them.
+# Kill by port rather than by card: the command line carries --port, the cards
+# only show up as an env var the kernel will not match on. sglang forks TP
+# workers, so the whole process group has to go, not just the parent -- a
+# surviving worker keeps the memory and the next start OOMs exactly the same.
+ExecStartPre=-/bin/bash -c 'pkill -9 -f "launch_server.*--port ${PORT}\\b" || true'
+# Freeing device memory is not instant once the processes are reaped.
+ExecStartPre=/bin/sleep 8
 EnvironmentFile=/mnt/cpfs/users/xiaohuang/engines/%i.env
 ExecStart=/bin/bash -c '/mnt/cpfs/users/xiaohuang/sgl3.sh "$CARDS" "$PORT"'
 Restart=on-failure
 RestartSec=15
+# Give up rather than spin forever. An engine that cannot get its memory is a
+# configuration problem, not a transient one, and a unit in failed state is
+# visible where a restart loop is not.
+StartLimitIntervalSec=3600
+StartLimitBurst=3
 # Model load plus CUDA graph capture runs well past the default 90s.
 TimeoutStartSec=2400
 TimeoutStopSec=60
