@@ -31,7 +31,7 @@ export PATH="$B/envs/sglang/bin:$PATH"
 
 exec $B/envs/sglang/bin/python -m sglang_router.launch_router \
   --host 0.0.0.0 --port 30080 \
-  --worker-urls http://127.0.0.1:30000 http://127.0.0.1:30001 \
+  --worker-urls http://127.0.0.1:30000 \
   --policy cache_aware \
   --cache-threshold 0.3 \
   --balance-abs-threshold 16 \
