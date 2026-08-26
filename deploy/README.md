@@ -42,10 +42,38 @@ verified: 401 with no key, 401 with a wrong one, 200 with the right one. That
 check matters because the public path terminates at the router, so the key is
 the only thing standing in front of the GPUs.
 
-The public path is `:18077 -> socat -> jump 127.0.0.1:18078 -> reverse ssh
-tunnel -> :30080`. The socat hop exists because sshd binds `-R` forwards to
+The public path is `:18077 -> nginx -> jump 127.0.0.1:18078 -> reverse ssh
+tunnel -> :30080`. The nginx hop exists because sshd binds `-R` forwards to
 loopback unless `GatewayPorts` is on, and turning that on would expose every
 future forward on that box rather than just this one.
+
+It is nginx rather than socat because of where the latency is. Measured:
+
+| hop | latency |
+|---|---|
+| laptop to jump | 12 ms |
+| jump to cluster (physical) | **151 ms** |
+| inference | 67 ms |
+
+socat opens a fresh tunnel connection per client connection, so every client
+paid that 151 ms twice -- once to open, once to ask. `keepalive 32` on the
+upstream keeps connections warm, and the client's first request lands on one
+that is already open:
+
+| | socat | nginx + keepalive |
+|---|---|---|
+| first request | 375 ms | **218 ms** |
+| subsequent | 221 ms | 218 ms |
+
+218 ms is the floor for this path: 151 ms of physical distance plus inference.
+`proxy_buffering off` matters just as much -- with it on, nginx accumulates the
+whole response before flushing, and an endpoint whose whole value is streaming
+the first token immediately would deliver nothing until the last one.
+
+`devbox-46` (8.220.108.255) sits on the GPU subnet, 0.16 ms from the engine,
+and looks like it should be the better entry -- but it measured 272 ms from
+this laptop with 40% packet loss, against jump's 12 ms. Which entry wins is a
+property of where the *client* is, not where the GPUs are; jump wins here.
 
 `ServerAliveInterval` on the tunnel is not optional. Without it the tunnel
 stays "up" on the cluster side long after the jump box has dropped it from its
