@@ -57,12 +57,52 @@ if [ -n "${SSM_DTYPE:-}" ]; then
   SSM_ARGS=(--mamba-ssm-dtype "$SSM_DTYPE")
 fi
 
+# Speculative decoding with a separately trained drafter, per the published
+# SGLang recipe for this model.
+#
+# An earlier attempt used the checkpoint's own MTP head (NEXTN) and lost: it
+# drafts by running a model layer, which costs the one resource this box does
+# not have -- measured at 100% SM against 32% memory bandwidth. A trained
+# drafter reads the target's hidden states at a few tap layers instead, so it
+# buys a much higher accept rate for far less compute. That is why the recipe
+# names it and not MTP.
+#
+# Which drafter depends on the sglang build: 0.5.18 registers DFlashDraftModel
+# (DFlash 1) and DSparkDraftModel, but not DFlash2DraftModel -- loading the
+# published DFlash2 weights fails with "Cannot find model module".
+#
+# Left unset by default, because every speculative variant measured worse here,
+# and worse in proportion to how much compute the draft costs:
+#
+#   decode tok/s        conc 1   conc 8   conc 16   accept rate
+#   no speculation       140.2    128.3     119.3   --
+#   MTP (own head)        98.0     90.8       --    0.65
+#   DSpark (recipe)      101.4     73.2      46.5   0.15-0.26
+#
+# Speculation trades compute for latency, and this box has no spare compute to
+# trade -- 100% SM against 32% memory bandwidth. The published recipes that
+# recommend it were measured on H200 and RTX PRO 6000, where the balance is the
+# other way round. Same flag, opposite conclusion, because the hardware differs.
+#
+# Note SGLang pins --max-running-requests to 48 whenever speculation is on and
+# the flag is unset; set it explicitly if a higher ceiling is needed.
+SPEC_ARGS=()
+if [ -n "${SPEC_DRAFT_PATH:-}" ]; then
+  SPEC_ARGS=(
+    --speculative-algorithm "${SPEC_ALGO:-DSPARK}"
+    --speculative-draft-model-path "$SPEC_DRAFT_PATH"
+    --speculative-num-draft-tokens "${SPEC_DRAFT_TOKENS:-8}"
+    --speculative-draft-model-quantization unquant
+  )
+fi
+
 exec $B/envs/sglang/bin/python -m sglang.launch_server \
   --model-path $B/models/Qwen3.8-27B-FP8 \
   --served-model-name qwen3.8-27b \
   --host 0.0.0.0 --port "$PORT" \
   --tp "$TP" \
   --context-length 262144 \
+  --kv-cache-dtype "${KV_DTYPE:-fp8_e4m3}" \
   --chunked-prefill-size 8192 \
   --mem-fraction-static 0.88 \
   --cuda-graph-max-bs-decode 64 \
@@ -71,4 +111,5 @@ exec $B/envs/sglang/bin/python -m sglang.launch_server \
   --reasoning-parser qwen3 \
   --tool-call-parser qwen3_coder \
   "${SSM_ARGS[@]}" \
+  "${SPEC_ARGS[@]}" \
   --api-key sk-crux-iM-eVeNJmh1_crsLPfiBInwFaU410pNM
