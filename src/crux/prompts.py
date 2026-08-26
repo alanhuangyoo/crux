@@ -89,7 +89,7 @@ relative. A failed patch changes nothing, so it is safe to correct and retry.
 # needed, and a sed edit that matches the wrong line reports success. These
 # tools are the same set the mature terminal agents converge on (opencode, pi,
 # Codex), delivered through the only channel available here.
-TOOLKIT_SECTION = """\
+FILE_TOOLS_SECTION = """\
 ### File tools — prefer these over cat/grep/sed
 
 `crux read <path> [--offset N] [--limit N]` — print with line numbers, \
@@ -120,6 +120,11 @@ leaves the file half-changed.
 
 `crux write <path>` — write stdin to a file, creating parent directories.
 
+"""
+
+CHECKLIST_SECTION = """\
+### Requirement checklist
+
 The requirement checklist, with a check bound to each item:
 
 ```bash
@@ -136,6 +141,7 @@ Write the check first, watch it fail, then make it pass. An item with no \
 runnable check is allowed but proves nothing.
 
 """
+
 
 SURVIVAL_SECTION = """\
 ## Turns are the scarcest resource
@@ -252,7 +258,7 @@ I need to understand the structure of the repository first. Let me check what fi
 {{system}} {{release}} {{version}} {{machine}}
 </system_information>
 
-__TOOLKIT_SECTION____APPLY_PATCH_SECTION__## Useful command examples
+__FILE_TOOLS_SECTION____CHECKLIST_SECTION____APPLY_PATCH_SECTION__## Useful command examples
 
 ### Create a new file:
 
@@ -302,7 +308,12 @@ anything
 
 
 def build_instance_template(
-    *, grading: bool, apply_patch: bool, toolkit: bool = True, survival: bool = True
+    *,
+    grading: bool,
+    apply_patch: bool,
+    toolkit: bool = True,
+    file_tools: bool = True,
+    survival: bool = True,
 ) -> str:
     """Assemble the instance template for a variant.
 
@@ -317,11 +328,13 @@ def build_instance_template(
             "__GRADING_SECTION__", GRADING_SECTION + "\n" if grading else ""
         )
         .replace("__SURVIVAL_SECTION__", SURVIVAL_SECTION if survival else "")
-        .replace("__TOOLKIT_SECTION__", TOOLKIT_SECTION if toolkit else "")
+        .replace("__FILE_TOOLS_SECTION__", FILE_TOOLS_SECTION if file_tools else "")
+        .replace("__CHECKLIST_SECTION__", CHECKLIST_SECTION if toolkit else "")
         # The caveat only makes sense when the tool it points at is installed;
         # `stock` must not reference something that is not there.
         .replace(
-            "__SED_CAVEAT__", " (last resort — prefer `crux edit`)" if toolkit else ""
+            "__SED_CAVEAT__",
+            " (last resort — prefer `crux edit`)" if file_tools else "",
         )
         .replace(
             "__APPLY_PATCH_SECTION__", APPLY_PATCH_SECTION + "\n" if apply_patch else ""

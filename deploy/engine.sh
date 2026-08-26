@@ -60,6 +60,18 @@ export TORCHINDUCTOR_CACHE_DIR=/scratch/crux-inductor-$SAFE
 export TRITON_CACHE_DIR=/scratch/crux-triton-$SAFE
 mkdir -p "$TORCHINDUCTOR_CACHE_DIR" "$TRITON_CACHE_DIR"
 
+# The SSM state dtype is a runtime activation, not the weights -- those stay
+# FP8 either way. It defaults to float32 from the model config, and on SM90
+# nothing forces that (the bf16 requirement is an SM100-only guard), while H20
+# runs bf16 at roughly 2.5x its fp32 rate. Since decode here is compute-bound
+# rather than bandwidth-bound -- measured at 100% SM against 32% memory -- the
+# state math is worth trying in bf16. Left unset by default until accuracy is
+# checked; long sequences are where a narrower state would drift.
+SSM_ARGS=()
+if [ -n "${SSM_DTYPE:-}" ]; then
+  SSM_ARGS=(--mamba-ssm-dtype "$SSM_DTYPE")
+fi
+
 exec $B/envs/sglang/bin/python -m sglang.launch_server \
   --model-path $B/models/Qwen3.8-27B-FP8 \
   --served-model-name qwen3.8-27b \
@@ -73,4 +85,5 @@ exec $B/envs/sglang/bin/python -m sglang.launch_server \
   --chat-template $B/models/qwen3.8-27b-openai-effort.jinja \
   --reasoning-parser qwen3 \
   --tool-call-parser qwen3_coder \
+  "${SSM_ARGS[@]}" \
   --api-key sk-crux-iM-eVeNJmh1_crsLPfiBInwFaU410pNM

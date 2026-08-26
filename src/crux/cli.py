@@ -26,7 +26,7 @@ from crux import __version__
 # config and yaml are imported lazily by the commands that need them. `report`
 # only reads job directories, and requiring pydantic to do that means it fails
 # on any box where the analysis would otherwise work fine.
-VARIANTS = ('default', 'no_apply_patch', 'no_grading', 'no_toolkit', 'stock')
+VARIANTS = ('default', 'lean', 'no_apply_patch', 'no_grading', 'no_toolkit', 'stock')
 
 RESOURCES = Path(__file__).parent / "resources"
 HELPERS = {"apply_patch": "apply_patch.py", "crux-tools": "crux_tool.py"}
