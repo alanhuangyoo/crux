@@ -1,7 +1,55 @@
-# 4 张 H20 上跑 Terminal-Bench:方案
+# 4 张 H20 上跑 Terminal-Bench:结论
 
-> 数据来自 h20-44 卡 0/2/6/7 的实测,每个配置独占四张卡串行测量。
-> 待补:Flash-Next 的八组配置(下载中)。
+用 **Qwen3.8-27B(稠密,FP8)+ SGLang TP=4 + crux-terminus**。
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+python -m sglang.launch_server \
+  --model-path /mnt/cpfs/users/xiaohuang/models/Qwen3.8-27B-FP8 \
+  --served-model-name qwen3.8-27b \
+  --tp 4 \
+  --context-length 262144 \
+  --chunked-prefill-size 8192 \
+  --mem-fraction-static 0.88 \
+  --cuda-graph-max-bs-decode 64 \
+  --reasoning-parser qwen3 \
+  --tool-call-parser qwen3_coder \
+  --host 0.0.0.0 --port 30000
+```
+
+对外服务再加 `--kv-cache-dtype fp8_e4m3`。跑评测:
+
+```bash
+AGENT=crux.terminus_agent:CruxTerminusAgent \
+MODEL=openai/qwen3.8-27b N_CONCURRENT=12 ./scripts/run.sh
+```
+
+## 不要用这些
+
+| | 实测 |
+|---|---|
+| 投机解码(MTP / ReplaySSM / DSpark) | 五种配置全为负,最好的仍慢 20% |
+| TP2 + DP2 | 掉 34% |
+| torch.compile | OOM(inductor 编译期显存与 KV 池冲突) |
+| Qwen3.8-Flash-Next | 见下 |
+
+## 为什么不是 Flash-Next
+
+它在纸面上正合适:176B 总参数只激活 6B,省算力费显存,而这张卡恰好算力弱显存足。
+实际连踩五道坎,前四道都解决了,第五道没有:
+
+| 障碍 | 结果 |
+|---|---|
+| 发布版引擎无此架构(sglang 0.5.18 / vLLM 0.28 均无 `Qwen4Exp`) | 用官方 `qwen4-main` 分支解决 |
+| 131 个权重分片中 39 个残缺 | 逐字节比对 manifest 后修复 |
+| FP8 专家维度 640 不能被量化块 128 整除,任何 TP 都切不开 | `--disable-shared-experts-fusion` 绕开 |
+| 后台进程被 ssh 会话回收 | systemd 前台托管 |
+| **EP 模式下 NCCL 集合通信超时**(加载 11 分钟后被杀) | **未解决** |
+
+官方 cookbook 自己标的是 `sglang_version: "qwen4-main @ e17062a1d"` 和 "day-0 preview"
+—— 上游还在分支上开发。拿它刷榜,环境风险大于它可能带来的速度收益,而且跑通之后
+还得重新验证精度与 agent 兼容性。等进正式发布版再评估。
+
 
 ## Agent:crux-terminus
 
