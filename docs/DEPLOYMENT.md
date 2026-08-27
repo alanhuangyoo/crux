@@ -21,8 +21,20 @@ python -m sglang.launch_server \
 
 ```bash
 AGENT=crux.terminus_agent:CruxTerminusAgent \
-MODEL=openai/qwen3.8-27b N_CONCURRENT=12 ./scripts/run.sh
+MODEL=openai/qwen3.8-27b N_CONCURRENT=8 ./scripts/run.sh
 ```
+
+**并发用 8，不要更高。** 这不是吞吐的取舍，是分数的取舍：TB 的每任务超时是
+墙钟，并发越高每个任务分到的 token/s 越少，超时越多。实测同一部署、同一 agent、
+同一模型，全量 89 任务：
+
+| 并发 | 单流 tok/s | 分数 | 解出 | 超时 | 耗时 |
+|---|---|---|---|---|---|
+| 24 | 50.7 | 51.69% | 46/89 | 33% | 6h03m |
+| **8** | **~88–105** | **60.67%** | **54/89** | 28% | **3h56m** |
+
+低并发同时更准**且**更快——超时的任务必然占满整个预算，解出来的提前还槽位。
+详见 [ABLATION.md](ABLATION.md)。
 
 ## 不要用这些
 
