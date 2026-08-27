@@ -56,7 +56,19 @@ class CruxTerminusAgent(Terminus2):
         # published runs use, and the template Crux extends is the XML one.
         kwargs.setdefault("parser_name", "xml")
         self._crux_tools = bool(kwargs.pop("crux_tools", True))
+        max_tokens = kwargs.pop("max_tokens", None)
         super().__init__(*args, **kwargs)
+        # Upstream sends no output cap at all, which leaves a thinking turn
+        # unbounded. Measured on this deployment, `write-compressor` spent its
+        # entire 900s budget on four turns averaging 19,500 completion tokens
+        # and never reached a fifth; `dna-assembly` generated 168,829 tokens
+        # across 19 turns and timed out the same way.
+        #
+        # Without a cap the truncation retry below is unreachable -- it fires
+        # on finish_reason=length, and nothing can be truncated when nothing
+        # is limited. Setting this is what arms it.
+        if max_tokens is not None:
+            self._llm_call_kwargs["max_tokens"] = int(max_tokens)
 
     @override
     def _get_prompt_template_path(self) -> Path:
