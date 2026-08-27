@@ -25,22 +25,49 @@ own data shows a **17%** swing for one model between two harnesses.
 
 ## Status
 
-Phase 0 complete — harness verified on the dev box (oracle 2/2, mean 1.000).
-Evaluation runs on the x86-64 dev machine, not this Mac; see docs/ENVIRONMENT.md.
+Full runs are working. Current best on Terminal-Bench 2.1 (89 tasks, the 4
+GPU-only ones excluded), against a self-hosted Qwen3.8-27B FP8 on four H20s:
 
-- [x] Harbor installed, Docker verified, oracle smoke test green on dev
-- [ ] Phase 1 — baseline: existing agent + DeepSeek, small subset
-- [x] Phase 2 — Crux v1: model client + ATIF trajectory emission
-- [ ] Phase 3 — iterate on prompts / tools / context management
-- [ ] Phase 4 — full run (all tasks x >=5 trials), `--upload`, submit PR
+| | concurrency | score | solved | timeouts | wall clock |
+|---|---|---|---|---|---|
+| baseline | 24 | 51.69% | 46/89 | 33% | 6h03m |
+| **current** | **8** | **60.67%** | **54/89** | 28% | **3h56m** |
+
+Concurrency is a scoring setting, not a throughput one: the benchmark's
+per-task timeout is wall clock, so every extra concurrent trial takes tokens
+per second away from all the others. Lowering it is worth 9 points *and* two
+hours — a timed-out task holds its slot for the full budget by definition,
+while a solved one gives the slot back early. See [docs/ABLATION.md](docs/ABLATION.md).
+
+Of the 35 remaining failures, roughly 19 are bound by generation speed
+(generation alone consumes most of the task budget) and 13 are not — wrong
+answers, or trials that sat waiting on a command. That bounds what more speed
+can buy.
+
+- [x] Harbor installed, Docker verified, oracle smoke test green
+- [x] Crux v1 on mini-swe-agent: model client + ATIF trajectory emission
+- [x] Crux v2 on Terminus 2 — live tmux session instead of one command per turn
+- [x] Full 89-task runs, with a failure taxonomy per run
+- [ ] Close the gap to the model card's 73.0
+- [ ] Full run at >=5 trials per task, `--upload`, submit PR
 
 ## What this is
 
-Crux is **mini-SWE-agent with a modified prompt and a better file-editing
-tool**, not a new agent. The base sits on the public leaderboard at 76.2%; its
-loop, parser, trajectory export and format contract are upstream's. Writing
-that machinery from scratch was tried first and reached 4.62% — the gap is the
-iterations already baked into a mature agent, not prompt tuning.
+Crux is a **modified scaffold, not a new agent** — the loop, parser,
+trajectory export and format contract are upstream's. Writing that machinery
+from scratch was tried first and reached 4.62%; the gap is the iterations
+already baked into a mature agent, not prompt tuning.
+
+There are two, and which base you sit on outweighs every prompt change measured
+here:
+
+- `crux-terminus` (`terminus_agent.py`) — subclasses Harbor's **Terminus 2**,
+  which drives a live tmux session and sends keystrokes. This is what the runs
+  above use. It adds Crux's all-or-nothing scoring instruction and `crux
+  submit`, and nothing else.
+- `crux` (`agent.py`) — the original, on **mini-swe-agent**: one shell command
+  per turn, read its stdout. Kept for comparison. It cannot express entering an
+  interactive session at all, which decides whole tasks (`qemu-alpine-ssh`).
 
 Around it is the part that actually drives the work: a pipeline that turns a
 run into an answer to *why did we score that*. Every change in this repo came
@@ -49,15 +76,19 @@ from a distinction the leaderboard number does not make.
 ## Layout
 
 ```
-src/crux/agent.py      CruxAgent — subclasses Harbor's MiniSweAgent
+src/crux/terminus_agent.py  CruxTerminusAgent — subclasses Harbor's Terminus 2
+src/crux/agent.py      CruxAgent — the earlier mini-swe-agent base
 src/crux/prompts.py    the modified templates; upstream's format contract intact
 src/crux/config.py     knobs and ablation variants (`stock` = upstream prompt)
 src/crux/analysis.py   job dir -> scores, failure taxonomy, completion fractions
 scripts/analyze.py     report on one run, or diff two
 scripts/provision.sh   set up an eval node (every setting has a run behind it)
 scripts/run.sh         run Crux; scripts/smoke.sh runs oracle to check the box
+deploy/                engine, router and launch scripts for the eval box
+docs/DEPLOYMENT.md     the four-card serving recipe, and what not to use
 docs/ENVIRONMENT.md    what broke and why — btrfs, address pools, GPU tasks
-docs/ABLATION.md       the questions each variant answers
+docs/ABLATION.md       every measurement, including the ones that overturned
+                       an earlier conclusion in this file
 ```
 
 ## Tests
@@ -66,9 +97,13 @@ The ATIF trajectory is the artifact Harbor's CI validates a submission
 against, so it is covered by tests that run Harbor's own validator:
 
 ```bash
-HARBOR_SP=$(dirname $(dirname $(readlink -f $(which harbor))))/lib/python3.14/site-packages
-PYTHONPATH="src:$HARBOR_SP" .venv/bin/python -m pytest tests/ -q
+HARBOR_SP=$(ls -d ~/.local/share/uv/tools/harbor/lib/python3.*/site-packages | head -1)
+PYTHONPATH="src:$HARBOR_SP" uv run --with pytest python -m pytest tests/ -q
 ```
+
+118 tests. Several are guards rather than unit tests — `stock` must render
+upstream's prompt untouched, and the agent name must stay `crux-terminus`,
+because a silently substituted agent has already invalidated a full run here.
 
 ## Quickstart
 
