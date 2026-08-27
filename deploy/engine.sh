@@ -30,12 +30,25 @@ set -euo pipefail
 CARDS="${1:?usage: sgl3.sh <card,card> <port>}"
 PORT="${2:?usage: sgl3.sh <card,card> <port>}"
 B=/mnt/cpfs/users/xiaohuang
+# envs/sglang was destroyed by an editable install of the qwen4 branch whose
+# source tree was later deleted, so `import sglang` fails there and any engine
+# started from it dies immediately. envs/sglang-rel is a clean `sglang[all]`
+# that resolved to the same released 0.5.18. Override with VENV= if needed.
+VENV="${VENV:-$B/envs/sglang-rel}"
 
 export CUDA_VISIBLE_DEVICES="$CARDS"
 export HF_HOME=$B/cache/hf
-# SGLang shells out to `ninja` when compiling CUDA graphs, so the venv bin has
-# to be on PATH -- importing the module is not enough.
-export PATH="$B/envs/sglang/bin:$PATH"
+# Both SGLang's CUDA-graph compilation and flashinfer's sampling module shell
+# out to `ninja` by name, so the venv bin has to be on PATH -- invoking
+# bin/python directly does not put it there.
+#
+# The flashinfer one is the dangerous half: it JIT-builds on the first
+# *sampled* token, which is after startup, after /health_generate returns 200,
+# and after any greedy (temperature=0) probe has answered correctly. An engine
+# missing this passes every check and then dies on the benchmark's first real
+# request. Validate a new environment with temperature > 0, not with a greedy
+# smoke test.
+export PATH="$VENV/bin:$PATH"
 # Compilation caches are keyed to the driver and GPU, so they stay on this
 # machine's local disk rather than the shared mount.
 SAFE=${CARDS//,/_}
@@ -96,7 +109,7 @@ if [ -n "${SPEC_DRAFT_PATH:-}" ]; then
   )
 fi
 
-exec $B/envs/sglang/bin/python -m sglang.launch_server \
+exec $VENV/bin/python -m sglang.launch_server \
   --model-path $B/models/Qwen3.8-27B-FP8 \
   --served-model-name qwen3.8-27b \
   --host 0.0.0.0 --port "$PORT" \
