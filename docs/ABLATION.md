@@ -448,6 +448,52 @@ verify 命令就会去验证那个误解，然后通过。本工具 docstring �
 一个自己写检查项的 agent，无法用检查项发现自己理解错了任务。要拦下这 9 个，
 需要一个**不来自这个 agent** 的信息源（任务自带的测试、第二个模型、人）。
 
+#### 不是「检查太浅」——恰恰相反
+
+看判分测试的通过/失败名字，模式极其整齐：`test_result_exists` 过，
+`test_data_matches` 挂；`test_hello_file_exists` 过，`test_hello_file_content` 挂。
+第一反应是模型只验存在不验内容，于是该去约束检查的**形状**。
+
+统计模型实际写的 `--verify` 命令，结论是反的：
+
+| | 只验存在 | 比对内容 |
+|---|---|---|
+| 解出的 42 个 | 5% | 46% |
+| **答错的 9 个** | **0%** | **77%** |
+
+答错的那批**检查写得比解出的更严**。它们长这样：
+
+```
+grep -qx 'flag{gc0d3 iz ch4LLenGiNg}' /app/out.txt
+grep -qx 'intfloat/multilingual-e5-large' /app/result.txt
+test "$(cat /app/result.txt)" = "HumanEval: Benchmarking Python code..."
+```
+
+每一条都是精确的内容断言——断言的是**模型自己认定的那个答案**。模型决定答案是
+X，把 X 写进文件，再写一条「文件内容等于 X」的检查，通过。检查是同义反复：它
+验证的是「模型写了模型决定的东西」。
+
+所以任何对检查形状的约束都无效，因为模型写的任何检查都嵌着它自己的结论。问题
+不在浅，在**期望值和答案出自同一次推理**。
+
+### 这 9 个是模型能力，不是脚手架
+
+逐个核对判分测试和终端录像之后：
+
+| 任务 | 实际情况 |
+|---|---|
+| `mteb-leaderboard` | 环境里只有 Dockerfile，没有任何数据。题目要「2025 年 8 月斯堪的纳维亚 MTEB 榜首」——**纯知识题** |
+| `mteb-retrieve` | 真的 `import mteb`、跑了 SentenceTransformer 和余弦相似度、无网络错误。**算了，名次取错** |
+| `query-optimize` | 6 个测试过 5 个，只挂在 `test_compare_golden_vs_solution_runtime`。**SQL 正确但太慢** |
+| `sanitize-git-repo` | 1/3，`test_no_other_files_changed` 过，删除与替换都错 |
+| `video-processing` | 3/5，文件在、能 import，跳跃帧号算错 |
+
+这些是模型试了、算了、错了，不是脚手架没给它机会。
+
+**于是三类失败没有一类是脚手架缺陷**：18 个受生成速度限制、6 个在等容器里的
+命令、9 个是模型能力。在这个模型加这张卡上，提示词与工具的调优已经到顶——
+本文档前半部分那些 ±10 分的提示词消融，现在回头看都是在天花板下面挪动。
+
 ### 不是原因的那些
 
 - **prompt 侧开销**：前缀缓存命中率 94–95%，每生成 1 个 token 只需 prefill
