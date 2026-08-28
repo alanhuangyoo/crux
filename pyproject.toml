@@ -11,7 +11,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.6"]
+# pytest-asyncio: the wait-policy tests drive the agent's async command path
+# directly, which is the only way to assert on how send_keys was called.
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.6"]
 # `crux solve` shells out to mini-swe-agent's runner; the benchmark path
 # installs it into the task container instead and does not need it here.
 local = ["mini-swe-agent>=1.0"]
@@ -28,3 +30,8 @@ packages = ["src/crux"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.pytest.ini_options]
+# Async tests are plain `async def` with a marker; auto mode keeps them from
+# silently passing as skipped coroutines.
+asyncio_mode = "auto"
