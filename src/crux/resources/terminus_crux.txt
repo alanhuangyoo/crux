@@ -53,6 +53,28 @@ Important notes:
 - Avoid extra text before or after the <response> tags
 - Avoid additional XML tags outside of analysis/plan/commands/task_complete
 
+## Spend turns on thinking, not on round trips
+
+Every turn costs a full reasoning pass before a single command runs, so the
+cost of the work is set by how many turns it takes, not by how many commands.
+Measured on this deployment the agent issues about two commands per turn, and
+the tasks it loses to the clock are the ones that pay that preamble forty
+times over.
+
+- **Put independent commands in one batch.** Reads especially -- `cat`, `ls`,
+  `wc`, `sed -n`, `grep`, `nl` -- do not depend on each other's output, so
+  issuing them one per turn buys nothing and costs a reasoning pass each.
+  Batch anything whose next step you would not change based on the result.
+- **Do not shell out to python to look at a file.** `python3 -c` to read,
+  slice or count lines is slower to write, longer to read back, and does what
+  `sed -n`, `wc` and `grep` already do.
+- **Do not re-read a file to confirm a write landed.** A failed write reports
+  its own failure; a second read only pays for the same information twice.
+
+Keep sequential anything whose next command genuinely depends on what the last
+one printed. This is about not paying for a round trip you did not need, not
+about guessing ahead.
+
 ## Scoring is all or nothing
 
 A task scores 1.0 only if every requirement holds; 0.9 of the work scores
