@@ -41,6 +41,29 @@ from typing_extensions import override
 # behaviour. Set from the measured waste: the losses are all long waits.
 _BLOCKING_THRESHOLD_SEC = 10.0
 
+
+def _can_block(keystrokes: str) -> bool:
+    """Whether appending a completion signal to these keystrokes is safe.
+
+    TmuxSession implements blocking by stripping the trailing newline and
+    appending `; tmux wait -S done`. For a single-line command that is
+    harmless. For a heredoc it is not: the keystrokes end with the delimiter
+    line, so the append turns `EOF` into `EOF; tmux wait -S done`, which no
+    longer terminates the heredoc. The shell sits at its continuation prompt
+    until the outer timeout fires.
+
+    That is not hypothetical -- it is what a first version of this did. A pane
+    from that run reads `> PY; tmux wait -S done`, the `>` being the shell
+    still waiting for a terminator, and the run tracked about fifteen points
+    below the unmodified agent before it was stopped.
+
+    So blocking is restricted to a single line with no heredoc operator.
+    Anything else keeps upstream's fixed sleep, which is always correct if
+    sometimes wasteful.
+    """
+    body = keystrokes.rstrip("\r\n")
+    return "<<" not in body and "\n" not in body and "\r" not in body
+
 _RESOURCES = Path(__file__).parent / "resources"
 
 
@@ -133,7 +156,9 @@ class CruxTerminusAgent(Terminus2):
         for command in commands:
             duration = command.duration_sec
             try:
-                if duration >= _BLOCKING_THRESHOLD_SEC:
+                if duration >= _BLOCKING_THRESHOLD_SEC and _can_block(
+                    command.keystrokes
+                ):
                     await session.send_keys(
                         command.keystrokes,
                         block=True,
