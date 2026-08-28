@@ -109,3 +109,37 @@ async def test_every_command_in_a_batch_is_dispatched():
         session,
     )
     assert [c["block"] for c in session.calls] == [False, True, False]
+
+
+# A completion signal is appended by stripping the trailing newline and adding
+# "; tmux wait -S done". These cases decide whether that is safe to do.
+
+def test_heredoc_never_blocks():
+    # `EOF` would become `EOF; tmux wait -S done` and stop terminating the
+    # heredoc; the shell then sits at its continuation prompt until the outer
+    # timeout. A run with this bug tracked ~15 points below the baseline.
+    from crux.terminus_agent import _can_block
+    assert not _can_block("python3 << 'PY'\nprint(1)\nPY\n")
+    assert not _can_block("cat > /app/f.py <<'EOF'\nx = 1\nEOF\n")
+
+
+def test_multiline_paste_never_blocks():
+    from crux.terminus_agent import _can_block
+    assert not _can_block("cd /app\nmake\n")
+
+
+def test_single_line_command_blocks():
+    from crux.terminus_agent import _can_block
+    assert _can_block("apt-get install -y r-base\n")
+    assert _can_block("make -j8")
+
+
+async def test_long_heredoc_keeps_the_fixed_sleep():
+    # The threshold alone is not enough: this is exactly the shape that gets a
+    # long duration, and exactly the shape that breaks.
+    session = _FakeSession()
+    await _ExecStub()._execute_commands(
+        [_Cmd("python3 << 'PY'\nimport time\ntime.sleep(1)\nPY\n", 120.0)], session
+    )
+    assert session.calls[0]["block"] is False
+    assert session.calls[0]["min"] == 120.0
