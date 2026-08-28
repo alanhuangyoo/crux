@@ -29,12 +29,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from harbor.agents.terminus_2.terminus_2 import Terminus2
+from harbor.agents.terminus_2.terminus_2 import Command, Terminus2
 from harbor.environments.base import BaseEnvironment
 from harbor.llms.chat import Chat
 from harbor.llms.base import LLMResponse
 from harbor.agents.terminus_2.tmux_session import TmuxSession
 from typing_extensions import override
+
+# Above this, a wait is worth completing early; below it, upstream's fixed sleep
+# is already close enough that the tmux round trip is not worth the change in
+# behaviour. Set from the measured waste: the losses are all long waits.
+_BLOCKING_THRESHOLD_SEC = 10.0
 
 _RESOURCES = Path(__file__).parent / "resources"
 
@@ -95,6 +100,63 @@ class CruxTerminusAgent(Terminus2):
             target_path="/usr/local/bin/crux",
         )
         await environment.exec("chmod +x /usr/local/bin/crux")
+
+    @override
+    async def _execute_commands(
+        self,
+        commands: list[Command],
+        session: TmuxSession,
+    ) -> tuple[bool, str]:
+        """Let a long wait end when the command ends.
+
+        Upstream always calls `send_keys(block=False, min_timeout_sec=duration)`,
+        and the non-blocking path sleeps the full duration whether or not the
+        command is still running. The blocking path exists in TmuxSession -- it
+        appends a tmux completion signal and returns the moment the command
+        finishes -- and nothing calls it.
+
+        The model is told to prefer short durations and it mostly does, but on
+        the turns where it decides "this may take a while" the difference is the
+        task. `adaptive-rejection-sampler` said exactly that before an apt
+        install, then sat for 633 seconds of a 900-second budget on an install
+        measured at 31, generated 596 tokens in total, and timed out. Across the
+        run, timed-out trials spent 35% of their elapsed time neither generating
+        tokens nor producing terminal output.
+
+        Only long waits are converted. Below the threshold the fixed sleep costs
+        little and upstream's semantics -- partial output, model polls again --
+        are what the prompt describes, so they are left alone. `_prepare_keys`
+        already falls back to non-blocking when the keystrokes do not execute a
+        command, which is what keeps this safe for entering a REPL or an ssh
+        session.
+        """
+        for command in commands:
+            duration = command.duration_sec
+            try:
+                if duration >= _BLOCKING_THRESHOLD_SEC:
+                    await session.send_keys(
+                        command.keystrokes,
+                        block=True,
+                        max_timeout_sec=duration,
+                    )
+                else:
+                    await session.send_keys(
+                        command.keystrokes,
+                        block=False,
+                        min_timeout_sec=duration,
+                    )
+            except TimeoutError:
+                return True, self._timeout_template.format(
+                    timeout_sec=duration,
+                    command=command.keystrokes,
+                    terminal_state=self._limit_output_length(
+                        await session.get_incremental_output()
+                    ),
+                )
+
+        return False, self._limit_output_length(
+            await session.get_incremental_output()
+        )
 
     @override
     async def _query_llm(
