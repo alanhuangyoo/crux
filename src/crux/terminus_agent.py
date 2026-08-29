@@ -36,6 +36,8 @@ from harbor.llms.base import LLMResponse
 from harbor.agents.terminus_2.tmux_session import TmuxSession
 from typing_extensions import override
 
+from crux.prompts import build_terminus_template
+
 # Above this, a wait is worth completing early; below it, upstream's fixed sleep
 # is already close enough that the tmux round trip is not worth the change in
 # behaviour. Set from the measured waste: the losses are all long waits.
@@ -85,7 +87,18 @@ class CruxTerminusAgent(Terminus2):
         kwargs.setdefault("parser_name", "xml")
         self._crux_tools = bool(kwargs.pop("crux_tools", True))
         max_tokens = kwargs.pop("max_tokens", None)
+        # Whether to keep the `crux submit` gate. Separable from the scoring
+        # section because the evidence against them differs: see prompts.py.
+        self._crux_submit = str(kwargs.pop("submit_gate", True)).lower() not in (
+            "false", "0", "no",
+        )
         super().__init__(*args, **kwargs)
+        if self._crux_tools:
+            self._prompt_template = build_terminus_template(
+                self._get_upstream_template(),
+                scoring=True,
+                submit=self._crux_submit,
+            )
         # Upstream sends no output cap at all, which leaves a thinking turn
         # unbounded. Measured on this deployment, `write-compressor` spent its
         # entire 900s budget on four turns averaging 19,500 completion tokens
@@ -98,11 +111,15 @@ class CruxTerminusAgent(Terminus2):
         if max_tokens is not None:
             self._llm_call_kwargs["max_tokens"] = int(max_tokens)
 
-    @override
-    def _get_prompt_template_path(self) -> Path:
-        if not self._crux_tools:
-            return super()._get_prompt_template_path()
-        return _RESOURCES / "terminus_crux.txt"
+    def _get_upstream_template(self) -> str:
+        """Upstream's own template text, read fresh rather than copied.
+
+        The crux sections are composed onto this in __init__. A frozen copy of
+        the whole prompt used to ship in resources/; it matched upstream
+        exactly, which is precisely the failure mode -- it would have gone on
+        matching a prompt harbor had since changed, with nothing to notice.
+        """
+        return super()._get_prompt_template_path().read_text()
 
     @override
     async def setup(self, environment: BaseEnvironment) -> None:

@@ -143,3 +143,50 @@ async def test_long_heredoc_keeps_the_fixed_sleep():
     )
     assert session.calls[0]["block"] is False
     assert session.calls[0]["min"] == 120.0
+
+
+# The Terminus template is composed from upstream's at runtime rather than
+# shipped as a copy. These pin the composition so a harbor upgrade that changes
+# the base prompt cannot silently leave crux on the old one.
+
+UPSTREAM = """You are an AI assistant.
+
+Some upstream instructions here.
+
+Task Description:
+{instruction}
+
+Current terminal state:
+{terminal_state}
+"""
+
+
+def test_composed_template_keeps_upstream_and_footer_last():
+    from crux.prompts import build_terminus_template
+    out = build_terminus_template(UPSTREAM)
+    assert "Some upstream instructions here." in out
+    # The task and the live terminal must stay at the end, where the model reads
+    # them; inserting after them would bury the actual work.
+    assert out.rstrip().endswith("{terminal_state}")
+    assert out.index("all or nothing") < out.index("Task Description:")
+
+
+def test_submit_gate_is_separable_from_scoring():
+    from crux.prompts import build_terminus_template
+    out = build_terminus_template(UPSTREAM, submit=False)
+    assert "crux submit" not in out
+    assert "all or nothing" in out
+
+
+def test_disabling_both_reproduces_upstream_exactly():
+    # Reproducing upstream byte-for-byte is what makes a stock comparison mean
+    # anything.
+    from crux.prompts import build_terminus_template
+    out = build_terminus_template(UPSTREAM, scoring=False, submit=False)
+    assert out.strip() == UPSTREAM.strip()
+
+
+def test_missing_footer_is_an_error_not_a_silent_append():
+    from crux.prompts import build_terminus_template
+    with pytest.raises(ValueError):
+        build_terminus_template("a template harbor changed beyond recognition")

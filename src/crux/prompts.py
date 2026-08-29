@@ -340,3 +340,68 @@ def build_instance_template(
             "__APPLY_PATCH_SECTION__", APPLY_PATCH_SECTION + "\n" if apply_patch else ""
         )
     )
+
+
+# --- Terminus-path sections -------------------------------------------------
+#
+# Composed onto upstream's template at runtime rather than shipped as a copy of
+# it. A frozen copy was in the tree and matched upstream exactly, which is the
+# problem: it would go on matching a prompt harbor had since changed, silently.
+
+TERMINUS_SCORING_SECTION = """## Scoring is all or nothing
+
+A task scores 1.0 only if every requirement holds; 0.9 of the work scores
+zero. Before you finish, enumerate the requirements from the task description
+as a checklist and prove each one with a command whose output you can see --
+not from memory of having done it earlier.
+
+Across one full evaluation this agent reached 80% or more of a task's checks
+on 52 tasks and scored on 47 of them. The gap is almost never a requirement
+nobody attempted; it is one that was met earlier and quietly broken since, or
+one that was assumed rather than checked.
+"""
+
+TERMINUS_SUBMIT_SECTION = """## Finish by verifying, not by deciding
+
+Run `crux submit` as your last command instead of declaring completion
+yourself. It re-runs every check you bound with `crux todo add ... --verify`,
+and only reports success if all of them pass; if anything is open or has
+regressed it says so and you can keep working.
+
+    crux todo add "rejects malformed input" --verify "./filter < bad.txt; test $? -ne 0"
+    crux todo done 1        # re-runs the check, refuses to close if it fails
+    crux submit             # re-runs everything, then finishes
+
+Only set <task_complete>true</task_complete> after `crux submit` has confirmed
+it. Declaring completion is the judgement this agent gets wrong most often.
+"""
+
+# Upstream ends every template with this; the crux sections go before it so the
+# task and the live terminal stay last, where the model reads them.
+_TERMINUS_FOOTER = "Task Description:"
+
+
+def build_terminus_template(
+    upstream: str,
+    scoring: bool = True,
+    submit: bool = True,
+) -> str:
+    """Insert the crux sections into upstream's Terminus template.
+
+    `submit` is separable from `scoring` because they are not the same claim.
+    The scoring section states a fact about the grader -- partial work scores
+    zero -- which nothing has contradicted. The submit section directs the model
+    through `crux submit`, and across a full run that gate passed on all nine
+    wrong answers and caught none of them, so it needs to be testable on its
+    own.
+    """
+    head, sep, tail = upstream.partition(_TERMINUS_FOOTER)
+    if not sep:
+        raise ValueError("upstream Terminus template has no task-description footer")
+    parts = [head.rstrip(), ""]
+    if scoring:
+        parts += [TERMINUS_SCORING_SECTION.strip(), ""]
+    if submit:
+        parts += [TERMINUS_SUBMIT_SECTION.strip(), ""]
+    parts += [sep + tail]
+    return "\n".join(parts)
