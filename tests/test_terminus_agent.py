@@ -226,3 +226,22 @@ def test_effort_and_max_tokens_coexist():
     agent = _EffortStub(reasoning_effort="medium", max_tokens=32768)
     assert agent._llm_call_kwargs["max_tokens"] == 32768
     assert agent._llm_call_kwargs["extra_body"]["chat_template_kwargs"]["reasoning_effort"] == "medium"
+
+
+def test_verification_guidance_ranks_external_sources_first():
+    # Borrowed from codex's "Validating your work": verify against what the task
+    # already ships before asserting a value you chose. Measured motivation: all
+    # nine wrong answers in a full run passed their own checks, and 77% of those
+    # checks were exact assertions of the answer the model had already decided.
+    from crux.prompts import TERMINUS_SUBMIT_SECTION as T
+    i_ships = T.index("Something the task already ships")
+    i_second = T.index("independent second derivation")
+    i_assert = T.index("an assertion of the value you believe is right")
+    assert i_ships < i_second < i_assert
+
+
+def test_verification_guidance_names_the_tautology():
+    # The failure mode is that the weakest check reads as the most convincing,
+    # so the prompt has to say so rather than just ordering the list.
+    from crux.prompts import TERMINUS_SUBMIT_SECTION as T
+    assert "confirms you wrote what you decided" in T

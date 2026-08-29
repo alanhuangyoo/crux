@@ -372,6 +372,21 @@ regressed it says so and you can keep working.
     crux todo done 1        # re-runs the check, refuses to close if it fails
     crux submit             # re-runs everything, then finishes
 
+A check is only worth as much as its source of truth. Prefer, in this order:
+
+1. Something the task already ships -- a test suite, a build, a linter, a
+   reference implementation, the program's own error paths. Run it. Start with
+   whatever is closest to what you changed, then widen.
+2. An independent second derivation -- compute the answer a different way, or
+   from a different input, and compare the two.
+3. Only if neither exists: an assertion of the value you believe is right.
+
+The third kind is the weakest, and it is the one that feels most convincing.
+`--verify "grep -qx 'flag{...}' out.txt"` passes whenever the file contains what
+you put there; it confirms you wrote what you decided, not that you decided
+correctly. Every wrong answer in a full evaluation passed its own checks, and
+most of them were of exactly this shape.
+
 Only set <task_complete>true</task_complete> after `crux submit` has confirmed
 it. Declaring completion is the judgement this agent gets wrong most often.
 """
