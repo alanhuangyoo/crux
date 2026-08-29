@@ -430,6 +430,55 @@ SGLang TP=4，agent 为 crux-terminus，评测跑在引擎同一台机器上。
 这个模型在 H20 上的生成速度，和 Terminal-Bench 按墙钟计时，这两件事叠在一起。
 同样的模型、同样的脚手架，换一台生成快 3 倍的机器，那 19 个失败大部分会翻面。
 
+## 所有测量都跑在模型最贵的档位上，而这件事没人说过
+
+Qwen3.8 有官方的 `reasoning_effort`，文档写着「adjust reasoning depth and
+**control cost**」，三档：`xhigh`（默认）、`medium`、`low`。
+
+Terminus 不发任何 chat-template 参数，所以引擎用模型自带默认值——**`xhigh`**。
+本文档里的每一个数字，60.67%、所有消融、三个失败池，**都是在最高档测的**。
+
+实测（每档 8 次，模型卡推荐的 temperature=1.0，同一道难推理题）：
+
+| effort | 生成 token 中位 | 思维链字符 |
+|---|---|---|
+| **`xhigh`（默认）** | **12,000——八次全部撞上限** | **46,560** |
+| `medium` | 3,944（33%） | 7,350（16%） |
+| `low` | 3,018（25%） | 4,758 |
+
+`xhigh` 每一次都撞到 12,000 的截断上限，**真实值比这更高**。medium 是它的三分之
+一生成量、六分之一思维链。
+
+### 为什么这正是需要的量级
+
+三次尝试跑出来的结构：18 个任务生成占掉预算 55–110%，25 个抛硬币任务里 22 次
+失败是超时，而**同一任务失败那次比成功那次多生成 2–4 倍**（`db-wal-recovery`
+22,800 → 89,654）。生成量降到三分之一，那 18 个会落到预算的 18–36%。
+
+### 参照：codex 的默认是 Medium
+
+codex 的 `ReasoningEffort` 枚举有 None / Minimal / Low / Medium / High / XHigh /
+Max / Ultra 八档，`#[default]` 标在 **Medium** 上（`protocol/src/openai_models.rs`）。
+没有任何模型被钉在 medium 以上，也没有动态升档逻辑——静态默认中档，用户可调。
+
+一个生产编码 agent 面对同样的选择取中档，而这里一直在跑最高档，且是无意的。
+
+### 但预期不是稳赢
+
+模型卡自己写着：
+
+> In multi-turn agentic tasks, lower reasoning effort **does not always reduce
+> overall task completion time**. …it can lead to insufficient analysis, more
+> failures, and repeated retries, which may **increase** total latency and token
+> consumption.
+
+这正是此前测 `low` 时发生的事：分数从 60% 掉到 50%，总耗时反而从 28m28s 涨到
+34m22s。官方文档预测了那次失败。`medium` 夹在**没测过的默认**和**测过会亏的
+low** 之间，这是它值得单独测的全部理由。
+
+`preserve_thinking` 同样查了，**不测**：模型卡说它「especially beneficial for
+agent scenarios」且能改善 KV 缓存利用率，而本部署实测缓存命中 94%，与之一致。
+
 ## 三次尝试把 89 个任务分成三个池子
 
 第一次用 `--n-attempts 3` 跑全量（267 个试次，62.55%）。分数只是副产品，
