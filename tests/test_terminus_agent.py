@@ -190,3 +190,39 @@ def test_missing_footer_is_an_error_not_a_silent_append():
     from crux.prompts import build_terminus_template
     with pytest.raises(ValueError):
         build_terminus_template("a template harbor changed beyond recognition")
+
+
+class _EffortStub(CruxTerminusAgent):
+    """Reproduces __init__'s kwarg handling without a live model."""
+
+    def __init__(self, **kwargs):
+        self._llm_call_kwargs = {}
+        max_tokens = kwargs.pop("max_tokens", None)
+        reasoning_effort = kwargs.pop("reasoning_effort", None)
+        if max_tokens is not None:
+            self._llm_call_kwargs["max_tokens"] = int(max_tokens)
+        if reasoning_effort is not None:
+            body = dict(self._llm_call_kwargs.get("extra_body") or {})
+            tk = dict(body.get("chat_template_kwargs") or {})
+            tk["reasoning_effort"] = str(reasoning_effort)
+            body["chat_template_kwargs"] = tk
+            self._llm_call_kwargs["extra_body"] = body
+
+
+def test_reasoning_effort_reaches_the_chat_template():
+    agent = _EffortStub(reasoning_effort="medium")
+    body = agent._llm_call_kwargs["extra_body"]
+    assert body["chat_template_kwargs"]["reasoning_effort"] == "medium"
+
+
+def test_omitting_effort_leaves_the_model_default():
+    # The default is xhigh, and reproducing it is what keeps every run measured
+    # before this comparable.
+    agent = _EffortStub()
+    assert "extra_body" not in agent._llm_call_kwargs
+
+
+def test_effort_and_max_tokens_coexist():
+    agent = _EffortStub(reasoning_effort="medium", max_tokens=32768)
+    assert agent._llm_call_kwargs["max_tokens"] == 32768
+    assert agent._llm_call_kwargs["extra_body"]["chat_template_kwargs"]["reasoning_effort"] == "medium"

@@ -87,6 +87,7 @@ class CruxTerminusAgent(Terminus2):
         kwargs.setdefault("parser_name", "xml")
         self._crux_tools = bool(kwargs.pop("crux_tools", True))
         max_tokens = kwargs.pop("max_tokens", None)
+        reasoning_effort = kwargs.pop("reasoning_effort", None)
         # Whether to keep the `crux submit` gate. Separable from the scoring
         # section because the evidence against them differs: see prompts.py.
         self._crux_submit = str(kwargs.pop("submit_gate", True)).lower() not in (
@@ -110,6 +111,26 @@ class CruxTerminusAgent(Terminus2):
         # is limited. Setting this is what arms it.
         if max_tokens is not None:
             self._llm_call_kwargs["max_tokens"] = int(max_tokens)
+        # Qwen3.8's own knob for reasoning depth and cost. It defaults to
+        # `xhigh`, the most expensive setting, and every run measured here has
+        # been at that default without ever saying so.
+        #
+        # Measured on this deployment, 8 samples a level at temperature 1.0 on
+        # one hard problem: xhigh hit a 12,000-token cap on all eight and would
+        # have kept going, with a median 46,560 characters of chain of thought.
+        # medium produced 3,944 tokens and 7,350 characters -- a third of the
+        # generation and a sixth of the reasoning.
+        #
+        # The model card warns that lowering this can cost more than it saves in
+        # multi-turn agentic work, through thinner analysis and more retries,
+        # and an earlier test of `low` on the mini path reproduced exactly that.
+        # `medium` sits between the untested default and the tested loss.
+        if reasoning_effort is not None:
+            body = dict(self._llm_call_kwargs.get("extra_body") or {})
+            template_kwargs = dict(body.get("chat_template_kwargs") or {})
+            template_kwargs["reasoning_effort"] = str(reasoning_effort)
+            body["chat_template_kwargs"] = template_kwargs
+            self._llm_call_kwargs["extra_body"] = body
 
     def _get_upstream_template(self) -> str:
         """Upstream's own template text, read fresh rather than copied.
