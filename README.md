@@ -25,30 +25,61 @@ own data shows a **17%** swing for one model between two harnesses.
 
 ## Status
 
-Full runs are working. Current best on Terminal-Bench 2.1 (89 tasks, the 4
-GPU-only ones excluded), against a self-hosted Qwen3.8-27B FP8 on four H20s:
+Terminal-Bench 2.1, 89 tasks (the 4 GPU-only ones excluded), self-hosted
+Qwen3.8-27B FP8 on four H20s. Six full runs, the last four at three attempts
+per task:
 
-| | concurrency | score | solved | timeouts | wall clock |
+| arm | trials | solved | timeout | wrong | tokens/trial |
 |---|---|---|---|---|---|
-| baseline | 24 | 51.69% | 46/89 | 33% | 6h03m |
-| **current** | **8** | **60.67%** | **54/89** | 28% | **3h56m** |
+| concurrency 24 | 89 | 51.7% | 33% | — | — |
+| concurrency 8 | 87 | 62.1% | 27.6% | 10.3% | 54,297 |
+| + output cap 16384 | 87 | 52.9% | 33.3% | 13.8% | 42,250 |
+| xhigh effort | 263 | **63.5%** | 27.8% | 8.7% | 51,153 |
+| medium effort | 265 | 62.3% | **19.2%** | 18.5% | **23,351** |
+| BF16 weights | 255 | 61.6% | 29.4% | 9.0% | 54,636 |
+| medium + verify | 265 | 62.6% | 23.3% | 13.9% | 24,740 |
 
-Concurrency is a scoring setting, not a throughput one: the benchmark's
-per-task timeout is wall clock, so every extra concurrent trial takes tokens
-per second away from all the others. Lowering it is worth 9 points *and* two
-hours — a timed-out task holds its slot for the full budget by definition,
-while a solved one gives the slot back early. See [docs/ABLATION.md](docs/ABLATION.md).
+**The score stopped separating the arms; the failure split did not.** The last
+four sit between 61.6% and 63.5%, all inside a variance floor measured at ±2–3
+points — a fifth of the tasks change outcome between runs of the *same*
+configuration. Read as means they are one result. Read as failure splits they
+are four different things, and only one bucket is reachable from this repo:
+timeouts are capped by 129 tok/s on this hardware, wrong answers are not.
 
-Of the 35 remaining failures, roughly 19 are bound by generation speed
-(generation alone consumes most of the task budget) and 13 are not — wrong
-answers, or trials that sat waiting on a command. That bounds what more speed
-can buy.
+Two findings carried the work. Concurrency turned out to be a scoring setting
+rather than a throughput one — the per-task timeout is wall clock, so every
+extra concurrent trial takes tokens per second from all the others — and
+lowering it from 24 to 8 was worth 9 points *and* two hours, because a
+timed-out task holds its slot for the full budget while a solved one gives it
+back early. And `reasoning_effort`, which every earlier measurement had been
+taking at the model's most expensive default without saying so, is a seesaw:
+halving generation cuts timeouts by 8 points and adds 8 points of wrong
+answers, moving failures from a bucket bounded by hardware into one bounded by
+the prompt.
 
-- [x] Harbor installed, Docker verified, oracle smoke test green
-- [x] Crux v1 on mini-swe-agent: model client + ATIF trajectory emission
+### The environment is not the gap
+
+Checked directly, because it is the first thing to suspect: the dataset is the
+official package pinned by sha256, the runner is harbor 0.22.0, grading is each
+task's own tests (absent from the container during the agent phase), and
+per-task timeouts carry no override or multiplier. Running the reference
+solutions scores **22 of 24**. Both failures are tasks that rotted —
+`build-pov-ray` fetches source from a 1993 archive that now answers 403, and
+`mcmc-sampling-stan` pins StanHeaders but lets RcppParallel float to a version
+that requires a cmake its image does not ship. Neither is reachable from here,
+and together they are worth about two points.
+
+What is left is hardware. Of the failures, generation alone consumes 55–110% of
+the task budget on the timeout-bound ones, against a measured ceiling of 129
+tok/s for TP=4 on an H20 — speculative decoding lost in five configurations,
+TP=8 was worse, torch.compile ran out of memory. Terminal-Bench times by the
+wall clock and an H20 has roughly 15% of an H100's compute.
+
+- [x] Harbor installed, Docker verified, oracle re-checked on TB 2.1
 - [x] Crux v2 on Terminus 2 — live tmux session instead of one command per turn
-- [x] Full 89-task runs, with a failure taxonomy per run
-- [ ] Close the gap to the model card's 73.0
+- [x] Six full runs with a failure taxonomy and a measured variance floor
+- [x] Quantisation, chat template, sampling params and effort default ruled out
+- [ ] Stock Terminus baseline — the scaffold the model card's 73.0 used
 - [ ] Full run at >=5 trials per task, `--upload`, submit PR
 
 ## What this is
