@@ -382,10 +382,10 @@ A check is only worth as much as its source of truth. Prefer, in this order:
 3. Only if neither exists: an assertion of the value you believe is right.
 
 The third kind is the weakest, and it is the one that feels most convincing.
-`--verify "grep -qx 'flag{...}' out.txt"` passes whenever the file contains what
-you put there; it confirms you wrote what you decided, not that you decided
-correctly. Every wrong answer in a full evaluation passed its own checks, and
-most of them were of exactly this shape.
+A check like `--verify "grep -qx 'the-answer-you-chose' out.txt"` passes
+whenever the file contains what you put there; it confirms you wrote what you
+decided, not that you decided correctly. Every wrong answer in a full
+evaluation passed its own checks, and most of them were of exactly this shape.
 
 Only set <task_complete>true</task_complete> after `crux submit` has confirmed
 it. Declaring completion is the judgement this agent gets wrong most often.

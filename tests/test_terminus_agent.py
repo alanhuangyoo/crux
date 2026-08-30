@@ -243,5 +243,33 @@ def test_verification_guidance_ranks_external_sources_first():
 def test_verification_guidance_names_the_tautology():
     # The failure mode is that the weakest check reads as the most convincing,
     # so the prompt has to say so rather than just ordering the list.
+    #
+    # Whitespace-normalised: the assertion is about what the prompt says, and
+    # rewrapping a paragraph must not break it. It did once.
     from crux.prompts import TERMINUS_SUBMIT_SECTION as T
-    assert "confirms you wrote what you decided" in T
+    flat = " ".join(T.split())
+    assert "confirms you wrote what you decided" in flat
+
+
+def test_composed_template_survives_str_format():
+    # Terminus renders the template with .format(instruction=..., terminal_state=...),
+    # so any literal brace in a crux section is read as a placeholder. A `{...}`
+    # in an example check raised IndexError on every trial: twenty scored zero
+    # before the arm was stopped. Formatting it here is the only check that
+    # catches it, because nothing else in the suite renders the template.
+    from crux.prompts import build_terminus_template
+    out = build_terminus_template(UPSTREAM)
+    rendered = out.format(instruction="do the thing", terminal_state="$ ")
+    assert "do the thing" in rendered
+    assert "$ " in rendered
+
+
+def test_every_section_survives_str_format_alone():
+    # Per section, so a failure names which one carries the stray brace.
+    from crux import prompts
+    for name in ("TERMINUS_SCORING_SECTION", "TERMINUS_SUBMIT_SECTION"):
+        text = getattr(prompts, name)
+        try:
+            text.format()
+        except (IndexError, KeyError) as e:
+            raise AssertionError(f"{name} has an unescaped brace: {e}") from e
