@@ -155,3 +155,48 @@ overlayfs 叠在 btrfs 上会破坏写入内容，apt 下载的 InRelease 签名
 定位过程中我一度以为是自己加的 privoxy 代理导致的（它确实是可疑对象——
 全局代理有可能破坏下载）。撤掉代理后 GPG 错误依旧，才继续往下查到文件系统。
 代理最终也没保留：它只为 1 个 fedora 任务而设，风险面却覆盖全部任务，不划算。
+
+## oracle 在 TB 2.1 上的复核：22/24，两个失败都是任务腐化
+
+「分数低是不是环境有问题」只有一个直接的答法：跑 oracle。它执行任务自带的
+参考解，不调模型，所以满分意味着容器、判分、数据都是好的，不满分就是环境
+坏了。此前那次 oracle 全绿是在旧机器、旧数据集（74 任务）上做的，
+**TB 2.1 加 h20-45 从没验过**。
+
+25 个任务，**22 个满分，2 个失败**。逐个查完根因，两个都不归咎于本部署：
+
+**`build-pov-ray`** — 参考解正确安装了 build-essential、gcc、make、wget（日志
+里全部 Setting up 成功），然后去取源码：
+
+```
+https://www.povray.org/ftp/pub/povray/Old-Versions/Official-2.2/POVDOC.TAR.Z
+HTTP request sent, awaiting response... 403 Forbidden
+```
+
+DNS 解析成功、TLS 握手成功、连接建立成功，**服务器主动拒绝**。任务依赖一个
+1993 年的站点仍然愿意提供下载。
+
+**`mcmc-sampling-stan`** — 参考解锁了 `StanHeaders 2.32.10`，却让传递依赖
+`RcppParallel` 浮动：
+
+```
+RcppParallel (NA -> 6.2.1) [CRAN]
+error: RcppParallel requires cmake (>= 3.5); cmake was not found
+```
+
+装到最新的 6.2.1，而新版要求 cmake，镜像的 Dockerfile 里没有，参考解也没装。
+**任务写的时候能跑，上游发新版之后就编不过了。**
+
+两者都是**外部世界随时间变化**造成的，今天任何人跑都会失败。它们对总分的影响
+约 2 个百分点，解释不了 63.5% 与模型卡 73.0 之间的差距。
+
+### 这次复核同时确认的
+
+| 项 | 结果 |
+|---|---|
+| 数据集 | 官方包，sha256 锁定 `7d7bdc1c…` |
+| 框架 | harbor 0.22.0 官方版 |
+| 判分 | 任务自带 `test.sh` 加 pytest，agent 阶段不在容器里 |
+| 每任务超时 | 无 override、无 multiplier，用数据集自带值 |
+| apt 与网络 | 参考解装了几十个包全部成功 |
+| **参考解** | **22/24 满分** |
