@@ -25,6 +25,15 @@
 #
 # 16 and 1.25 keep affinity for real prefix hits while making it structurally
 # impossible for one engine to idle through a backlog on the other.
+#
+# THE THRESHOLD MUST BE WELL BELOW THE CONCURRENCY IT GOVERNS. 16 was chosen
+# against 96 concurrent requests. Reused unchanged for a 16-concurrent
+# benchmark it is unreachable -- the largest possible gap between two engines
+# is the concurrency itself -- so balancing never fires. Measured in exactly
+# that configuration: one engine at load 14, the other at 0, four cards at 0%
+# utilisation, and every task running at the single-engine speed the second
+# engine was added to avoid. Set it to a small fraction of N_CONCURRENT (2 at
+# 16) rather than carrying this number across.
 set -euo pipefail
 B=/mnt/cpfs/users/xiaohuang
 export PATH="$B/envs/sglang/bin:$PATH"
