@@ -479,7 +479,58 @@ low** 之间，这是它值得单独测的全部理由。
 `preserve_thinking` 同样查了，**不测**：模型卡说它「especially beneficial for
 agent scenarios」且能改善 KV 缓存利用率，而本部署实测缓存命中 94%，与之一致。
 
-### 原版 terminus-2：我的改动值 +6.6 分
+### 七轮的并集：天花板是 86.5%，不是 63.5%
+
+单轮分数把两件事混在一起：这个模型解不了的题，和这一轮的配置解不了的题。
+把七轮的解出取并集就能分开：
+
+| | 任务数 | |
+|---|---|---|
+| **至少被某一轮解出过** | **77/89** | **86.5%** |
+| 七轮全部失败 | 12/89 | 13.5% |
+
+最好的单轮（xhigh 三次）拿到 70 个。**另有 7 个被别的配置解出过而它没有：**
+
+| 任务 | 被哪些轮解出 |
+|---|---|
+| `adaptive-rejection-sampler` | medium、bf16 |
+| `caffe-cifar-10` | medium+verify、bf16 |
+| `gcode-to-text` | medium、bf16 |
+| `install-windows-3.11` | medium |
+| `torch-pipeline-parallelism` | medium |
+| `query-optimize` | medium+verify、原版 terminus |
+| `model-extraction-relu-logits` | 四轮解出过，偏偏 xhigh 没有 |
+
+**前五个全是 medium 系解出的**，正是「低 effort 救超时」那一批。跷跷板在这里
+第三次显形：xhigh 丢掉的，恰好是 medium 救回来的。
+
+七轮里没有任何一轮有「独占解出」超过 2 个的（medium 有 2 个，其余为 0），说明
+这些不是运气，是配置与任务的匹配。
+
+### 这改变了对上限的判断
+
+此前记的是「25 个抛硬币的任务，全部转化上限 80%」，以及「按预算分两档估计
+65.6%」。并集说明**按任务选配置的真实上界是 86.5%**，而 65.6% 那个估计之所以
+保守，是因为它只有两档、只用预算一个信号。
+
+也就是说 **75 分是够得着的，但不是靠调出一个更好的全局配置**——单轮的上限就是
+70/89 = 78.7%，而且要恰好每个任务都走对。真正的空间在**按任务选档**。
+
+实现障碍仍在：agent 看不到自己的时间预算（`AgentContext` 只有结果字段，
+`run()` 的签名也不带）。但现在多了一个信号——89 个任务 × 7 种配置的实测结果，
+不必只依赖预算这一个代理变量。用它做选择需要留出验证集，否则就是在同一批数据
+上拟合。
+
+### 12 个真正够不着的
+
+`chess-best-move`、`dna-assembly`、`extract-moves-from-video`、
+`filter-js-from-html`、`gpt2-codegolf`、`make-doom-for-mips`、
+`make-mips-interpreter`、`path-tracing`、`path-tracing-reverse`、
+`raman-fitting`、`regex-chess`、`write-compressor`。
+
+七轮、上千试次，一次都没解出过。这是这个模型加这张卡的硬边界，占 13.5%。
+
+## 原版 terminus-2：我的改动值 +6.6 分
 
 模型卡的 73.0 标注的是 `Terminal Bench 2.1 (Terminus)`——括号里那个词是原版
 Terminus 2，而本仓库跑的一直是改过的版本。这是与 73.0 之间最后一个未验证的
