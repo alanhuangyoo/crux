@@ -137,3 +137,41 @@ def test_the_default_dataset_is_the_one_the_board_scores():
     from crux.cli import DEFAULT_DATASET
 
     assert DEFAULT_DATASET == "terminal-bench/terminal-bench@4.0.0"
+
+
+def test_bench_runs_the_agent_the_measurements_used():
+    # cmd_bench hardcoded crux.agent:CruxAgent -- the mini-swe-agent base -- while
+    # every number in the repo came from the Terminus one, the same mismatch
+    # `crux solve` had.
+    assert parse(["bench"]).agent == "crux.terminus_agent:CruxTerminusAgent"
+
+
+def test_bench_can_run_a_comparison_arm():
+    # Same dataset, concurrency and attempts, different scaffold: that is the
+    # only shape in which the difference between two runs means the scaffold.
+    a = parse(["bench", "-a", "claude-code", "--ak", "model_api=openai-completions"])
+    assert a.agent == "claude-code"
+    assert a.agent_kwarg == ["model_api=openai-completions"]
+
+
+def test_variant_is_not_passed_to_a_foreign_agent(monkeypatch):
+    # `variant` is ours; claude-code and pi reject an unknown agent kwarg rather
+    # than ignoring it, so passing it always would break every comparison arm.
+    import crux.cli as cli
+
+    # setdefault would keep only the first call and make the second assertion
+    # read a stale command line, which is how this test first "failed" against
+    # working code.
+    calls = []
+    monkeypatch.setattr(cli.shutil, "which", lambda _: "/usr/bin/harbor")
+    monkeypatch.setattr(cli.subprocess, "call", lambda cmd, env=None: calls.append(cmd) or 0)
+    cli.cmd_bench(parse(["bench", "-a", "claude-code"]))
+    cli.cmd_bench(parse(["bench"]))
+    foreign, ours = calls
+    assert "variant=default" not in foreign
+    assert "variant=default" in ours
+
+
+def test_upload_is_opt_in():
+    assert parse(["bench"]).upload is False
+    assert parse(["bench", "--upload"]).upload is True

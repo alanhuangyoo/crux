@@ -190,11 +190,16 @@ def cmd_bench(args) -> int:
     # on local disk, not on a shared network mount.
     jobs_dir = args.jobs_dir or ("/scratch/crux-jobs" if Path("/scratch").is_dir() else "jobs")
 
+    # Every measurement in this repo came from the Terminus base; the
+    # mini-swe-agent one that used to be hardcoded here scores about 3 points
+    # lower and cannot express entering an ssh session at all. `--agent` exists
+    # so a comparison arm -- claude-code, pi -- runs through the same command
+    # with the same dataset, concurrency and attempts, which is the only shape
+    # in which the difference between two runs means the scaffold.
     command = [
         "harbor", "run",
         "--dataset", args.dataset,
-        "--agent", "crux.agent:CruxAgent",
-        "--ak", f"variant={args.variant}",
+        "--agent", args.agent,
         "--model", args.model,
         "--n-attempts", str(args.attempts),
         "--n-concurrent", str(args.concurrent),
@@ -202,6 +207,14 @@ def cmd_bench(args) -> int:
         "--env", args.env,
         "--yes",
     ]
+    # variant is ours; claude-code and pi reject an unknown agent kwarg rather
+    # than ignoring it, so passing it always would break every comparison arm.
+    if args.agent.startswith("crux."):
+        command += ["--ak", f"variant={args.variant}"]
+    for kv in args.agent_kwarg or []:
+        command += ["--ak", kv]
+    if args.upload:
+        command += ["--upload"]
     if args.tasks:
         command += ["--n-tasks", str(args.tasks)]
     if args.env_file and Path(args.env_file).exists():
@@ -216,8 +229,10 @@ def cmd_bench(args) -> int:
     env = dict(os.environ)
     env["PYTHONPATH"] = f"{src}{os.pathsep}{env.get('PYTHONPATH', '')}"
 
-    print(f"variant={args.variant}  model={args.model}  concurrent={args.concurrent}")
-    print(f"jobs   ={jobs_dir}")
+    print(f"agent  ={args.agent}"
+          f"{'  variant=' + args.variant if args.agent.startswith('crux.') else ''}")
+    print(f"model  ={args.model}  concurrent={args.concurrent}  attempts={args.attempts}")
+    print(f"jobs   ={jobs_dir}{'  (uploads to Harbor Hub when it finishes)' if args.upload else ''}")
     if not args.include_gpu_tasks:
         print(
             f"skipped={', '.join(gpu_tasks)} (need a GPU)"
@@ -401,7 +416,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--include-gpu-tasks",
         action="store_true",
-        help="do not skip the four GPU tasks (needs an nvidia runtime)",
+        help="do not skip the GPU tasks (needs a GPU-capable sandbox: modal, "
+             "daytona, beam or opensandbox -- harbor's docker env has none)",
+    )
+    # The benchmarked agent by default. Anything else is a comparison arm.
+    p.add_argument(
+        "-a",
+        "--agent",
+        default="crux.terminus_agent:CruxTerminusAgent",
+        help="harbor agent to run (default: the benchmarked one; try "
+             "claude-code or pi for a scaffold comparison)",
+    )
+    p.add_argument(
+        "--ak",
+        "--agent-kwarg",
+        dest="agent_kwarg",
+        action="append",
+        metavar="K=V",
+        help="extra agent kwarg, repeatable (e.g. --ak model_api=openai-completions)",
+    )
+    p.add_argument(
+        "--upload",
+        action="store_true",
+        help="upload the finished job to Harbor Hub (private by default)",
     )
     p.set_defaults(func=cmd_bench)
 
