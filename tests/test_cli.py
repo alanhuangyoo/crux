@@ -185,3 +185,24 @@ def test_the_default_model_is_the_one_every_measurement_used():
 
     assert DEFAULT_MODEL == "openai/qwen3.8-27b"
     assert parse(["bench"]).model == DEFAULT_MODEL
+
+
+def test_the_agent_budget_can_be_opened_and_says_so(capsys, monkeypatch):
+    # 2.1's ~900s median makes 76% of this hardware's failures wall clock rather
+    # than wrong answers, so tuning against it measures the engine. Opening the
+    # budget fixes that and forfeits submittability -- harbor requires 1.0 -- so
+    # the run has to announce it rather than quietly produce an unusable number.
+    import crux.cli as cli
+
+    calls = []
+    monkeypatch.setattr(cli.shutil, "which", lambda _: "/usr/bin/harbor")
+    monkeypatch.setattr(cli.subprocess, "call", lambda cmd, env=None: calls.append(cmd) or 0)
+
+    cli.cmd_bench(parse(["bench"]))
+    assert "--agent-timeout-multiplier" not in calls[-1]
+    assert "NOT submittable" not in capsys.readouterr().out
+
+    cli.cmd_bench(parse(["bench", "--agent-timeout-multiplier", "8"]))
+    cmd = calls[-1]
+    assert cmd[cmd.index("--agent-timeout-multiplier") + 1] == "8.0"
+    assert "NOT submittable" in capsys.readouterr().out
