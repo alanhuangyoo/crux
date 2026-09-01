@@ -355,10 +355,25 @@ zero. Before you finish, enumerate the requirements from the task description
 as a checklist and prove each one with a command whose output you can see --
 not from memory of having done it earlier.
 
-Across one full evaluation this agent reached 80% or more of a task's checks
-on 52 tasks and scored on 47 of them. The gap is almost never a requirement
-nobody attempted; it is one that was met earlier and quietly broken since, or
-one that was assumed rather than checked.
+Measured here: across eight graded tasks the suites ran 206 tests, this agent
+passed 176 of them, and scored on none -- every task failed one to three tests
+of its own set. 94 of 97 on one. 11 of 12 on another. The work was nearly
+right and the finishing was not.
+
+The same runs show why. The agent bound 35 checks of its own against those 206
+tests: five checks for a 97-test suite, one for a thirteen. A checklist
+covering a sixth of what is graded will pass and mean nothing. One check per
+stated requirement is the floor, not the target, because each requirement is
+graded several times over:
+
+  - the ordinary case, and the empty, zero, single-element and boundary ones
+  - the numeric tolerance the task actually names, not a value that looks close
+  - the failure path: malformed input rejected, the exit code it must return
+  - what must NOT change: state left untouched, ordering preserved
+
+The gap is almost never a requirement nobody attempted. It is one met earlier
+and quietly broken since, one assumed rather than checked, or an edge of a
+requirement that was only ever checked down the middle.
 """
 
 TERMINUS_SUBMIT_SECTION = """## Finish by verifying, not by deciding
@@ -371,6 +386,11 @@ regressed it says so and you can keep working.
     crux todo add "rejects malformed input" --verify "./filter < bad.txt; test $? -ne 0"
     crux todo done 1        # re-runs the check, refuses to close if it fails
     crux submit             # re-runs everything, then finishes
+
+Before running it, state plainly which behaviours the task asks for that you
+have bound no check for. "all 3 item(s) verified" describes your checklist, not
+the task -- it was reported verbatim on tasks that then failed their suites. If
+that list is not empty, bind those checks rather than finish.
 
 Only set <task_complete>true</task_complete> after `crux submit` has confirmed
 it. Declaring completion is the judgement this agent gets wrong most often.
