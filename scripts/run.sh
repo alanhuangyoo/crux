@@ -25,9 +25,21 @@ VARIANT="${VARIANT:-default}"
 # up would contend with the training job that owns all eight cards. Excluding
 # them is not cosmetic: the validation error propagates and aborts the whole
 # job, so leaving them in cancels every other trial in flight (docs/ENVIRONMENT.md).
+#
+# The names are qualified by dataset org, so a hardcoded "terminal-bench/" prefix
+# silently matches nothing on any other dataset -- it looked like the exclusion
+# was active through 88 trials of a terminal-bench-pro run where it was a no-op.
+# Pro happens to declare gpus=0 on all 200 tasks so nothing was at risk, but the
+# next dataset may not. Derive the org, and leave the list empty when it does not
+# apply rather than pretending to exclude.
 GPU_TASKS="${GPU_TASKS:-exam-pdf-eval fp8-rmsnorm-gemm jax-speedrun-gpu math-eval-grader}"
+ORG="${DATASET%%/*}"
 EXCLUDE=""
-for t in ${GPU_TASKS}; do EXCLUDE="${EXCLUDE} --exclude-task-name terminal-bench/${t}"; done
+if [ "${ORG}" = "terminal-bench" ]; then
+  for t in ${GPU_TASKS}; do EXCLUDE="${EXCLUDE} --exclude-task-name ${ORG}/${t}"; done
+else
+  GPU_TASKS="(none -- ${ORG} tasks declare no GPU requirement)"
+fi
 
 SP=$(ls -d "$HOME"/.local/share/uv/tools/harbor/lib/python3.*/site-packages | head -1)
 export PYTHONPATH="$(pwd)/src:${SP}"
