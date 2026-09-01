@@ -48,6 +48,7 @@ FRONTIER_DATASET = "terminal-bench/terminal-bench@latest"
 # old advice to iterate on a cheap model and confirm on an expensive one. What
 # costs now is the four cards, and the engine's aggregate throughput stops
 # climbing at about 48 concurrent streams (see docs/ABLATION.md).
+DEFAULT_AGENT = "crux.terminus_agent:CruxTerminusAgent"
 DEFAULT_MODEL = "openai/qwen3.8-27b"
 # Hosted models, for a cross-check that the result is not an artefact of this
 # particular deployment.
@@ -323,6 +324,8 @@ def cmd_bench(args) -> int:
         command += ["--upload"]
     if args.agent_timeout_multiplier != 1.0:
         command += ["--agent-timeout-multiplier", str(args.agent_timeout_multiplier)]
+    for task in getattr(args, "task", None) or []:
+        command += ["--include-task-name", f"{args.dataset.split('/', 1)[0]}/{task}"]
     if args.tasks:
         command += ["--n-tasks", str(args.tasks)]
     if args.env_file and Path(args.env_file).exists():
@@ -380,37 +383,37 @@ QUICK_CONTESTED = (
 
 
 def cmd_quick(args) -> int:
-    """Run the development slice rather than the whole benchmark."""
-    if shutil.which("harbor") is None:
-        print("harbor is not installed.", file=sys.stderr)
-        return 1
+    """Run the development slice rather than the whole benchmark.
 
-    jobs_dir = "/scratch/crux-jobs" if Path("/scratch").is_dir() else "jobs"
-    command = [
-        "harbor", "run",
-        "--dataset", DEFAULT_DATASET,
-        "--agent", "crux.agent:CruxAgent",
-        "--ak", f"variant={args.variant}",
-        "--model", args.model,
-        "--n-concurrent", str(args.concurrent),
-        "--jobs-dir", jobs_dir,
-        "--env", "docker",
-        "--yes",
-    ]
-    for task in QUICK_CANARIES + QUICK_CONTESTED:
-        command += ["--include-task-name", f"terminal-bench/{task}"]
-    if Path(".env").exists():
-        command += ["--env-file", ".env"]
+    A preset over `crux bench`, not a third way of building the same command
+    line. The two earlier copies drifted from each other and from this one: all
+    three hardcoded a `terminal-bench/` prefix, and this one still named
+    crux.agent:CruxAgent -- the base the measurements rejected -- while pointing
+    at a default dataset whose task names its canary list does not contain, so
+    `--include-task-name` would have matched nothing at all.
 
-    src = str(Path(__file__).resolve().parent.parent)
-    env = dict(os.environ)
-    env["PYTHONPATH"] = f"{src}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    The slice is pinned to 2.1 because that is where the canaries were chosen
+    and measured; the names do not exist in 4.0.
+    """
+    slice_args = argparse.Namespace(**vars(args))
+    slice_args.dataset = LEGACY_DATASET
+    slice_args.task = list(QUICK_CANARIES + QUICK_CONTESTED)
+    slice_args.attempts = getattr(args, "attempts", 1)
+    slice_args.tasks = None
+    slice_args.env = "docker"
+    slice_args.env_file = ".env"
+    slice_args.jobs_dir = getattr(args, "jobs_dir", None)
+    slice_args.include_gpu_tasks = False
+    slice_args.upload = False
+    slice_args.allow_concurrent_jobs = getattr(args, "allow_concurrent_jobs", False)
+    slice_args.agent_timeout_multiplier = getattr(args, "agent_timeout_multiplier", 1.0)
+    slice_args.agent_kwarg = getattr(args, "agent_kwarg", None)
+    slice_args.agent = getattr(args, "agent", None) or DEFAULT_AGENT
 
-    print(f"variant={args.variant}  model={args.model}")
+    print(f"slice   ={len(slice_args.task)} tasks on {LEGACY_DATASET}")
     print(f"canaries  {', '.join(QUICK_CANARIES)}")
     print(f"contested {', '.join(QUICK_CONTESTED)}")
-    print()
-    return subprocess.call(command, env=env)
+    return cmd_bench(slice_args)
 
 
 def cmd_report(args) -> int:
@@ -537,7 +540,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "-a",
         "--agent",
-        default="crux.terminus_agent:CruxTerminusAgent",
+        default=DEFAULT_AGENT,
         help="harbor agent to run (default: the benchmarked one; try "
              "claude-code or pi for a scaffold comparison)",
     )
@@ -558,6 +561,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-concurrent-jobs",
         action="store_true",
         help="start even if another harbor run is going (they will share the engine)",
+    )
+    p.add_argument(
+        "-t",
+        "--task",
+        action="append",
+        metavar="NAME",
+        help="run only this task, repeatable (unqualified; the dataset's org is added)",
     )
     # 2.1 gives a ~900s median, and on this hardware 76% of its failures are
     # wall clock rather than wrong answers -- tuning against it mostly measures
