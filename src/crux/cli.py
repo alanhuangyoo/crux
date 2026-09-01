@@ -79,38 +79,81 @@ def _install_helpers(target: Path) -> list[str]:
 
 
 def cmd_solve(args) -> int:
-    """Run the agent against a task in a local directory.
+    """Run the benchmarked agent against a task in a local directory.
 
-    Delegates to mini-swe-agent's own runner rather than reimplementing a loop
-    — this is its agent, with our prompt and our tools.
+    This used to shell out to mini-swe-agent while every number in the repo came
+    from the Terminus base, so the CLI shipped the scaffold the measurements had
+    rejected -- about 3 points lower on the same tasks, and unable to express
+    entering an ssh session or a REPL at all.
+
+    Now it runs the same agent the benchmark runs, against `LocalEnvironment`
+    instead of a container, with an approval gate in front of commands that are
+    expensive to get wrong. A benchmark trial can afford `rm -rf`; the user's
+    working directory cannot.
     """
-    if shutil.which("mini") is None:
+    import asyncio
+
+    try:
+        from harbor.models.agent.context import AgentContext
+    except ImportError:
         print(
-            "mini-swe-agent is not installed. Install it with:\n"
-            "  uv tool install mini-swe-agent",
+            "harbor is not installed. The agent measured by this project is a\n"
+            "Terminus derivative and needs it:\n"
+            "  uv tool install 'harbor[modal]'",
             file=sys.stderr,
         )
         return 1
 
-    from crux.config import build_config
+    from crux.approval import Approval
+    from crux.local_agent import LocalCruxAgent
+    from crux.local_env import LocalEnvironment
 
-    cfg = build_config(variant=args.variant)
-    config_path = _write_config(cfg)
+    cwd = Path(args.cwd or os.getcwd()).resolve()
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    approval = Approval(args.approval)
 
-    env = dict(os.environ)
-    if cfg.toolkit or cfg.apply_patch:
-        bin_dir = Path(tempfile.mkdtemp(prefix="crux-bin-"))
-        _install_helpers(bin_dir)
-        env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+    env = LocalEnvironment(cwd=cwd)
+    # BaseAgent writes its trajectory and pane dump under logs_dir. In a
+    # benchmark that is the trial directory; here it goes beside the session so
+    # a run can be read back afterwards.
+    logs_dir = Path(env.trial_paths.agent_dir)
+    agent = LocalCruxAgent(
+        logs_dir=logs_dir,
+        model_name=args.model,
+        approval=approval,
+        project_root=cwd,
+        interactive=interactive,
+        **({"variant": args.variant} if args.variant != "default" else {}),
+    )
 
-    command = ["mini", "-c", str(config_path), "-t", args.task, "-y"]
-    if args.model:
-        command += ["-m", args.model]
-    if args.cwd:
-        command += ["--cwd", args.cwd]
+    print(
+        f"crux {__version__}  agent={agent.name()}  variant={args.variant}  "
+        f"model={args.model or 'default'}"
+    )
+    print(f"  {env.describe()}   approval={approval.value}"
+          f"{'' if interactive else '  (non-interactive: anything needing a prompt is refused)'}")
+    print(f"  logs: {logs_dir}")
 
-    print(f"crux {__version__}  variant={cfg.variant}  model={args.model or 'default'}")
-    return subprocess.call(command, env=env)
+    async def _run() -> None:
+        await env.start()
+        try:
+            await agent.setup(env)
+            await agent.run(args.task, env, AgentContext())
+        finally:
+            await env.stop()
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        print("\ninterrupted", file=sys.stderr)
+        return 130
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    for command, reason in agent.blocked_commands:
+        print(f"refused: {command.strip()}  ({reason})", file=sys.stderr)
+    return 0
 
 
 def cmd_bench(args) -> int:
@@ -294,6 +337,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-m", "--model")
     p.add_argument("--cwd", help="directory to work in")
     p.add_argument("--variant", default="default", choices=sorted(VARIANTS))
+    # Default to asking about the destructive and outward-facing ones only.
+    # "never" is what the benchmark uses, where the container is disposable.
+    p.add_argument(
+        "--approval",
+        default="dangerous",
+        choices=("never", "dangerous", "always"),
+        help="how much to ask before running a command (default: dangerous)",
+    )
     p.set_defaults(func=cmd_solve)
 
     p = sub.add_parser("bench", help="run Terminal-Bench")
