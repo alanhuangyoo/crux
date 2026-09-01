@@ -8,7 +8,12 @@ changing it changes scores.
 
 import pytest
 
-from crux.cli import GPU_TASKS, VARIANTS as CLI_VARIANTS, build_parser, cmd_prompt
+from crux.cli import (
+    GPU_TASKS_BY_ORG,
+    VARIANTS as CLI_VARIANTS,
+    build_parser,
+    cmd_prompt,
+)
 
 
 def parse(argv):
@@ -29,7 +34,10 @@ def test_leaderboard_needs_five_attempts_and_the_flag_allows_it():
 
 
 def test_gpu_task_list_matches_what_the_dataset_declares():
-    assert set(GPU_TASKS) == {
+    # 2.1 declares these four. 4.0 dropped exam-pdf-eval and keeps the rest, so
+    # the list is a superset of what any single version needs -- excluding a
+    # name a dataset does not contain is harmless, missing one is not.
+    assert set(GPU_TASKS_BY_ORG["terminal-bench"]) == {
         "exam-pdf-eval",
         "fp8-rmsnorm-gemm",
         "jax-speedrun-gpu",
@@ -109,3 +117,23 @@ def test_quick_slice_mixes_canaries_and_contested():
 def test_quick_defaults():
     args = parse(["quick"])
     assert args.variant == "default" and args.concurrent == 10
+
+
+def test_gpu_exclusion_is_scoped_to_the_dataset_org():
+    # Task names are qualified by org, so a hardcoded terminal-bench/ prefix
+    # matches nothing on another dataset while the run still prints
+    # "skipped=..." -- 88 trials of a terminal-bench-pro run went by that way.
+    from crux.cli import gpu_tasks_for
+
+    assert "fp8-rmsnorm-gemm" in gpu_tasks_for("terminal-bench/terminal-bench@4.0.0")
+    assert "fp8-rmsnorm-gemm" in gpu_tasks_for("terminal-bench/terminal-bench-2-1")
+    assert gpu_tasks_for("terminal-bench-pro/terminal-bench-pro") == ()
+    assert gpu_tasks_for("scale-ai/swe-atlas-qna") == ()
+
+
+def test_the_default_dataset_is_the_one_the_board_scores():
+    # tbench.ai ranks Terminal-Bench 4.0; 2.1 is the older set and Pro is a
+    # different benchmark by a different publisher.
+    from crux.cli import DEFAULT_DATASET
+
+    assert DEFAULT_DATASET == "terminal-bench/terminal-bench@4.0.0"

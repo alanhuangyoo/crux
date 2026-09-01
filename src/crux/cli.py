@@ -31,11 +31,13 @@ VARIANTS = ('default', 'lean', 'no_apply_patch', 'no_grading', 'no_toolkit', 'st
 RESOURCES = Path(__file__).parent / "resources"
 HELPERS = {"apply_patch": "apply_patch.py", "crux-tools": "crux_tool.py"}
 
-# terminal-bench@latest is Terminal-Bench 3, the frontier set, and it is
-# deliberately harder than 2.1. The public leaderboard figures everyone quotes
-# — mini-SWE-agent at 76.2%, Claude Code at 83.8% — are on 2.1, so that is the
-# dataset to measure against unless the frontier set is the explicit target.
-DEFAULT_DATASET = "terminal-bench/terminal-bench-2-1"
+# The board at tbench.ai is Terminal-Bench 4.0 -- 66 tasks, a flat 8h agent
+# budget, scored at -k 5. Opus 5 with Claude Code leads it at 51.8%. 2.1 is the
+# older 89-task set the widely quoted figures came from, and terminal-bench-pro
+# is a different benchmark entirely (Alibaba's, 400 tasks, its own board), not a
+# version of this one.
+DEFAULT_DATASET = "terminal-bench/terminal-bench@4.0.0"
+LEGACY_DATASET = "terminal-bench/terminal-bench-2-1"
 FRONTIER_DATASET = "terminal-bench/terminal-bench@latest"
 # Iteration runs on a free model. A development loop that costs real money per
 # turn is a loop nobody runs often enough, and most of what we needed to learn
@@ -44,15 +46,33 @@ FRONTIER_DATASET = "terminal-bench/terminal-bench@latest"
 DEFAULT_MODEL = "openrouter/stealth/ox-alpha"
 CONFIRM_MODEL = "deepseek/deepseek-v4-flash"
 
-# These declare gpus=1. Without an nvidia runtime the validation error does not
-# just fail those trials — it propagates and aborts the whole job, taking every
-# other trial in flight with it.
-GPU_TASKS = (
-    "exam-pdf-eval",
-    "fp8-rmsnorm-gemm",
-    "jax-speedrun-gpu",
-    "math-eval-grader",
-)
+# These declare gpus=1. harbor's docker environment declares no GPU capability
+# at all (environments/capabilities.py, `gpus: bool = False`), so the validation
+# error does not just fail those trials — it propagates and aborts the whole
+# job, taking every other trial in flight with it. Only modal, daytona, beam and
+# opensandbox can allocate a GPU, and all of them are paid cloud sandboxes.
+#
+# The names are per dataset version, so they cannot be one flat list: 2.1 has
+# these four, 4.0 dropped exam-pdf-eval and keeps the other three.
+GPU_TASKS_BY_ORG = {
+    "terminal-bench": (
+        "exam-pdf-eval",
+        "fp8-rmsnorm-gemm",
+        "jax-speedrun-gpu",
+        "math-eval-grader",
+    ),
+}
+
+
+def gpu_tasks_for(dataset: str) -> tuple[str, ...]:
+    """The GPU-requiring task names to exclude, for this dataset's org.
+
+    A task name is qualified by org, so a hardcoded `terminal-bench/` prefix
+    matches nothing on any other dataset while still printing "skipped=..." --
+    which is how 88 trials of a terminal-bench-pro run went by with an exclusion
+    that was a no-op. Returning an empty tuple makes the caller say so honestly.
+    """
+    return GPU_TASKS_BY_ORG.get(dataset.split("/", 1)[0], ())
 
 
 def _write_config(cfg) -> Path:
@@ -186,9 +206,11 @@ def cmd_bench(args) -> int:
         command += ["--n-tasks", str(args.tasks)]
     if args.env_file and Path(args.env_file).exists():
         command += ["--env-file", args.env_file]
+    org = args.dataset.split("/", 1)[0]
+    gpu_tasks = gpu_tasks_for(args.dataset)
     if not args.include_gpu_tasks:
-        for task in GPU_TASKS:
-            command += ["--exclude-task-name", f"terminal-bench/{task}"]
+        for task in gpu_tasks:
+            command += ["--exclude-task-name", f"{org}/{task}"]
 
     src = str(Path(__file__).resolve().parent.parent)
     env = dict(os.environ)
@@ -197,7 +219,11 @@ def cmd_bench(args) -> int:
     print(f"variant={args.variant}  model={args.model}  concurrent={args.concurrent}")
     print(f"jobs   ={jobs_dir}")
     if not args.include_gpu_tasks:
-        print(f"skipped={', '.join(GPU_TASKS)} (need a GPU)")
+        print(
+            f"skipped={', '.join(gpu_tasks)} (need a GPU)"
+            if gpu_tasks
+            else f"skipped=nothing (no GPU-task list known for org '{org}')"
+        )
     print()
     return subprocess.call(command, env=env)
 
