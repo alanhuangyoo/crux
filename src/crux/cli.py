@@ -221,6 +221,53 @@ def running_harbor_jobs(exclude_pid: int | None = None) -> list[str]:
                     f"jobs-dir={m.group(1) if m else '?'}")
     return jobs
 
+def _write_provenance(jobs_dir: str, command: list[str]) -> Path | None:
+    """Record what code produced a run, beside the run.
+
+    A job directory says what was measured but not what was measuring. Tonight a
+    baseline went out with a prompt change that had never been scored, and
+    nothing in its output would have said so -- the difference between an
+    experiment and a number you find later and cannot place.
+
+    Best effort: a run must not fail because git is missing or the tree is not a
+    repository.
+    """
+    import hashlib
+    import json
+    from datetime import datetime, timezone
+
+    root = Path(__file__).resolve().parent.parent.parent
+
+    def _git(*args) -> str | None:
+        try:
+            out = subprocess.run(["git", "-C", str(root), *args],
+                                 capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return out.stdout.strip() if out.returncode == 0 else None
+
+    prompts = Path(__file__).with_name("prompts.py")
+    record = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "crux_version": __version__,
+        "git_commit": _git("rev-parse", "HEAD"),
+        "git_branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
+        # A dirty tree means the commit above does not describe what ran.
+        "git_dirty": bool(_git("status", "--porcelain")),
+        "prompts_sha256": (
+            hashlib.sha256(prompts.read_bytes()).hexdigest() if prompts.exists() else None
+        ),
+        "command": command,
+    }
+    try:
+        target = Path(jobs_dir)
+        target.mkdir(parents=True, exist_ok=True)
+        path = target / "crux-provenance.json"
+        path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        return path
+    except OSError:
+        return None
+
 def cmd_bench(args) -> int:
     """Run the Terminal-Bench evaluation through Harbor."""
     if shutil.which("harbor") is None:
@@ -303,6 +350,9 @@ def cmd_bench(args) -> int:
             if gpu_tasks
             else f"skipped=nothing (no GPU-task list known for org '{org}')"
         )
+    prov = _write_provenance(jobs_dir, command)
+    if prov is not None:
+        print(f"record ={prov}")
     print()
     return subprocess.call(command, env=env)
 

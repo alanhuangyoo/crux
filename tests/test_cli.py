@@ -269,3 +269,33 @@ def test_unreadable_process_table_does_not_block_a_run(monkeypatch):
 
     monkeypatch.setattr(cli.subprocess, "run", _boom)
     assert cli.running_harbor_jobs() == []
+
+
+def test_a_run_records_what_code_produced_it(tmp_path, monkeypatch):
+    # A job directory says what was measured, not what was measuring. A baseline
+    # went out tonight carrying a prompt change that had never been scored, and
+    # nothing in its output would have said so.
+    import json
+
+    import crux.cli as cli
+
+    path = cli._write_provenance(str(tmp_path / "jobs"), ["harbor", "run", "-d", "x"])
+    assert path is not None
+    rec = json.loads(path.read_text())
+    assert rec["command"] == ["harbor", "run", "-d", "x"]
+    assert rec["crux_version"]
+    # the prompt file is the part that changes agent behaviour without changing
+    # any flag, so its hash is what makes two runs distinguishable
+    assert rec["prompts_sha256"] and len(rec["prompts_sha256"]) == 64
+    assert "git_dirty" in rec
+
+
+def test_provenance_failure_does_not_fail_the_run(monkeypatch):
+    # Best effort: no git, or an unwritable directory, must not stop a benchmark.
+    import crux.cli as cli
+
+    def _boom(*a, **k):
+        raise OSError("no git")
+
+    monkeypatch.setattr(cli.subprocess, "run", _boom)
+    assert cli._write_provenance("/proc/nonexistent/nope", ["harbor"]) is None
