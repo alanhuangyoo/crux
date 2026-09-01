@@ -164,6 +164,7 @@ def test_variant_is_not_passed_to_a_foreign_agent(monkeypatch):
     # working code.
     calls = []
     monkeypatch.setattr(cli.shutil, "which", lambda _: "/usr/bin/harbor")
+    monkeypatch.setattr(cli, "running_harbor_jobs", lambda *a, **k: [])
     monkeypatch.setattr(cli.subprocess, "call", lambda cmd, env=None: calls.append(cmd) or 0)
     cli.cmd_bench(parse(["bench", "-a", "claude-code"]))
     cli.cmd_bench(parse(["bench"]))
@@ -196,6 +197,7 @@ def test_the_agent_budget_can_be_opened_and_says_so(capsys, monkeypatch):
 
     calls = []
     monkeypatch.setattr(cli.shutil, "which", lambda _: "/usr/bin/harbor")
+    monkeypatch.setattr(cli, "running_harbor_jobs", lambda *a, **k: [])
     monkeypatch.setattr(cli.subprocess, "call", lambda cmd, env=None: calls.append(cmd) or 0)
 
     cli.cmd_bench(parse(["bench"]))
@@ -206,3 +208,64 @@ def test_the_agent_budget_can_be_opened_and_says_so(capsys, monkeypatch):
     cmd = calls[-1]
     assert cmd[cmd.index("--agent-timeout-multiplier") + 1] == "8.0"
     assert "NOT submittable" in capsys.readouterr().out
+
+
+def _ps_output(lines):
+    class _R:
+        stdout = "  PID ARGS\n" + "\n".join(lines) + "\n"
+    return lambda *a, **k: _R()
+
+
+def test_a_second_harbor_job_is_detected(monkeypatch):
+    # A neighbouring run is invisible from the inside: every status check reads
+    # one job directory, so a run that has lost half the engine looks exactly
+    # like one that is merely slow.
+    import crux.cli as cli
+
+    monkeypatch.setattr(cli.subprocess, "run", _ps_output([
+        "  4242 /root/.local/bin/harbor run --dataset terminal-bench/terminal-bench-2-1 "
+        "--agent claude-code --jobs-dir /scratch/base-cc",
+        "  4243 /usr/bin/python3 -m something.else",
+    ]))
+    jobs = cli.running_harbor_jobs()
+    assert len(jobs) == 1
+    assert "claude-code" in jobs[0] and "/scratch/base-cc" in jobs[0]
+
+
+def test_unrelated_processes_are_not_mistaken_for_a_job(monkeypatch):
+    import crux.cli as cli
+
+    monkeypatch.setattr(cli.subprocess, "run", _ps_output([
+        "  1 /sbin/init",
+        "  2 grep --color harbor run",           # a grep for it is not it
+        "  3 /root/.local/bin/harbor datasets download terminal-bench/x",
+    ]))
+    assert cli.running_harbor_jobs() == []
+
+
+def test_bench_refuses_to_start_beside_another_job(monkeypatch, capsys):
+    import crux.cli as cli
+
+    monkeypatch.setattr(cli.shutil, "which", lambda _: "/usr/bin/harbor")
+    monkeypatch.setattr(cli, "running_harbor_jobs", lambda *a, **k: ["pid 9 agent=pi"])
+    called = []
+    monkeypatch.setattr(cli.subprocess, "call", lambda cmd, env=None: called.append(cmd) or 0)
+
+    assert cli.cmd_bench(parse(["bench"])) == 1
+    assert called == []
+    assert "another harbor run" in capsys.readouterr().err
+
+    assert cli.cmd_bench(parse(["bench", "--allow-concurrent-jobs"])) == 0
+    assert len(called) == 1
+
+
+def test_unreadable_process_table_does_not_block_a_run(monkeypatch):
+    # Not being able to look is not evidence of a neighbour; refusing then would
+    # make the guard worse than the problem.
+    import crux.cli as cli
+
+    def _boom(*a, **k):
+        raise OSError("no ps here")
+
+    monkeypatch.setattr(cli.subprocess, "run", _boom)
+    assert cli.running_harbor_jobs() == []

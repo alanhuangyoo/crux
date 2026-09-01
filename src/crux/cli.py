@@ -183,12 +183,64 @@ def cmd_solve(args) -> int:
     return 0
 
 
+def running_harbor_jobs(exclude_pid: int | None = None) -> list[str]:
+    """Other `harbor run` processes on this machine, as short descriptions.
+
+    A second job is invisible from the inside: every status check reads one job
+    directory, so a run that has quietly lost half the engine to a neighbour
+    looks exactly like a run that is merely slow. Two arms at concurrency 24 put
+    ~48 streams on an engine whose aggregate throughput peaks near 48 and then
+    falls -- measured at 1109 tok/s for 24 and 507 for 48.
+    """
+    import re
+
+    try:
+        out = subprocess.run(
+            ["ps", "-eo", "pid,args"], capture_output=True, text=True, timeout=10
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []          # no reading of process state is not a reason to refuse
+
+    jobs = []
+    for line in out.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        pid_s, args = parts
+        if "harbor" not in args or " run " not in f" {args} ":
+            continue
+        if "--dataset" not in args:
+            continue
+        if not pid_s.isdigit() or (exclude_pid is not None and int(pid_s) == exclude_pid):
+            continue
+        if int(pid_s) == os.getpid():
+            continue
+        m = re.search(r"--jobs-dir\s+(\S+)", args)
+        a = re.search(r"--agent\s+(\S+)", args)
+        jobs.append(f"pid {pid_s}  agent={a.group(1) if a else '?'}  "
+                    f"jobs-dir={m.group(1) if m else '?'}")
+    return jobs
+
 def cmd_bench(args) -> int:
     """Run the Terminal-Bench evaluation through Harbor."""
     if shutil.which("harbor") is None:
         print(
             "harbor is not installed. Install it with:\n"
             "  uv tool install 'harbor[modal]'",
+            file=sys.stderr,
+        )
+        return 1
+
+    others = running_harbor_jobs()
+    if others and not args.allow_concurrent_jobs:
+        print("another harbor run is already going on this machine:", file=sys.stderr)
+        for job in others:
+            print(f"  {job}", file=sys.stderr)
+        print(
+            "\nTwo arms at this concurrency put ~48 streams on the engine, where\n"
+            "aggregate throughput peaks and then falls (1109 tok/s at 24, 507 at 48),\n"
+            "so both runs get slower and neither is comparable to a solo one.\n"
+            "Stop the other job, or pass --allow-concurrent-jobs if you mean it.",
             file=sys.stderr,
         )
         return 1
@@ -451,6 +503,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--upload",
         action="store_true",
         help="upload the finished job to Harbor Hub (private by default)",
+    )
+    p.add_argument(
+        "--allow-concurrent-jobs",
+        action="store_true",
+        help="start even if another harbor run is going (they will share the engine)",
     )
     # 2.1 gives a ~900s median, and on this hardware 76% of its failures are
     # wall clock rather than wrong answers -- tuning against it mostly measures
