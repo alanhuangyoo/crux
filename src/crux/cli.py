@@ -39,12 +39,19 @@ HELPERS = {"apply_patch": "apply_patch.py", "crux-tools": "crux_tool.py"}
 DEFAULT_DATASET = "terminal-bench/terminal-bench@4.0.0"
 LEGACY_DATASET = "terminal-bench/terminal-bench-2-1"
 FRONTIER_DATASET = "terminal-bench/terminal-bench@latest"
-# Iteration runs on a free model. A development loop that costs real money per
-# turn is a loop nobody runs often enough, and most of what we needed to learn
-# came from failure modes that any competent model reproduces. Confirm a result
-# on the paid model before believing the number.
-DEFAULT_MODEL = "openrouter/stealth/ox-alpha"
-CONFIRM_MODEL = "deepseek/deepseek-v4-flash"
+# The model is self-hosted -- Qwen3.8-27B FP8 on four H20s, served by sglang and
+# addressed through OPENAI_BASE_URL. Every number in this repo came from it, so
+# it is the default; a run that silently used something else would not be
+# comparable to any of them.
+#
+# Tokens are therefore free and wall clock is the constraint, which inverts the
+# old advice to iterate on a cheap model and confirm on an expensive one. What
+# costs now is the four cards, and the engine's aggregate throughput stops
+# climbing at about 48 concurrent streams (see docs/ABLATION.md).
+DEFAULT_MODEL = "openai/qwen3.8-27b"
+# Hosted models, for a cross-check that the result is not an artefact of this
+# particular deployment.
+HOSTED_MODELS = ("deepseek/deepseek-v4-flash", "openrouter/stealth/ox-alpha")
 
 # These declare gpus=1. harbor's docker environment declares no GPU capability
 # at all (environments/capabilities.py, `gpus: bool = False`), so the validation
