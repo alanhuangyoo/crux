@@ -175,3 +175,13 @@ def test_variant_is_not_passed_to_a_foreign_agent(monkeypatch):
 def test_upload_is_opt_in():
     assert parse(["bench"]).upload is False
     assert parse(["bench", "--upload"]).upload is True
+
+
+def test_the_default_model_is_the_one_every_measurement_used():
+    # The default was a free hosted router while every run in the repo used the
+    # self-hosted Qwen, so `crux bench` with no -m produced a number comparable
+    # to nothing else here.
+    from crux.cli import DEFAULT_MODEL
+
+    assert DEFAULT_MODEL == "openai/qwen3.8-27b"
+    assert parse(["bench"]).model == DEFAULT_MODEL
