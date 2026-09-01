@@ -222,6 +222,8 @@ def cmd_bench(args) -> int:
         command += ["--ak", kv]
     if args.upload:
         command += ["--upload"]
+    if args.agent_timeout_multiplier != 1.0:
+        command += ["--agent-timeout-multiplier", str(args.agent_timeout_multiplier)]
     if args.tasks:
         command += ["--n-tasks", str(args.tasks)]
     if args.env_file and Path(args.env_file).exists():
@@ -240,6 +242,9 @@ def cmd_bench(args) -> int:
           f"{'  variant=' + args.variant if args.agent.startswith('crux.') else ''}")
     print(f"model  ={args.model}  concurrent={args.concurrent}  attempts={args.attempts}")
     print(f"jobs   ={jobs_dir}{'  (uploads to Harbor Hub when it finishes)' if args.upload else ''}")
+    if args.agent_timeout_multiplier != 1.0:
+        print(f"budget =agent timeout x{args.agent_timeout_multiplier:g}"
+              f"  -- NOT submittable, harbor requires 1.0")
     if not args.include_gpu_tasks:
         print(
             f"skipped={', '.join(gpu_tasks)} (need a GPU)"
@@ -446,6 +451,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--upload",
         action="store_true",
         help="upload the finished job to Harbor Hub (private by default)",
+    )
+    # 2.1 gives a ~900s median, and on this hardware 76% of its failures are
+    # wall clock rather than wrong answers -- tuning against it mostly measures
+    # the engine's 129 tok/s. Opening the agent budget makes the score reflect
+    # the agent. It also makes the run non-submittable: harbor requires the
+    # multiplier to be 1.0, so anything measured this way is an internal
+    # comparison and has to be reported as one.
+    p.add_argument(
+        "--agent-timeout-multiplier",
+        type=float,
+        default=1.0,
+        metavar="X",
+        help="multiply the agent's budget (default 1.0 = submittable; 8 turns "
+             "2.1's 900s median into 7200s, matching TB 3.0's own median)",
     )
     p.set_defaults(func=cmd_bench)
 
