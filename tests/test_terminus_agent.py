@@ -226,3 +226,30 @@ def test_effort_and_max_tokens_coexist():
     agent = _EffortStub(reasoning_effort="medium", max_tokens=32768)
     assert agent._llm_call_kwargs["max_tokens"] == 32768
     assert agent._llm_call_kwargs["extra_body"]["chat_template_kwargs"]["reasoning_effort"] == "medium"
+
+
+def test_scoring_section_demands_more_than_one_check_per_requirement():
+    # The agent bound 35 checks against 206 graded tests and reported success on
+    # all of them. Enumerating requirements is not enough when each is graded
+    # several times over, so the section has to name the cases that were missed.
+    from crux.prompts import build_terminus_template
+    out = build_terminus_template(UPSTREAM).lower()
+    for case in ("boundary", "tolerance", "exit code", "must not change"):
+        assert case in out, case
+    assert "floor, not the target" in out
+
+
+def test_submit_section_asks_what_is_unverified_before_finishing():
+    # "all 3 item(s) verified" was reported verbatim on tasks that then failed;
+    # the gate is only useful if the agent first says what it left out.
+    from crux.prompts import build_terminus_template
+    out = build_terminus_template(UPSTREAM)
+    assert "bound no check for" in out
+    assert out.index("bound no check for") < out.index("<task_complete>true</task_complete>")
+
+
+def test_the_two_sections_stay_separable_after_the_rewrite():
+    from crux.prompts import build_terminus_template
+    scoring_only = build_terminus_template(UPSTREAM, submit=False)
+    assert "bound no check for" not in scoring_only
+    assert "floor, not the target" in scoring_only
