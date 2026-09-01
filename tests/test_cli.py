@@ -299,3 +299,40 @@ def test_provenance_failure_does_not_fail_the_run(monkeypatch):
 
     monkeypatch.setattr(cli.subprocess, "run", _boom)
     assert cli._write_provenance("/proc/nonexistent/nope", ["harbor"]) is None
+
+
+def test_quick_runs_the_benchmarked_agent_on_the_dataset_its_tasks_exist_in():
+    # cmd_quick was the third copy of the command builder and the worst of the
+    # three: it named crux.agent:CruxAgent and pointed at a default dataset that
+    # does not contain any of its canary task names, so --include-task-name
+    # would have matched nothing and the "quick slice" would have run empty.
+    import crux.cli as cli
+
+    captured = {}
+    real = cli.cmd_bench
+    try:
+        cli.cmd_bench = lambda a: captured.setdefault("args", a) and 0 or 0
+        cli.cmd_quick(parse(["quick"]))
+    finally:
+        cli.cmd_bench = real
+
+    a = captured["args"]
+    assert a.agent == cli.DEFAULT_AGENT
+    assert a.dataset == cli.LEGACY_DATASET
+    assert set(a.task) == set(cli.QUICK_CANARIES + cli.QUICK_CONTESTED)
+
+
+def test_task_names_are_qualified_by_the_dataset_org(monkeypatch):
+    import crux.cli as cli
+
+    calls = []
+    monkeypatch.setattr(cli.shutil, "which", lambda _: "/usr/bin/harbor")
+    monkeypatch.setattr(cli, "running_harbor_jobs", lambda *a, **k: [])
+    monkeypatch.setattr(cli, "_write_provenance", lambda *a, **k: None)
+    monkeypatch.setattr(cli.subprocess, "call", lambda cmd, env=None: calls.append(cmd) or 0)
+
+    cli.cmd_bench(parse(["bench", "--dataset", "terminal-bench-pro/terminal-bench-pro",
+                         "-t", "some-task"]))
+    cmd = calls[-1]
+    i = cmd.index("--include-task-name")
+    assert cmd[i + 1] == "terminal-bench-pro/some-task"
