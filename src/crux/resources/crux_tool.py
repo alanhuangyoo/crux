@@ -25,6 +25,7 @@ happens to provide.
 
 import argparse
 import json
+import pathlib
 import os
 import re
 import subprocess
@@ -400,32 +401,83 @@ def cmd_submit(args):
         )
         sys.exit(1)
 
+    # Kept beside the checklist rather than in it, so the list's shape -- which
+    # the prompt, the tests and `todo list` all depend on -- does not change to
+    # carry one integer.
+    marker = pathlib.Path(TODO_PATH + ".gate")
+    try:
+        seen_at = int(marker.read_text(encoding="utf-8"))
+        gate_fired = True
+    except (OSError, ValueError):
+        seen_at, gate_fired = len(items), False
+
+    if args.confirm and gate_fired and len(items) <= seen_at:
+        # Without this the flag is the escape hatch the first version had. The
+        # measured failure was not that the agent argues with the gate: it
+        # enumerated the task's requirements correctly at the step before it
+        # quit, then bound none of them. So what closes the gate is a bound
+        # check, and `--confirm` alone is not one.
+        print(
+            f"not submitting: still {len(items)} check(s), the same as when the "
+            "last submit asked for more.\n"
+            "\n--confirm records that you looked again; it does not record what "
+            "you found. Bind the requirement you checked:\n"
+            "\n    crux todo add \"<requirement>\" --verify \"<command>\"\n"
+            "\nthen `crux submit --confirm`.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     if not args.confirm:
         # Every check passing is where this agent stops, and stopping there is
         # what it loses on. Measured against claude-code on the same model and
         # the same tasks: of six tasks it lost, five were ones where it used
         # FEWER steps -- qemu-startup ended at 48 steps with "crux submit
         # already confirmed all 3 bound checks. The task is complete", while the
-        # arm that solved it ran 123. The gate was not too strict; it granted
-        # permission to stop.
+        # arm that solved it ran 123.
         #
-        # So a passing checklist buys one more deliberation rather than the
-        # sentinel. This is a forcing function, not a proof -- a tool cannot
-        # check that the model actually looked. It costs one round trip, and the
-        # gap it addresses was 75 of them.
+        # A first version of this gate listed generic categories -- empty input,
+        # exit codes, tolerances -- and let the agent through if none applied.
+        # The trajectory shows exactly what that bought: "The nudge to add more
+        # checks lists generic categories ... none of which this task actually
+        # specifies", then `--confirm`, with one check bound, and a fail. A
+        # generic checklist earns a generic dismissal, and the dismissal was
+        # correct on its own terms.
+        #
+        # So the gate asks about the task's own words instead, and is closed by
+        # binding a check rather than by reading a list. `--confirm` is refused
+        # until the checklist has grown, because the measured gap is not that
+        # the agent reasons badly about coverage -- at the step before it quit
+        # it enumerated the requirements correctly -- but that it enumerates
+        # them and does not bind them.
+        if not gate_fired:
+            try:
+                marker.write_text(str(len(items)), encoding="utf-8")
+            except OSError:
+                pass  # a read-only /tmp is not a reason to block submitting
+
+        if gate_fired and len(items) > seen_at:
+            print(
+                f"all {len(items)} check(s) pass, {len(items) - seen_at} added "
+                "since the last submit. Run `crux submit --confirm` to finish."
+            )
+            sys.exit(1)
+
         print(f"all {len(items)} check(s) pass.")
         print(
             "\nThat says the checks you bound hold. It does not say they cover "
             "what is graded: measured here, graders ran about six times as many "
             "checks as this agent bound, and every failure was inside that gap.\n"
-            "\nBefore finishing, go through the task once more and bind a check "
-            "for any of these that apply and are not covered:\n"
-            "  - the empty, zero, single-element and boundary inputs\n"
-            "  - the numeric tolerance the task states, not one that looks close\n"
-            "  - the failure path: malformed input rejected, the exit code named\n"
-            "  - what must NOT change: state left alone, ordering preserved\n"
-            "  - anything the task described that has no check above\n"
-            "\nThen run `crux submit --confirm`. If nothing applies, run it now."
+            "\nRe-read the task statement now and list every separate thing it "
+            "asks for -- each sentence that says the work must do, produce, "
+            "accept, reject or preserve something is its own requirement. Then, "
+            "for each one with no check above, bind it:\n"
+            "\n    crux todo add \"<the requirement, in the task's words>\" "
+            "--verify \"<command that exits non-zero if it does not hold>\"\n"
+            "\nBind at least one. If every requirement really is covered, the "
+            "check to add is the one that runs the whole deliverable end to end "
+            "the way the task describes running it, from a clean state.\n"
+            "\nThen `crux submit` again."
         )
         sys.exit(1)
 
