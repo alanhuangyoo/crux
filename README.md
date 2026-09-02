@@ -184,7 +184,23 @@ cp .env.example .env              # model endpoint and key
 ./scripts/smoke.sh                # verify the harness works here
 ```
 
-Solve something in a real directory, with the agent the benchmark measures:
+Use it interactively -- multi-turn, resumable:
+
+```bash
+npm install -g @earendil-works/pi-coding-agent   # the terminal UI
+crux chat                    # conversation, with the measured prompt sections
+crux chat -c                 # continue the last session
+crux chat --sections ""      # stock pi, the control arm
+```
+
+`crux chat` is a wrapper, and says so: pi supplies the front-end, crux supplies
+the prompt sections and the model configuration. The alternative was writing a
+REPL onto the Terminus base, whose `run()` builds a fresh chat every call, so
+multi-turn would have meant monkeypatching chat construction. The same sections
+run on the benchmark through `crux bench -a crux.pi_agent:CruxPiAgent`, so what
+is measured is what runs.
+
+Or run one task to completion, with the agent the benchmark measures:
 
 ```bash
 crux solve "make the failing test pass" --cwd ~/work/project
