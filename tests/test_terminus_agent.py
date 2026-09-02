@@ -528,3 +528,60 @@ async def test_an_ordinary_response_never_trims():
     for _ in range(5):
         await c.chat("go")
     assert len(c._messages) == 40
+
+
+@pytest.mark.asyncio
+async def test_the_deadlock_arrives_as_an_exception_not_a_value():
+    """The regression the verification run caught.
+
+    Upstream calls chat.chat inside a try and substitutes its fixed string in
+    its own except block, so the string never passes through the wrapper -- the
+    exception does. A first version of this guard only inspected the returned
+    response, and path-tracing-reverse deadlocked 204 times with it installed.
+    """
+    from types import SimpleNamespace
+    from crux.terminus_agent import _guard_context_deadlock
+
+    class _Chat:
+        def __init__(self):
+            self._messages = [f"m{i}" for i in range(40)]
+            self.calls = 0
+
+        async def chat(self, *a, **k):
+            self.calls += 1
+            if len(self._messages) > 20:
+                raise RuntimeError("Model hit max_tokens limit. Response was truncated.")
+            return SimpleNamespace(content="<response>ok</response>")
+
+    c = _Chat()
+    _guard_context_deadlock(c)
+
+    # One failure still raises: a transient error keeps upstream's own retry.
+    with pytest.raises(RuntimeError):
+        await c.chat("go")
+    assert len(c._messages) == 40
+
+    # The second is the loop, and trimming is what changes the input.
+    out = await c.chat("go")
+    assert out.content == "<response>ok</response>"
+    assert len(c._messages) < 40
+    assert c._messages[0] == "m0" and c._messages[-1] == "m39"
+
+
+@pytest.mark.asyncio
+async def test_an_untrimmable_failure_is_not_swallowed():
+    """With nothing left to drop, the error has to surface as an error."""
+    from crux.terminus_agent import _guard_context_deadlock
+
+    class _Chat:
+        def __init__(self):
+            self._messages = ["only"]
+
+        async def chat(self, *a, **k):
+            raise RuntimeError("still failing")
+
+    c = _Chat()
+    _guard_context_deadlock(c)
+    for _ in range(3):
+        with pytest.raises(RuntimeError):
+            await c.chat("go")
