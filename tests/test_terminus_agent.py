@@ -178,11 +178,12 @@ def test_submit_gate_is_separable_from_scoring():
     assert "all or nothing" in out
 
 
-def test_disabling_both_reproduces_upstream_exactly():
+def test_disabling_every_section_reproduces_upstream_exactly():
     # Reproducing upstream byte-for-byte is what makes a stock comparison mean
-    # anything.
+    # anything. This has to name every section: when the harness section was
+    # added with the test still listing two, it failed -- correctly.
     from crux.prompts import build_terminus_template
-    out = build_terminus_template(UPSTREAM, scoring=False, submit=False)
+    out = build_terminus_template(UPSTREAM, scoring=False, submit=False, harness=False)
     assert out.strip() == UPSTREAM.strip()
 
 
@@ -325,3 +326,23 @@ def test_the_threshold_is_configurable():
     a = _StuckStub(threshold=3)
     assert a._stuck_notice() == "" and a._stuck_notice() == ""
     assert "3 steps" in a._stuck_notice()
+
+
+def test_the_harness_section_names_the_two_things_the_comparison_showed():
+    # Read side by side with a run that solved mailman in 15 steps against this
+    # agent's 512: it ran the /app/eval.py the task shipped, twice; we ran it
+    # zero times. It wrote `echo "exit=$?"` after every state-changing command;
+    # we wrote it zero times and inferred success from prose.
+    from crux.prompts import build_terminus_template
+    out = build_terminus_template(UPSTREAM)
+    assert "eval.py" in out
+    assert 'echo "exit=$?"' in out
+    assert "Output text is not a result" in out
+
+
+def test_the_harness_section_is_separable():
+    from crux.prompts import build_terminus_template
+    without = build_terminus_template(UPSTREAM, harness=False)
+    assert "eval.py" not in without
+    assert "all or nothing" in without
+

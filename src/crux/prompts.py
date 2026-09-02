@@ -348,6 +348,31 @@ def build_instance_template(
 # it. A frozen copy was in the tree and matched upstream exactly, which is the
 # problem: it would go on matching a prompt harbor had since changed, silently.
 
+TERMINUS_HARNESS_SECTION = """## Use what the task already gives you
+
+Read the task for anything that checks the work -- a script it names, a test
+file, a make target, a sample input with a known answer. Run it early, and run
+it again before you finish.
+
+Read side by side with a run that solved `mailman` in 15 steps where this agent
+took 512: the task said "an /app/eval.py script is provided to help
+iterations". That run read it as its second action and executed it twice, once
+to check the build and once at the end. This agent read it once and never ran
+it. The grader is not visible to you, but a checker the task ships is the
+closest thing to it you will get, and running it is cheaper than any amount of
+reasoning about whether the work is right.
+
+Capture the exit status of anything that matters:
+
+    <command> 2>&1; echo "exit=$?"
+
+Output text is not a result. A command that printed something plausible and
+returned 1 looks, in the terminal, exactly like one that worked. That same
+comparison run wrote `echo "exit=$?"` after every state-changing command; this
+one wrote it zero times in 512 steps and inferred success from prose.
+"""
+
+
 TERMINUS_SCORING_SECTION = """## Scoring is all or nothing
 
 A task scores 1.0 only if every requirement holds; 0.9 of the work scores
@@ -405,6 +430,7 @@ def build_terminus_template(
     upstream: str,
     scoring: bool = True,
     submit: bool = True,
+    harness: bool = True,
 ) -> str:
     """Insert the crux sections into upstream's Terminus template.
 
@@ -423,5 +449,7 @@ def build_terminus_template(
         parts += [TERMINUS_SCORING_SECTION.strip(), ""]
     if submit:
         parts += [TERMINUS_SUBMIT_SECTION.strip(), ""]
+    if harness:
+        parts += [TERMINUS_HARNESS_SECTION.strip(), ""]
     parts += [sep + tail]
     return "\n".join(parts)
