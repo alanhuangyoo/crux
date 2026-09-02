@@ -43,6 +43,16 @@ from crux.prompts import build_terminus_template
 # behaviour. Set from the measured waste: the losses are all long waits.
 _BLOCKING_THRESHOLD_SEC = 10.0
 
+# No task solved in a full 89-task run took more than 120 steps; the longest was
+# winning-avg-corewars at 120, and the solved median was 29. Failures ran 71 at
+# the median and 323 at the 90th percentile. So a trial past this point is not
+# a slow success, it is an approach that has already failed -- and the model
+# cannot see that, because from inside every step still looks locally sensible.
+#
+# The nudge fires once. Stopping the trial would only save wall clock; telling
+# it what the number means is the part that might change the outcome.
+_STUCK_STEP_THRESHOLD = 120
+
 
 def _can_block(keystrokes: str) -> bool:
     """Whether appending a completion signal to these keystrokes is safe.
@@ -100,6 +110,28 @@ def _guard_whitespace_tags(parser):
     parser._find_top_level_tags = _safe
     return parser
 
+_STUCK_NUDGE = """\
+[crux] You have now taken {steps} steps on this task.
+
+Across a full evaluation of this benchmark, no task that was eventually solved
+took more than 120 steps; the median solve took 29. Trials that reached this
+point failed, and they failed while every individual step still looked
+reasonable -- re-reading the same files, re-running the same command with a
+small variation, recovering the same stuck terminal.
+
+Treat this as evidence about your current approach rather than about the task.
+Before your next command:
+
+  - State in one sentence what you have actually established so far, and what
+    you have been assuming without checking.
+  - Name the approach you have been pursuing, and pick a different one. Not a
+    variation -- a different mechanism.
+  - If a check you bound earlier is still failing, consider that the
+    requirement may not mean what you read it to mean.
+
+Do not repeat a command you have already run unless its inputs have changed.
+"""
+
 class CruxTerminusAgent(Terminus2):
     """Terminus with Crux's scoring prompt and verified submission."""
 
@@ -124,6 +156,10 @@ class CruxTerminusAgent(Terminus2):
         self._crux_submit = str(kwargs.pop("submit_gate", True)).lower() not in (
             "false", "0", "no",
         )
+        # Steps past which the agent is told its approach has failed. 0 disables.
+        self._stuck_at = int(kwargs.pop("stuck_step_threshold", _STUCK_STEP_THRESHOLD))
+        self._stuck_fired = False
+        self._crux_steps = 0
         super().__init__(*args, **kwargs)
         if getattr(self, "_parser", None) is not None:
             _guard_whitespace_tags(self._parser)
@@ -196,6 +232,22 @@ class CruxTerminusAgent(Terminus2):
         await environment.exec("chmod +x /usr/local/bin/crux")
 
     @override
+    def _stuck_notice(self) -> str:
+        """One-time warning once a trial passes the point solves never reach.
+
+        Reads its state through getattr so that a subclass, or a construction
+        path that does not run this __init__, degrades to "no notice" rather
+        than killing the trial with an AttributeError. The warning is worth
+        having; it is not worth a crash.
+        """
+        steps = getattr(self, "_crux_steps", 0) + 1
+        self._crux_steps = steps
+        threshold = getattr(self, "_stuck_at", _STUCK_STEP_THRESHOLD)
+        if not threshold or getattr(self, "_stuck_fired", False) or steps < threshold:
+            return ""
+        self._stuck_fired = True
+        return _STUCK_NUDGE.format(steps=steps)
+
     async def _execute_commands(
         self,
         commands: list[Command],
@@ -250,7 +302,9 @@ class CruxTerminusAgent(Terminus2):
                     ),
                 )
 
-        return False, self._limit_output_length(
+        # Appended to the terminal output the model reads next, so the warning
+        # arrives in the same channel as everything else it reasons about.
+        return False, self._stuck_notice() + self._limit_output_length(
             await session.get_incremental_output()
         )
 

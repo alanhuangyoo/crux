@@ -290,3 +290,38 @@ def test_the_guard_leaves_other_failures_alone():
     p = _guard_whitespace_tags(_Parser())
     with pytest.raises(ValueError):
         p._find_top_level_tags("<x>")
+
+
+class _StuckStub(CruxTerminusAgent):
+    """_stuck_notice without harbor's Terminus base in the constructor."""
+
+    def __init__(self, threshold=120):
+        self._stuck_at = threshold
+        self._stuck_fired = False
+        self._crux_steps = 0
+
+
+def test_the_stuck_notice_fires_once_at_the_measured_threshold():
+    # No task solved in a full 89-task run passed 120 steps; the longest solve
+    # was 120 and the median 29, while failures ran 71 median and 323 at p90.
+    # So the threshold is where a trial stops being a slow success.
+    a = _StuckStub()
+    for _ in range(119):
+        assert a._stuck_notice() == ""
+    first = a._stuck_notice()
+    assert "120 steps" in first
+    assert "different one" in first
+    # once only: repeating it every step would train the model to ignore it
+    assert a._stuck_notice() == ""
+
+
+def test_the_notice_can_be_disabled():
+    a = _StuckStub(threshold=0)
+    for _ in range(300):
+        assert a._stuck_notice() == ""
+
+
+def test_the_threshold_is_configurable():
+    a = _StuckStub(threshold=3)
+    assert a._stuck_notice() == "" and a._stuck_notice() == ""
+    assert "3 steps" in a._stuck_notice()
