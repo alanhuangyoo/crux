@@ -25,6 +25,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from crux.endpoint import ensure_reachable
 from crux.prompts import build_sections
 
 PI_CONFIG = Path.home() / ".pi" / "agent" / "models.json"
@@ -49,6 +50,12 @@ def _endpoint() -> tuple[str, str, str]:
                     base = v
                 elif k == "OPENAI_API_KEY" and not key:
                     key = v
+                elif k == "CRUX_MODEL" and not model:
+                    model = v
+                elif k == "CRUX_TUNNEL":
+                    # Exported rather than returned: the tunnel is looked up by
+                    # whoever needs the endpoint, not only by this caller.
+                    os.environ.setdefault("CRUX_TUNNEL", v)
             if base and key:
                 break
     return base or "", key or "", model or "qwen3.8-27b"
@@ -101,6 +108,14 @@ def cmd_chat(args) -> int:
         )
         return 1
     model = args.model or model
+    if not ensure_reachable(base):
+        print(
+            f"cannot reach the model at {base}.\n"
+            "If it is served on an eval box, set CRUX_TUNNEL=<ssh host> in\n"
+            "~/.crux/env and this will open the forward itself.",
+            file=sys.stderr,
+        )
+        return 1
     ensure_pi_provider(base, key, model)
 
     sections = [s.strip() for s in (args.sections or "").split(",") if s.strip()]
