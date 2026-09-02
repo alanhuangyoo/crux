@@ -156,6 +156,12 @@ class CruxTerminusAgent(Terminus2):
         self._crux_submit = str(kwargs.pop("submit_gate", True)).lower() not in (
             "false", "0", "no",
         )
+        # Separable so the harness section can be measured on its own: it makes
+        # a different claim from the other two, and comes from a different kind
+        # of evidence (a side-by-side read rather than an aggregate).
+        self._crux_harness = str(kwargs.pop("harness_section", True)).lower() not in (
+            "false", "0", "no",
+        )
         # Steps past which the agent is told its approach has failed. 0 disables.
         self._stuck_at = int(kwargs.pop("stuck_step_threshold", _STUCK_STEP_THRESHOLD))
         self._stuck_fired = False
@@ -168,6 +174,7 @@ class CruxTerminusAgent(Terminus2):
                 self._get_upstream_template(),
                 scoring=True,
                 submit=self._crux_submit,
+                harness=self._crux_harness,
             )
         # Upstream sends no output cap at all, which leaves a thinking turn
         # unbounded. Measured on this deployment, `write-compressor` spent its
