@@ -426,6 +426,36 @@ it. Declaring completion is the judgement this agent gets wrong most often.
 _TERMINUS_FOOTER = "Task Description:"
 
 
+
+# The three sections, addressable by name, for front-ends that append them to
+# another agent's system prompt. Kept here rather than beside the harbor adapter
+# so that the interactive CLI does not need the benchmark harness installed --
+# the same separation pi has between its agent core and its eval package.
+PROMPT_SECTIONS = {
+    "scoring": TERMINUS_SCORING_SECTION,
+    "harness": TERMINUS_HARNESS_SECTION,
+    "submit": TERMINUS_SUBMIT_SECTION,
+}
+_SECTION_ORDER = ("scoring", "harness", "submit")
+
+
+def build_sections(names) -> str:
+    """The requested sections, in a fixed order, as one appended block.
+
+    Order is fixed rather than following the caller so two runs asking for the
+    same set produce the same bytes; otherwise an A/B could differ by section
+    order with nothing recording it. An unknown name raises, because a typo that
+    quietly runs the control arm while claiming the treatment is the failure
+    this project keeps finding elsewhere.
+    """
+    wanted = set(names)
+    unknown = wanted - set(PROMPT_SECTIONS)
+    if unknown:
+        raise ValueError(f"unknown prompt section(s): {sorted(unknown)}")
+    return "\n\n".join(
+        PROMPT_SECTIONS[n].strip() for n in _SECTION_ORDER if n in wanted
+    )
+
 def build_terminus_template(
     upstream: str,
     scoring: bool = True,

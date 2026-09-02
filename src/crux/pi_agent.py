@@ -28,11 +28,7 @@ from harbor.agents.installed.base import CliFlag
 from harbor.agents.installed.pi import Pi
 from harbor.environments.base import BaseEnvironment
 
-from crux.prompts import (
-    TERMINUS_HARNESS_SECTION,
-    TERMINUS_SCORING_SECTION,
-    TERMINUS_SUBMIT_SECTION,
-)
+from crux.prompts import build_sections
 
 # Where the sections land inside the environment. pi reads the file at startup,
 # so it has to exist before the agent command runs.
@@ -40,26 +36,7 @@ _REMOTE_PROMPT_PATH = "/tmp/crux-sections.md"
 
 # The submit section directs the model through `crux submit`, a tool that only
 # exists inside crux's own image, so it is off by default here.
-_SECTIONS = {
-    "scoring": TERMINUS_SCORING_SECTION,
-    "harness": TERMINUS_HARNESS_SECTION,
-    "submit": TERMINUS_SUBMIT_SECTION,
-}
 _DEFAULT_SECTIONS = ("scoring", "harness")
-
-
-def build_sections(names) -> str:
-    """The requested sections, in a fixed order, as one appended block.
-
-    Order is fixed rather than following the caller's argument so that two runs
-    asking for the same set produce the same bytes -- otherwise an A/B could
-    differ by section order and nothing would say so.
-    """
-    wanted = [n for n in ("scoring", "harness", "submit") if n in set(names)]
-    unknown = set(names) - set(_SECTIONS)
-    if unknown:
-        raise ValueError(f"unknown prompt section(s): {sorted(unknown)}")
-    return "\n\n".join(_SECTIONS[n].strip() for n in wanted)
 
 
 class CruxPiAgent(Pi):

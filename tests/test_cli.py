@@ -336,3 +336,42 @@ def test_task_names_are_qualified_by_the_dataset_org(monkeypatch):
     cmd = calls[-1]
     i = cmd.index("--include-task-name")
     assert cmd[i + 1] == "terminal-bench-pro/some-task"
+
+
+def test_chat_writes_pis_provider_without_clobbering_others(tmp_path):
+    # Two details that cost time when wrong: the file is ~/.pi/agent/models.json,
+    # not ~/.pi/models.json; and an OpenAI-compatible server like sglang needs
+    # compat.supportsDeveloperRole false or pi sends a role it rejects.
+    import json
+
+    from crux.chat import ensure_pi_provider
+
+    cfg = tmp_path / "models.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(json.dumps({"providers": {"someone-else": {"baseUrl": "x"}}}))
+
+    ensure_pi_provider("http://host:30001/v1/", "sk-test", "qwen3.8-27b", cfg)
+    doc = json.loads(cfg.read_text())
+    assert "someone-else" in doc["providers"]
+    p = doc["providers"]["crux-local"]
+    assert p["baseUrl"] == "http://host:30001/v1"      # trailing slash trimmed
+    assert p["compat"]["supportsDeveloperRole"] is False
+    assert p["models"][0]["id"] == "qwen3.8-27b"
+
+
+def test_a_corrupt_pi_config_is_replaced_not_fatal(tmp_path):
+    from crux.chat import ensure_pi_provider
+
+    cfg = tmp_path / "models.json"
+    cfg.write_text("{ not json at all")
+    ensure_pi_provider("http://h/v1", "k", "m", cfg)
+    import json
+    assert "crux-local" in json.loads(cfg.read_text())["providers"]
+
+
+def test_chat_defaults_to_the_measured_sections():
+    a = parse(["chat"])
+    assert a.sections == "scoring,harness"
+    # stock pi has to be reachable through the same command, so the interactive
+    # control arm and the benchmark control arm are the same thing
+    assert parse(["chat", "--sections", ""]).sections == ""

@@ -351,7 +351,7 @@ def test_the_harness_section_is_separable():
 def test_pi_sections_are_ordered_not_caller_ordered():
     # Two runs asking for the same set must produce the same bytes; otherwise an
     # A/B could differ by section order with nothing recording it.
-    from crux.pi_agent import build_sections
+    from crux.prompts import build_sections
     a = build_sections(["harness", "scoring"])
     b = build_sections(["scoring", "harness"])
     assert a == b
@@ -363,7 +363,7 @@ def test_an_unknown_pi_section_is_an_error_not_a_silent_drop():
     # treatment is the failure this project keeps finding elsewhere.
     import pytest as _pytest
 
-    from crux.pi_agent import build_sections
+    from crux.prompts import build_sections
     with _pytest.raises(ValueError):
         build_sections(["scoring", "harnes"])
 
@@ -371,5 +371,5 @@ def test_an_unknown_pi_section_is_an_error_not_a_silent_drop():
 def test_the_control_arm_is_reachable():
     # Stock pi has to run through the same class, so a difference between the
     # arms is the sections rather than the plumbing.
-    from crux.pi_agent import build_sections
+    from crux.prompts import build_sections
     assert build_sections([]) == ""

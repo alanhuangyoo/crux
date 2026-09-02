@@ -23,6 +23,13 @@ from pathlib import Path
 
 from crux import __version__
 
+
+def _chat(args) -> int:
+    # imported lazily: chat pulls in pi_agent, which needs harbor installed
+    from crux.chat import cmd_chat
+
+    return cmd_chat(args)
+
 # config and yaml are imported lazily by the commands that need them. `report`
 # only reads job directories, and requiring pydantic to do that means it fails
 # on any box where the analysis would otherwise work fine.
@@ -603,6 +610,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--variant", default="default", choices=sorted(VARIANTS))
     p.add_argument("--yaml", action="store_true", help="full config, not just the prompt")
     p.set_defaults(func=cmd_prompt)
+
+    p = sub.add_parser(
+        "chat",
+        help="interactive agent: pi's terminal UI with crux's measured sections",
+    )
+    p.add_argument("-m", "--model", help="model id (default: from the endpoint config)")
+    p.add_argument(
+        "--sections",
+        default="scoring,harness",
+        help="crux prompt sections to append, comma separated; empty for stock pi",
+    )
+    p.add_argument("-c", "--continue", dest="cont", action="store_true",
+                   help="continue the previous session")
+    p.add_argument("-r", "--resume", action="store_true", help="pick a session to resume")
+    p.add_argument("rest", nargs="*", help="passed through to pi")
+    p.set_defaults(func=_chat)
 
     return parser
 
