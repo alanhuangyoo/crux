@@ -431,9 +431,40 @@ _TERMINUS_FOOTER = "Task Description:"
 # another agent's system prompt. Kept here rather than beside the harbor adapter
 # so that the interactive CLI does not need the benchmark harness installed --
 # the same separation pi has between its agent core and its eval package.
+
+TERMINUS_EDIT_SECTION = """## Changing part of a file
+
+`apply_patch` is on PATH. Use it to change an existing file:
+
+    apply_patch <<'PATCH'
+    *** Begin Patch
+    *** Update File: path/to/file.py
+    @@
+     unchanged context line
+    -the line as it is now
+    +the line as it should be
+     unchanged context line
+    *** End Patch
+    PATCH
+
+It also takes `*** Add File:`, `*** Delete File:` and `*** Move to:`. It fails
+loudly when the context does not match, which is the point: the edit either
+lands where you meant or it does not land.
+
+Measured on this setup, across an 89-task run this agent made 845 file
+modifications, 791 of them a heredoc that retyped the whole file and 54 a
+`sed -i`. Both are worse than they look. A heredoc silently discards every
+line you did not retype, so a file you meant to adjust comes back missing
+whatever you forgot. A `sed -i` edits every line that matches the pattern, not
+the line you had in mind, and reports nothing when it matches four.
+
+Write a whole file with a heredoc when you are creating it. To change one that
+already exists, patch it."""
+
 PROMPT_SECTIONS = {
     "scoring": TERMINUS_SCORING_SECTION,
     "harness": TERMINUS_HARNESS_SECTION,
+    "edit": TERMINUS_EDIT_SECTION,
     "submit": TERMINUS_SUBMIT_SECTION,
 }
 _SECTION_ORDER = ("scoring", "harness", "submit")
@@ -461,6 +492,7 @@ def build_terminus_template(
     scoring: bool = True,
     submit: bool = True,
     harness: bool = True,
+    edit: bool = True,
 ) -> str:
     """Insert the crux sections into upstream's Terminus template.
 
@@ -481,5 +513,7 @@ def build_terminus_template(
         parts += [TERMINUS_SUBMIT_SECTION.strip(), ""]
     if harness:
         parts += [TERMINUS_HARNESS_SECTION.strip(), ""]
+    if edit:
+        parts += [TERMINUS_EDIT_SECTION.strip(), ""]
     parts += [sep + tail]
     return "\n".join(parts)
