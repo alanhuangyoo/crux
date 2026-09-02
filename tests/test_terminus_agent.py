@@ -253,3 +253,40 @@ def test_the_two_sections_stay_separable_after_the_rewrite():
     scoring_only = build_terminus_template(UPSTREAM, submit=False)
     assert "bound no check for" not in scoring_only
     assert "floor, not the target" in scoring_only
+
+
+def test_a_whitespace_only_tag_does_not_kill_the_trial():
+    # Upstream computes a tag name as
+    #   tag_content.split()[0] if " " in tag_content else tag_content
+    # which raises IndexError on "  ": the membership test passes and split()
+    # returns nothing. The exception escapes the agent loop and the trial scores
+    # zero. One trial in 61 hit it on a 2.1 run.
+    from crux.terminus_agent import _guard_whitespace_tags
+
+    class _Parser:
+        def _find_top_level_tags(self, content):
+            tag = content.strip("<>")
+            return [tag.split()[0] if " " in tag else tag]
+
+    p = _Parser()
+    assert p._find_top_level_tags("<response>") == ["response"]
+    with pytest.raises(IndexError):
+        p._find_top_level_tags("<  >")
+
+    _guard_whitespace_tags(p)
+    assert p._find_top_level_tags("<response>") == ["response"]
+    assert p._find_top_level_tags("<  >") == []
+
+
+def test_the_guard_leaves_other_failures_alone():
+    # Only IndexError is swallowed. Anything else is a different bug and hiding
+    # it would turn a crash into a silently empty parse.
+    from crux.terminus_agent import _guard_whitespace_tags
+
+    class _Parser:
+        def _find_top_level_tags(self, content):
+            raise ValueError("something else entirely")
+
+    p = _guard_whitespace_tags(_Parser())
+    with pytest.raises(ValueError):
+        p._find_top_level_tags("<x>")

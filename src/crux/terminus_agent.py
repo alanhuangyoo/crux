@@ -69,6 +69,37 @@ def _can_block(keystrokes: str) -> bool:
 _RESOURCES = Path(__file__).parent / "resources"
 
 
+def _guard_whitespace_tags(parser):
+    """Stop a whitespace-only tag from taking the whole trial down.
+
+    Upstream's XML parser extracts a tag name with
+
+        tag_name = tag_content.split()[0] if " " in tag_content else tag_content
+
+    which raises IndexError when the tag holds nothing but whitespace: `" " in
+    "  "` is true, and `"  ".split()` is empty. The exception escapes
+    parse_response, escapes the agent loop, and the trial scores zero -- for a
+    model emitting `<  >` once in a turn.
+
+    Measured here: one trial in 61 on Terminal-Bench 2.1, so roughly 1.5 tasks
+    per full run, lost to a malformed tag rather than to a wrong answer.
+
+    Wrapping rather than patching the module: the fix belongs upstream, and a
+    monkeypatch on an import would silently apply to any other agent in the same
+    process. A whitespace-only tag has no name, so it is dropped, which is what
+    the surrounding code does with anything it cannot identify.
+    """
+    original = parser._find_top_level_tags
+
+    def _safe(content):
+        try:
+            return original(content)
+        except IndexError:
+            return []
+
+    parser._find_top_level_tags = _safe
+    return parser
+
 class CruxTerminusAgent(Terminus2):
     """Terminus with Crux's scoring prompt and verified submission."""
 
@@ -94,6 +125,8 @@ class CruxTerminusAgent(Terminus2):
             "false", "0", "no",
         )
         super().__init__(*args, **kwargs)
+        if getattr(self, "_parser", None) is not None:
+            _guard_whitespace_tags(self._parser)
         if self._crux_tools:
             self._prompt_template = build_terminus_template(
                 self._get_upstream_template(),
