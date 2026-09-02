@@ -7,6 +7,7 @@ recovery installed but unreachable -- and let single turns reach 19,500
 completion tokens against a 900-second task budget.
 """
 
+from pathlib import Path
 import pytest
 
 from crux.terminus_agent import CruxTerminusAgent
@@ -444,3 +445,26 @@ def test_forgetting_clears_the_conversation_only():
     fresh = _FakeChat()
     a._chat = fresh
     assert fresh.messages == []
+
+
+def test_submit_gate_is_armed_inside_the_container_not_on_the_runner():
+    """`crux submit` runs in the task container, so the host's env arms nothing.
+
+    Routing it through Terminus's extra_env is the difference between a flag
+    that works and one that reads as if it does.
+    """
+
+
+    off = CruxTerminusAgent(logs_dir=Path("/tmp"), model_name="openai/m")
+    assert "CRUX_SUBMIT_GATE" not in (off._extra_env or {})
+
+    on = CruxTerminusAgent(logs_dir=Path("/tmp"), model_name="openai/m", confirm_gate="1")
+    assert (on._extra_env or {}).get("CRUX_SUBMIT_GATE") == "1"
+
+    # And it does not discard whatever else was being passed through.
+    both = CruxTerminusAgent(
+        logs_dir=Path("/tmp"), model_name="openai/m",
+        confirm_gate=True, extra_env={"KEEP": "yes"},
+    )
+    assert (both._extra_env or {}).get("KEEP") == "yes"
+    assert (both._extra_env or {}).get("CRUX_SUBMIT_GATE") == "1"
