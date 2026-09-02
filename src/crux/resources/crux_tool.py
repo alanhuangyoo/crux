@@ -400,6 +400,35 @@ def cmd_submit(args):
         )
         sys.exit(1)
 
+    if not args.confirm:
+        # Every check passing is where this agent stops, and stopping there is
+        # what it loses on. Measured against claude-code on the same model and
+        # the same tasks: of six tasks it lost, five were ones where it used
+        # FEWER steps -- qemu-startup ended at 48 steps with "crux submit
+        # already confirmed all 3 bound checks. The task is complete", while the
+        # arm that solved it ran 123. The gate was not too strict; it granted
+        # permission to stop.
+        #
+        # So a passing checklist buys one more deliberation rather than the
+        # sentinel. This is a forcing function, not a proof -- a tool cannot
+        # check that the model actually looked. It costs one round trip, and the
+        # gap it addresses was 75 of them.
+        print(f"all {len(items)} check(s) pass.")
+        print(
+            "\nThat says the checks you bound hold. It does not say they cover "
+            "what is graded: measured here, graders ran about six times as many "
+            "checks as this agent bound, and every failure was inside that gap.\n"
+            "\nBefore finishing, go through the task once more and bind a check "
+            "for any of these that apply and are not covered:\n"
+            "  - the empty, zero, single-element and boundary inputs\n"
+            "  - the numeric tolerance the task states, not one that looks close\n"
+            "  - the failure path: malformed input rejected, the exit code named\n"
+            "  - what must NOT change: state left alone, ordering preserved\n"
+            "  - anything the task described that has no check above\n"
+            "\nThen run `crux submit --confirm`. If nothing applies, run it now."
+        )
+        sys.exit(1)
+
     print(f"all {len(items)} item(s) verified")
     print(SUBMIT_SENTINEL)
 
@@ -435,6 +464,11 @@ def main():
 
     p = sub.add_parser(
         "submit", help="finish the task, if every check still passes"
+    )
+    p.add_argument(
+        "--confirm",
+        action="store_true",
+        help="finish, after the first call has asked what is not covered",
     )
     p.set_defaults(func=cmd_submit)
 

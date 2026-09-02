@@ -379,7 +379,7 @@ def test_submit_emits_the_sentinel_when_everything_holds(tmp_path):
     (tmp_path / "a.txt").write_text("x")
     todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
     todo(["done", "1"], tmp_path)
-    r = crux(["submit"], tmp_path)
+    r = crux(["submit", "--confirm"], tmp_path)
     assert r.returncode == 0
     assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in r.stdout
 
@@ -388,3 +388,35 @@ def test_submit_refuses_an_empty_checklist(tmp_path):
     """Submitting without having enumerated anything proves nothing."""
     r = crux(["submit"], tmp_path)
     assert r.returncode == 1 and "checklist is empty" in r.stderr
+
+
+def test_submit_asks_once_before_finishing(tmp_path):
+    # Measured against claude-code on the same model and the same tasks: of the
+    # six tasks crux lost, five used FEWER steps. qemu-startup ended at step 48
+    # with "crux submit already confirmed all 3 bound checks. The task is
+    # complete", while the arm that solved it ran 123. The gate was not too
+    # strict -- it granted permission to stop.
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    todo(["done", "1"], tmp_path)
+
+    first = crux(["submit"], tmp_path)
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" not in first.stdout
+    assert "boundary" in first.stdout
+    assert "--confirm" in first.stdout
+
+    second = crux(["submit", "--confirm"], tmp_path)
+    assert second.returncode == 0
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in second.stdout
+
+
+def test_confirm_is_a_second_look_not_a_bypass(tmp_path):
+    # The extra phase must not become a way around a check that regressed.
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    todo(["done", "1"], tmp_path)
+    (tmp_path / "a.txt").unlink()
+
+    r = crux(["submit", "--confirm"], tmp_path)
+    assert r.returncode != 0
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" not in r.stdout
