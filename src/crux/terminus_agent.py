@@ -115,19 +115,38 @@ def _guard_context_deadlock(chat):
         return chat  # nothing to guard; upstream may hand us another shape
     seen = {"n": 0}
 
+    def _trim() -> bool:
+        """Drop the middle of the conversation. True if anything was dropped."""
+        messages = getattr(chat, "_messages", None)
+        if not isinstance(messages, list) or len(messages) <= _KEEP_HEAD + _KEEP_TAIL:
+            return False
+        del messages[_KEEP_HEAD:len(messages) - _KEEP_TAIL]
+        return True
+
     async def _chat(*args, **kwargs):
-        response = await original(*args, **kwargs)
+        # The failure is an exception, not a value. A first version of this
+        # guard only inspected the returned response, and the run showed what
+        # that bought: path-tracing-reverse deadlocked 204 times with the guard
+        # installed. Upstream's summarization fallback calls chat.chat inside a
+        # try, and substitutes the fixed string in its own except block -- so
+        # the string never passes through here, and the exception does.
+        try:
+            response = await original(*args, **kwargs)
+        except Exception:
+            seen["n"] += 1
+            if seen["n"] < 2 or not _trim():
+                raise
+            seen["n"] = 0
+            return await original(*args, **kwargs)
         content = (getattr(response, "content", "") or "").strip()
         if content != _DEADLOCK_CONTENT:
             seen["n"] = 0
             return response
+        # Belt and braces: if some path does hand the string back as a value,
+        # it means the same thing and gets the same treatment.
         seen["n"] += 1
-        messages = getattr(chat, "_messages", None)
-        if seen["n"] < 2 or not isinstance(messages, list):
+        if seen["n"] < 2 or not _trim():
             return response
-        if len(messages) <= _KEEP_HEAD + _KEEP_TAIL:
-            return response  # nothing left to drop; let it fail honestly
-        del messages[_KEEP_HEAD:len(messages) - _KEEP_TAIL]
         seen["n"] = 0
         return await original(*args, **kwargs)
 
