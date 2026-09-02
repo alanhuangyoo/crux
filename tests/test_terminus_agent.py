@@ -262,33 +262,47 @@ def test_a_whitespace_only_tag_does_not_kill_the_trial():
     # which raises IndexError on "  ": the membership test passes and split()
     # returns nothing. The exception escapes the agent loop and the trial scores
     # zero. One trial in 61 hit it on a 2.1 run.
-    from crux.terminus_agent import _guard_whitespace_tags
+    from crux.terminus_agent import _harden_parser
 
     class _Parser:
         def _find_top_level_tags(self, content):
-            tag = content.strip("<>")
-            return [tag.split()[0] if " " in tag else tag]
+            return [
+                (t.split()[0] if " " in t else t)
+                for t in content.strip("<>").split("><")
+            ]
+
+        def _get_auto_fixes(self):
+            return []
 
     p = _Parser()
     assert p._find_top_level_tags("<response>") == ["response"]
     with pytest.raises(IndexError):
         p._find_top_level_tags("<  >")
 
-    _guard_whitespace_tags(p)
+    _harden_parser(p)
     assert p._find_top_level_tags("<response>") == ["response"]
-    assert p._find_top_level_tags("<  >") == []
+    # The nameless tag is dropped; what surrounded it is not. The first version
+    # of this guard returned [] here, which lost the <commands> beside it and
+    # sent the model into a retry loop that ran out the clock.
+    assert p._find_top_level_tags("<analysis><  ><commands>") == [
+        "analysis",
+        "commands",
+    ]
 
 
 def test_the_guard_leaves_other_failures_alone():
     # Only IndexError is swallowed. Anything else is a different bug and hiding
     # it would turn a crash into a silently empty parse.
-    from crux.terminus_agent import _guard_whitespace_tags
+    from crux.terminus_agent import _harden_parser
 
     class _Parser:
         def _find_top_level_tags(self, content):
             raise ValueError("something else entirely")
 
-    p = _guard_whitespace_tags(_Parser())
+        def _get_auto_fixes(self):
+            return []
+
+    p = _harden_parser(_Parser())
     with pytest.raises(ValueError):
         p._find_top_level_tags("<x>")
 

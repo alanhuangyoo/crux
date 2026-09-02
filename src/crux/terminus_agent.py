@@ -27,6 +27,8 @@ summarisation are upstream's, and that is the point.
 
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 
 from harbor.agents.terminus_2.terminus_2 import Command, Terminus2
@@ -79,25 +81,39 @@ def _can_block(keystrokes: str) -> bool:
 _RESOURCES = Path(__file__).parent / "resources"
 
 
-def _guard_whitespace_tags(parser):
-    """Stop a whitespace-only tag from taking the whole trial down.
+def _harden_parser(parser):
+    """Two parser faults that cost this arm more than any prompt did.
 
-    Upstream's XML parser extracts a tag name with
+    **An unclosed <commands> deadlocks the trial.** The model on this setup
+    reliably writes `<commands>`, then its `<keystrokes>` blocks, then
+    `</response>` -- and never `</commands>`. The parser looks for the closing
+    tag, does not find it, and reports "Missing <commands> section". The model
+    reads that, writes the section again, and omits the closing tag again. On
+    `mailman` that ran 438 times and consumed the entire 240-minute budget; on
+    `path-tracing-reverse`, 237 times. Across the 89-task run it accounted for
+    682 of 5,670 steps -- 12% of every step taken, spent on a missing tag.
+
+    Upstream already repairs exactly this shape of fault for `</response>`:
+    `_get_auto_fixes` returns (warning, fixer) pairs, and one of them appends
+    the tag and warns. There is no equivalent for `</commands>`, so this adds
+    one through that hook rather than around it.
+
+    Worth being precise about why the model never learns: the rejection says
+    the section is *missing*. It is not -- it is unclosed. The model is being
+    told to do the thing it already did, so it does it the same way.
+
+    **A whitespace-only tag raises.** Upstream extracts a tag name with
 
         tag_name = tag_content.split()[0] if " " in tag_content else tag_content
 
-    which raises IndexError when the tag holds nothing but whitespace: `" " in
-    "  "` is true, and `"  ".split()` is empty. The exception escapes
-    parse_response, escapes the agent loop, and the trial scores zero -- for a
-    model emitting `<  >` once in a turn.
+    which raises IndexError on `<  >`: `" " in "  "` is true and `"  ".split()`
+    is empty. The exception escapes the agent loop and the trial scores zero.
 
-    Measured here: one trial in 61 on Terminal-Bench 2.1, so roughly 1.5 tasks
-    per full run, lost to a malformed tag rather than to a wrong answer.
-
-    Wrapping rather than patching the module: the fix belongs upstream, and a
-    monkeypatch on an import would silently apply to any other agent in the same
-    process. A whitespace-only tag has no name, so it is dropped, which is what
-    the surrounding code does with anything it cannot identify.
+    The first version of this guard caught the IndexError and returned `[]`,
+    which dropped *every* tag in the response rather than the malformed one --
+    trading a rare crash for a silent misparse. This one skips the bad tag and
+    keeps the rest, which is what the surrounding code does with anything it
+    cannot identify.
     """
     original = parser._find_top_level_tags
 
@@ -105,10 +121,36 @@ def _guard_whitespace_tags(parser):
         try:
             return original(content)
         except IndexError:
-            return []
+            # Re-run over a copy with the nameless tags removed, so the tags
+            # around the bad one still reach the caller.
+            return original(re.sub(r"<\s+>", "", content))
 
     parser._find_top_level_tags = _safe
+
+    def _close_commands(response: str, error: str) -> tuple[str, bool]:
+        """Insert the `</commands>` the model omitted, if that is the fault."""
+        if "Missing <commands> section" not in error:
+            return response, False
+        if "<commands>" not in response or "</commands>" in response:
+            return response, False
+        # Before </response> when there is one, so the section keeps its place
+        # in the document; otherwise at the end.
+        end = response.find("</response>")
+        if end == -1:
+            return response.rstrip() + "\n</commands>", True
+        return response[:end].rstrip() + "\n</commands>\n" + response[end:], True
+
+    upstream_fixes = parser._get_auto_fixes
+
+    def _fixes():
+        return list(upstream_fixes()) + [
+            ("Missing </commands> closing tag was automatically inserted",
+             _close_commands),
+        ]
+
+    parser._get_auto_fixes = _fixes
     return parser
+
 
 _STUCK_NUDGE = """\
 [crux] You have now taken {steps} steps on this task.
@@ -175,7 +217,7 @@ class CruxTerminusAgent(Terminus2):
         self._crux_steps = 0
         super().__init__(*args, **kwargs)
         if getattr(self, "_parser", None) is not None:
-            _guard_whitespace_tags(self._parser)
+            _harden_parser(self._parser)
         if self._crux_tools:
             self._prompt_template = build_terminus_template(
                 self._get_upstream_template(),
