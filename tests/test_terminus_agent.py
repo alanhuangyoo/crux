@@ -468,3 +468,63 @@ def test_submit_gate_is_armed_inside_the_container_not_on_the_runner():
     )
     assert (both._extra_env or {}).get("KEEP") == "yes"
     assert (both._extra_env or {}).get("CRUX_SUBMIT_GATE") == "1"
+
+
+@pytest.mark.asyncio
+async def test_context_deadlock_is_broken_by_trimming():
+    """The loop that cost two tasks their entire budget.
+
+    Upstream's context-overflow fallback substitutes a fixed string when it
+    cannot get a usable turn. That string does not parse, so the agent is asked
+    again -- on the same oversized context, which overflows again. Measured at
+    322 iterations on extract-moves-from-video and 182 on path-tracing-reverse,
+    both scoring zero, with nothing in the trajectory that reads as an error.
+    """
+    from types import SimpleNamespace
+    from crux.terminus_agent import _DEADLOCK_CONTENT, _guard_context_deadlock
+
+    class _Chat:
+        def __init__(self):
+            self._messages = [f"m{i}" for i in range(40)]
+            self.calls = 0
+
+        async def chat(self, *a, **k):
+            self.calls += 1
+            # Recovers only once the history has actually been trimmed.
+            if len(self._messages) > 20:
+                return SimpleNamespace(content=_DEADLOCK_CONTENT)
+            return SimpleNamespace(content="<response>ok</response>")
+
+    c = _Chat()
+    _guard_context_deadlock(c)
+
+    # One occurrence is left alone: a transient failure keeps its normal retry.
+    first = await c.chat("go")
+    assert first.content == _DEADLOCK_CONTENT
+    assert len(c._messages) == 40, "must not trim on the first occurrence"
+
+    # The second is the loop, and trimming is what changes the input.
+    second = await c.chat("go")
+    assert second.content == "<response>ok</response>"
+    assert len(c._messages) < 40
+    assert c._messages[0] == "m0", "the opening instruction is kept"
+    assert c._messages[-1] == "m39", "and the recent turns are kept"
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_response_never_trims():
+    from types import SimpleNamespace
+    from crux.terminus_agent import _guard_context_deadlock
+
+    class _Chat:
+        def __init__(self):
+            self._messages = [f"m{i}" for i in range(40)]
+
+        async def chat(self, *a, **k):
+            return SimpleNamespace(content="<response>fine</response>")
+
+    c = _Chat()
+    _guard_context_deadlock(c)
+    for _ in range(5):
+        await c.chat("go")
+    assert len(c._messages) == 40
