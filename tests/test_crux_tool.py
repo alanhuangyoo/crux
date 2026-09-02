@@ -390,24 +390,44 @@ def test_submit_refuses_an_empty_checklist(tmp_path):
     assert r.returncode == 1 and "checklist is empty" in r.stderr
 
 
-def test_submit_asks_once_before_finishing(tmp_path):
-    # Measured against claude-code on the same model and the same tasks: of the
-    # six tasks crux lost, five used FEWER steps. qemu-startup ended at step 48
-    # with "crux submit already confirmed all 3 bound checks. The task is
-    # complete", while the arm that solved it ran 123. The gate was not too
-    # strict -- it granted permission to stop.
+def test_submit_is_closed_by_a_check_not_by_reading_a_list(tmp_path):
+    """The gate has to cost a bound check, because that is the measured gap.
+
+    First version listed generic categories -- empty input, exit codes,
+    tolerances -- and let the agent through if none applied. The trajectory
+    from that run says what it bought, in the model's own words: "The nudge to
+    add more checks lists generic categories ... none of which this task
+    actually specifies". It then ran --confirm with one check bound, and failed.
+    The dismissal was correct on its own terms, which is why the fix is not a
+    sterner list.
+    """
     (tmp_path / "a.txt").write_text("x")
     todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
     todo(["done", "1"], tmp_path)
 
     first = crux(["submit"], tmp_path)
     assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" not in first.stdout
-    assert "boundary" in first.stdout
-    assert "--confirm" in first.stdout
+    assert "crux todo add" in first.stdout, "it must say how to close the gate"
+    assert "end to end" in first.stdout, "and what to bind when all else is covered"
 
-    second = crux(["submit", "--confirm"], tmp_path)
-    assert second.returncode == 0
-    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in second.stdout
+    # The flag on its own is what the first version let through.
+    bypass = crux(["submit", "--confirm"], tmp_path)
+    assert bypass.returncode == 1
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" not in bypass.stdout
+    assert "does not record what you found" in bypass.stderr
+
+    # Binding one is what closes it.
+    (tmp_path / "b.txt").write_text("y")
+    todo(["add", "b exists", "--verify", "test -f b.txt"], tmp_path)
+    todo(["done", "2"], tmp_path)
+
+    nudge = crux(["submit"], tmp_path)
+    assert "--confirm" in nudge.stdout
+    assert "1 added" in nudge.stdout
+
+    done = crux(["submit", "--confirm"], tmp_path)
+    assert done.returncode == 0
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in done.stdout
 
 
 def test_confirm_is_a_second_look_not_a_bypass(tmp_path):
