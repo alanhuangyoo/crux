@@ -15,6 +15,8 @@ to get wrong.
 
 from __future__ import annotations
 
+import shlex
+
 import logging
 from pathlib import Path
 
@@ -56,6 +58,26 @@ class LocalCruxAgent(CruxTerminusAgent):
         self._interactive = interactive
         self._confirm = confirm or _prompt_yes_no
         self._blocked: list[tuple[str, str]] = []
+
+    async def setup(self, environment) -> None:
+        """Install the helpers, then put them on the shell's PATH.
+
+        The base class installs `crux` and `apply_patch` at container-absolute
+        paths, and LocalEnvironment redirects those into the session directory
+        so a laptop run needs no root. That redirect is invisible to the shell
+        the agent actually types into -- it drives tmux directly rather than
+        going through exec -- so the directory has to be exported there too, or
+        the prompt tells the model to run a command the shell cannot find.
+        """
+        await super().setup(environment)
+        bin_dir = getattr(environment, "bin_dir", None)
+        if bin_dir is None or self._session is None:
+            return
+        await self._session.send_keys(
+            [f"export PATH={shlex.quote(str(bin_dir))}:$PATH", "Enter"],
+            block=False,
+            min_timeout_sec=0.2,
+        )
 
     @staticmethod
     def name() -> str:
