@@ -162,6 +162,13 @@ class CruxTerminusAgent(Terminus2):
         self._crux_harness = str(kwargs.pop("harness_section", True)).lower() not in (
             "false", "0", "no",
         )
+        # Carry the conversation across run() calls, for the interactive path.
+        # Off by default: the benchmark scores one instruction per trial, and
+        # every number in this repo was measured with a fresh chat per run.
+        self._carry_context = str(kwargs.pop("carry_context", False)).lower() not in (
+            "false", "0", "no", "none",
+        )
+        self._carried: list = []
         # Steps past which the agent is told its approach has failed. 0 disables.
         self._stuck_at = int(kwargs.pop("stuck_step_threshold", _STUCK_STEP_THRESHOLD))
         self._stuck_fired = False
@@ -207,6 +214,40 @@ class CruxTerminusAgent(Terminus2):
             template_kwargs["reasoning_effort"] = str(reasoning_effort)
             body["chat_template_kwargs"] = template_kwargs
             self._llm_call_kwargs["extra_body"] = body
+
+    # Terminus assigns a fresh Chat as the second statement of every run(), so
+    # a second call starts with no memory of the first. The shell does not --
+    # the tmux session, its cwd, its environment and its background processes
+    # all survive, because harbor reuses the agent instance across calls (its
+    # own comment says so). Only the model's side of the continuity is missing.
+    #
+    # Seeding on assignment rather than patching harbor: the hook is the one
+    # place the object is handed to us, and a property lives entirely in this
+    # subclass. The alternative was reimplementing run(), which is 200 lines
+    # that upstream owns and changes.
+    @property
+    def _chat(self):
+        return getattr(self, "_chat_obj", None)
+
+    @_chat.setter
+    def _chat(self, chat) -> None:
+        if chat is not None and getattr(self, "_carry_context", False) and self._carried:
+            # Re-entering with prior turns means the template's preamble appears
+            # again above them. That repetition is the price of not rewriting
+            # upstream's prompt assembly, and it reads as a restatement of the
+            # standing instructions rather than a contradiction.
+            chat._messages.extend(self._carried)
+        self._chat_obj = chat
+
+    def remember_turn(self) -> None:
+        """Keep this turn's messages so the next run() continues from them."""
+        chat = self._chat
+        if self._carry_context and chat is not None:
+            self._carried = list(chat.messages)
+
+    def forget_context(self) -> None:
+        """Drop the carried conversation. The shell state is untouched."""
+        self._carried = []
 
     def _get_upstream_template(self) -> str:
         """Upstream's own template text, read fresh rather than copied.

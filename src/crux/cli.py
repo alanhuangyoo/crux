@@ -24,6 +24,13 @@ from pathlib import Path
 from crux import __version__
 
 
+def _repl(args) -> int:
+    # lazy: repl pulls in harbor through local_agent
+    from crux.repl import cmd_repl
+
+    return cmd_repl(args)
+
+
 def _chat(args) -> int:
     # imported lazily: chat pulls in pi_agent, which needs harbor installed
     from crux.chat import cmd_chat
@@ -626,6 +633,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-r", "--resume", action="store_true", help="pick a session to resume")
     p.add_argument("rest", nargs="*", help="passed through to pi")
     p.set_defaults(func=_chat)
+
+    p = sub.add_parser(
+        "repl",
+        help="talk to the benchmarked agent, multi-turn, in a directory",
+    )
+    p.add_argument("-m", "--model", help="model id")
+    p.add_argument("--cwd", help="directory to work in")
+    p.add_argument("--variant", default="default", choices=sorted(VARIANTS))
+    p.add_argument(
+        "--approval",
+        default="dangerous",
+        choices=("never", "dangerous", "always"),
+        help="how much to ask before running a command (default: dangerous)",
+    )
+    p.set_defaults(func=_repl)
 
     return parser
 

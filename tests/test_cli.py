@@ -375,3 +375,10 @@ def test_chat_defaults_to_the_measured_sections():
     # stock pi has to be reachable through the same command, so the interactive
     # control arm and the benchmark control arm are the same thing
     assert parse(["chat", "--sections", ""]).sections == ""
+
+
+def test_repl_is_a_subcommand_with_the_same_approval_default():
+    # The interactive path must not be more permissive than the one-shot one.
+    a = parse(["repl"])
+    assert a.approval == "dangerous"
+    assert parse(["solve", "x"]).approval == "dangerous"
