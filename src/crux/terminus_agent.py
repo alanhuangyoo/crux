@@ -221,6 +221,18 @@ class CruxTerminusAgent(Terminus2):
         self._stuck_at = int(kwargs.pop("stuck_step_threshold", _STUCK_STEP_THRESHOLD))
         self._stuck_fired = False
         self._crux_steps = 0
+        # Whether `crux submit` demands a second pass before it will finish.
+        # Named apart from `submit_gate`, which is about the prompt section:
+        # one decides whether the agent is told to run the command, this
+        # decides what the command does when it is run.
+        #
+        # Routed through Terminus's own extra_env rather than the host's, since
+        # `crux submit` runs inside the task container: setting it on the
+        # runner would arm nothing and look like it had.
+        if str(kwargs.pop("confirm_gate", "")).lower() in ("1", "true", "yes"):
+            env = dict(kwargs.get("extra_env") or {})
+            env["CRUX_SUBMIT_GATE"] = "1"
+            kwargs["extra_env"] = env
         super().__init__(*args, **kwargs)
         if getattr(self, "_parser", None) is not None:
             _harden_parser(self._parser)
