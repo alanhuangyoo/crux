@@ -401,6 +401,18 @@ def cmd_submit(args):
         )
         sys.exit(1)
 
+    # Off unless asked for. The gate was built on a reading of the trajectories
+    # that the finished runs disproved: crux was said to stop earlier than the
+    # arm that solved the same task, and on the full 89 it stops LATER on nine
+    # of the ten tasks it loses. What remains true is the coverage measurement
+    # it also rests on -- 206 grader tests against 35 bound checks -- but that
+    # is a reason to measure the gate, not to leave it in the default path
+    # while something else is being measured through it.
+    if os.environ.get("CRUX_SUBMIT_GATE", "0") not in ("1", "true", "yes"):
+        print(f"all {len(items)} item(s) verified")
+        print(SUBMIT_SENTINEL)
+        return
+
     # Kept beside the checklist rather than in it, so the list's shape -- which
     # the prompt, the tests and `todo list` all depend on -- does not change to
     # carry one integer.

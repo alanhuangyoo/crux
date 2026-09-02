@@ -390,7 +390,7 @@ def test_submit_refuses_an_empty_checklist(tmp_path):
     assert r.returncode == 1 and "checklist is empty" in r.stderr
 
 
-def test_submit_is_closed_by_a_check_not_by_reading_a_list(tmp_path):
+def test_submit_is_closed_by_a_check_not_by_reading_a_list(tmp_path, monkeypatch):
     """The gate has to cost a bound check, because that is the measured gap.
 
     First version listed generic categories -- empty input, exit codes,
@@ -401,6 +401,7 @@ def test_submit_is_closed_by_a_check_not_by_reading_a_list(tmp_path):
     The dismissal was correct on its own terms, which is why the fix is not a
     sterner list.
     """
+    monkeypatch.setenv("CRUX_SUBMIT_GATE", "1")
     (tmp_path / "a.txt").write_text("x")
     todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
     todo(["done", "1"], tmp_path)
@@ -440,3 +441,20 @@ def test_confirm_is_a_second_look_not_a_bypass(tmp_path):
     r = crux(["submit", "--confirm"], tmp_path)
     assert r.returncode != 0
     assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" not in r.stdout
+
+
+def test_the_gate_is_off_unless_asked_for(tmp_path):
+    """An unverified change must not sit in the path of the next measurement.
+
+    The gate rests partly on a reading the finished runs disproved -- crux was
+    said to stop earlier than the arm that solved the same task, and on the
+    full 89 it stops later on nine of the ten it loses. Leaving it on would put
+    two changes in one experiment.
+    """
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    todo(["done", "1"], tmp_path)
+
+    out = crux(["submit"], tmp_path)
+    assert out.returncode == 0
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in out.stdout
