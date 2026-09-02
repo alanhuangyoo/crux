@@ -81,6 +81,60 @@ def _can_block(keystrokes: str) -> bool:
 _RESOURCES = Path(__file__).parent / "resources"
 
 
+# Upstream's synthetic response when its context-overflow fallback cannot get a
+# usable turn out of the model. It is not model output, and it does not parse.
+_DEADLOCK_CONTENT = "Technical difficulties. Please continue with the task."
+
+# What to keep when trimming: the instruction the task opened with, and enough
+# recent turns to know what the terminal is showing. The middle is what grew.
+_KEEP_HEAD = 1
+_KEEP_TAIL = 12
+
+
+def _guard_context_deadlock(chat):
+    """Break the summarize-fails-resend loop by trimming the conversation.
+
+    The loop, measured: the context overflows, upstream summarizes, the chat
+    call carrying the summary comes back truncated (`finish_reason=length`),
+    and the exception handler substitutes `_DEADLOCK_CONTENT` for the response.
+    That string has no <response> tag, so the parser rejects it, so the agent is
+    asked again -- with the same oversized context, which overflows again.
+
+    On `extract-moves-from-video` that ran 322 times and consumed the whole
+    budget; on `path-tracing-reverse`, 182. Both scored zero. Nothing about it
+    is visible as an error: the trajectory shows an agent politely being told
+    its response had parsing errors, several hundred times.
+
+    Upstream cannot escape it on its own because every exit it has goes through
+    another call on the same context. Trimming is the one move that changes the
+    input, so that is what this does -- after the second occurrence, so a single
+    transient failure still gets its ordinary retry.
+    """
+    original = getattr(chat, "chat", None)
+    if not callable(original):
+        return chat  # nothing to guard; upstream may hand us another shape
+    seen = {"n": 0}
+
+    async def _chat(*args, **kwargs):
+        response = await original(*args, **kwargs)
+        content = (getattr(response, "content", "") or "").strip()
+        if content != _DEADLOCK_CONTENT:
+            seen["n"] = 0
+            return response
+        seen["n"] += 1
+        messages = getattr(chat, "_messages", None)
+        if seen["n"] < 2 or not isinstance(messages, list):
+            return response
+        if len(messages) <= _KEEP_HEAD + _KEEP_TAIL:
+            return response  # nothing left to drop; let it fail honestly
+        del messages[_KEEP_HEAD:len(messages) - _KEEP_TAIL]
+        seen["n"] = 0
+        return await original(*args, **kwargs)
+
+    chat.chat = _chat
+    return chat
+
+
 def _harden_parser(parser):
     """Two parser faults that cost this arm more than any prompt did.
 
@@ -298,6 +352,8 @@ class CruxTerminusAgent(Terminus2):
             # upstream's prompt assembly, and it reads as a restatement of the
             # standing instructions rather than a contradiction.
             chat._messages.extend(self._carried)
+        if chat is not None:
+            _guard_context_deadlock(chat)
         self._chat_obj = chat
 
     def remember_turn(self) -> None:
