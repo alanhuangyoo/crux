@@ -65,6 +65,13 @@ class LocalEnvironment:
         self.logger = logger or logging.getLogger("crux.local")
         root = session_root or (Path.home() / ".crux" / "sessions" / self.session_id)
         self.trial_paths = _LocalTrialPaths(root)
+        # Where container-absolute tool paths land instead. The agent installs
+        # its helpers at /usr/local/bin, which is correct inside a task image
+        # and needs root on a laptop. Redirecting into the session and putting
+        # that on PATH keeps one code path for both, and keeps a local run from
+        # writing outside its own directory.
+        self.bin_dir = root / "bin"
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -97,6 +104,9 @@ class LocalEnvironment:
         CLI that silently escalates is worse than one that cannot.
         """
         merged = {**os.environ, **(env or {})}
+        for prefix in ("/usr/local/bin/", "/usr/bin/"):
+            if prefix in command:
+                command = command.replace(prefix, f"{self.bin_dir}/")
         proc = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,
@@ -119,9 +129,19 @@ class LocalEnvironment:
     async def is_dir(self, path: str, user: str | int | None = None) -> bool:
         return Path(path).expanduser().is_dir()
 
+    def _local_target(self, target_path: str) -> Path:
+        """Map a container-absolute tool path into this session's bin dir."""
+        target = Path(target_path).expanduser()
+        for prefix in ("/usr/local/bin", "/usr/bin"):
+            try:
+                return self.bin_dir / target.relative_to(prefix)
+            except ValueError:
+                continue
+        return target
+
     async def upload_file(self, source_path: Path | str, target_path: str) -> None:
         """A copy, since 'the environment' is the same filesystem."""
-        dst = Path(target_path).expanduser()
+        dst = self._local_target(target_path)
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(Path(source_path).expanduser(), dst)
 
