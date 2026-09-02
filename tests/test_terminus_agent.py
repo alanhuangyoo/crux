@@ -183,7 +183,9 @@ def test_disabling_every_section_reproduces_upstream_exactly():
     # anything. This has to name every section: when the harness section was
     # added with the test still listing two, it failed -- correctly.
     from crux.prompts import build_terminus_template
-    out = build_terminus_template(UPSTREAM, scoring=False, submit=False, harness=False)
+    out = build_terminus_template(
+        UPSTREAM, scoring=False, submit=False, harness=False, edit=False
+    )
     assert out.strip() == UPSTREAM.strip()
 
 

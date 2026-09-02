@@ -204,6 +204,12 @@ class CruxTerminusAgent(Terminus2):
         self._crux_harness = str(kwargs.pop("harness_section", True)).lower() not in (
             "false", "0", "no",
         )
+        # Separable from installing the binary: whether apply_patch is on PATH
+        # and whether the model is told to use it are two claims, and an
+        # ablation needs to move one at a time.
+        self._crux_edit = str(kwargs.pop("edit_section", True)).lower() not in (
+            "false", "0", "no",
+        )
         # Carry the conversation across run() calls, for the interactive path.
         # Off by default: the benchmark scores one instruction per trial, and
         # every number in this repo was measured with a fresh chat per run.
@@ -224,6 +230,7 @@ class CruxTerminusAgent(Terminus2):
                 scoring=True,
                 submit=self._crux_submit,
                 harness=self._crux_harness,
+                edit=self._crux_edit,
             )
         # Upstream sends no output cap at all, which leaves a thinking turn
         # unbounded. Measured on this deployment, `write-compressor` spent its
@@ -320,6 +327,19 @@ class CruxTerminusAgent(Terminus2):
             target_path="/usr/local/bin/crux",
         )
         await environment.exec("chmod +x /usr/local/bin/crux")
+        # An edit primitive. Without one, every modification this agent makes
+        # goes through the shell: 791 heredoc rewrites and 54 `sed -i` calls
+        # across an 89-task run, 845 edits with no way to change part of a file
+        # except by retyping all of it or matching a pattern that may hit the
+        # wrong line. The arm that outscored this one reached for a targeted
+        # edit tool instead. apply_patch is already in this repo, measured at
+        # 97.5% over 601 calls; it was wired into the older agent and never
+        # into the one being scored.
+        await environment.upload_file(
+            source_path=_RESOURCES / "apply_patch.py",
+            target_path="/usr/local/bin/apply_patch",
+        )
+        await environment.exec("chmod +x /usr/local/bin/apply_patch")
 
     @override
     def _stuck_notice(self) -> str:

@@ -95,3 +95,19 @@ def test_nameless_tag_does_not_drop_its_siblings():
     tags = parser._find_top_level_tags("<analysis>a</analysis><  ><commands>c</commands>")
     assert "commands" in tags
     assert "analysis" in tags
+
+
+def test_the_edit_section_names_the_tool_and_its_format():
+    """The section is only useful if the model can write a patch from it alone.
+
+    It is delivered as part of the system prompt with no examples elsewhere, so
+    the envelope markers have to appear verbatim in the text.
+    """
+    from crux.prompts import TERMINUS_EDIT_SECTION as s
+
+    assert "apply_patch" in s
+    for marker in ("*** Begin Patch", "*** Update File:", "*** End Patch"):
+        assert marker in s, marker
+    # And it has to say when NOT to use it, or the model patches files it is
+    # creating and the context never matches.
+    assert "creating" in s
