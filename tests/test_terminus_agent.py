@@ -373,3 +373,58 @@ def test_the_control_arm_is_reachable():
     # arms is the sections rather than the plumbing.
     from crux.prompts import build_sections
     assert build_sections([]) == ""
+
+
+class _CarryStub(CruxTerminusAgent):
+    """The chat property without harbor's Terminus constructor."""
+
+    def __init__(self, carry=True):
+        self._carry_context = carry
+        self._carried = []
+
+
+class _FakeChat:
+    def __init__(self, messages=None):
+        self._messages = list(messages or [])
+
+    @property
+    def messages(self):
+        return self._messages
+
+
+def test_a_second_run_continues_the_conversation():
+    # Terminus assigns a fresh Chat as the second statement of every run(), so
+    # without this a second call starts with no memory of the first -- while the
+    # shell, which harbor reuses across calls, remembers everything.
+    a = _CarryStub()
+    first = _FakeChat()
+    a._chat = first
+    first._messages.extend(["sys+task", "assistant did work"])
+    a.remember_turn()
+
+    second = _FakeChat()
+    a._chat = second
+    assert second.messages[:2] == ["sys+task", "assistant did work"]
+
+
+def test_the_benchmark_path_keeps_a_fresh_chat():
+    # Every number in this repo was measured one instruction per trial with no
+    # carry-over, so the default must not quietly change what is being scored.
+    a = _CarryStub(carry=False)
+    first = _FakeChat(["one"])
+    a._chat = first
+    a.remember_turn()
+    second = _FakeChat()
+    a._chat = second
+    assert second.messages == []
+
+
+def test_forgetting_clears_the_conversation_only():
+    a = _CarryStub()
+    c = _FakeChat(["one"])
+    a._chat = c
+    a.remember_turn()
+    a.forget_context()
+    fresh = _FakeChat()
+    a._chat = fresh
+    assert fresh.messages == []
