@@ -64,9 +64,21 @@ def cmd_repl(args) -> int:
         return 1
 
     from crux import __version__
+    from crux.chat import _endpoint
+    from crux.endpoint import ensure_reachable
     from crux.approval import Approval
     from crux.local_agent import LocalCruxAgent
     from crux.local_env import LocalEnvironment
+
+    base, _, default_model = _endpoint()
+    if base and not ensure_reachable(base):
+        print(
+            f"cannot reach the model at {base}.\n"
+            "If it is served on an eval box, set CRUX_TUNNEL=<ssh host> in\n"
+            "~/.crux/env and this will open the forward itself.",
+            file=sys.stderr,
+        )
+        return 1
 
     cwd = Path(args.cwd or os.getcwd()).resolve()
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
@@ -75,7 +87,7 @@ def cmd_repl(args) -> int:
     env = LocalEnvironment(cwd=cwd)
     agent = LocalCruxAgent(
         logs_dir=Path(env.trial_paths.agent_dir),
-        model_name=args.model,
+        model_name=args.model or f"openai/{default_model}",
         approval=approval,
         project_root=cwd,
         interactive=interactive,

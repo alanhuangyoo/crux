@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -115,3 +116,40 @@ async def test_the_refusal_reaches_the_model_as_output(agent):
     _, out = await a._execute_commands([_Cmd("echo hi\n"), _Cmd("rm -rf /\n")], None)
     assert "ok" in out
     assert "crux refused to run" in out
+
+
+@pytest.mark.asyncio
+async def test_a_second_session_takes_a_free_name():
+    """Two `crux repl` windows is ordinary use, not an edge case.
+
+    Upstream names the tmux session after the agent, a constant, so the second
+    one died with "duplicate session: crux-local" before its first turn.
+    """
+    from crux.local_agent import LocalCruxAgent
+
+    class _Env:
+        def __init__(self, listing):
+            self.listing = listing
+
+        async def exec(self, command, **kwargs):
+            return SimpleNamespace(stdout=self.listing, stderr="", returncode=0)
+
+    agent = LocalCruxAgent.__new__(LocalCruxAgent)
+
+    # Nothing running: the name is untouched, so `tmux attach -t crux-local`
+    # still finds a lone session.
+    await agent._claim_session_name(_Env(""))
+    assert agent.name() == "crux-local"
+
+    # One already up: the next free name, not a random one.
+    agent2 = LocalCruxAgent.__new__(LocalCruxAgent)
+    await agent2._claim_session_name(_Env("crux-local\nother\n"))
+    assert agent2.name() == "crux-local-2"
+
+    # And it skips past however many are up.
+    agent3 = LocalCruxAgent.__new__(LocalCruxAgent)
+    await agent3._claim_session_name(_Env("crux-local\ncrux-local-2\ncrux-local-3\n"))
+    assert agent3.name() == "crux-local-4"
+
+    # The unbound call harbor makes on its handoff path is unaffected.
+    assert LocalCruxAgent.name() == "crux-local"

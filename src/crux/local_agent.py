@@ -59,6 +59,32 @@ class LocalCruxAgent(CruxTerminusAgent):
         self._confirm = confirm or _prompt_yes_no
         self._blocked: list[tuple[str, str]] = []
 
+    async def _claim_session_name(self, environment) -> None:
+        """Take a free tmux session name, so a second window is not blocked.
+
+        Upstream names the session `self.name()`, a constant, so a second
+        `crux repl` fails with "duplicate session: crux-local" before its first
+        turn. Two terminals open on two projects is ordinary use, not an edge
+        case.
+
+        The name stays exactly `crux-local` whenever it is free, so a lone
+        session is still findable by `tmux attach -t crux-local`; only a
+        genuine collision gets a suffix. Assigning it on the instance shadows
+        the staticmethod for `self.name()` without touching `cls.name()`,
+        which harbor calls unbound on its handoff path.
+        """
+        base = type(self).name()
+        probe = await environment.exec("tmux ls -F '#{session_name}' 2>/dev/null")
+        taken = set((probe.stdout or "").split())
+        if base not in taken:
+            return
+        for n in range(2, 100):
+            candidate = f"{base}-{n}"
+            if candidate not in taken:
+                self.name = lambda c=candidate: c
+                return
+        raise RuntimeError(f"no free tmux session name for {base}")
+
     async def setup(self, environment) -> None:
         """Install the helpers, then put them on the shell's PATH.
 
@@ -69,6 +95,7 @@ class LocalCruxAgent(CruxTerminusAgent):
         going through exec -- so the directory has to be exported there too, or
         the prompt tells the model to run a command the shell cannot find.
         """
+        await self._claim_session_name(environment)
         await super().setup(environment)
         bin_dir = getattr(environment, "bin_dir", None)
         if bin_dir is None or self._session is None:
