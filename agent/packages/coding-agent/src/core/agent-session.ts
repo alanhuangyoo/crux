@@ -41,6 +41,7 @@ import {
 	getSupportedThinkingLevels,
 	isContextOverflow,
 	isRecoverableLength,
+	isSaturatedLength,
 	isRetryableAssistantError,
 	modelsAreEqual,
 	type RetryCallbacks,
@@ -334,6 +335,7 @@ export class AgentSession {
 	private _compactionAbortController: AbortController | undefined = undefined;
 	private _autoCompactionAbortController: AbortController | undefined = undefined;
 	private _overflowRecoveryAttempted = false;
+	private _saturatedRecoveryAttempted = false;
 
 	// Branch summarization state
 	private _branchSummaryAbortController: AbortController | undefined = undefined;
@@ -697,6 +699,7 @@ export class AgentSession {
 				const assistantMsg = event.message as AssistantMessage;
 				if (assistantMsg.stopReason !== "error" && assistantMsg.stopReason !== "length") {
 					this._overflowRecoveryAttempted = false;
+					this._saturatedRecoveryAttempted = false;
 				}
 
 				// Reset retry counter immediately on successful assistant response
@@ -2192,6 +2195,39 @@ export class AgentSession {
 				this.agent.state.messages = messages.slice(0, -1);
 			}
 			return await this._runAutoCompaction("overflow", willRetry);
+		}
+
+		// Case 3: the response ran to the end of its own output budget. Compaction is
+		// the wrong remedy and isRecoverableLength rightly rejects it -- but until now
+		// nothing else picked it up, so the turn simply ended. Measured on
+		// Terminal-Bench 2.1, that lost four tasks outright, one of them on the first
+		// turn of the task. Asking for the same work in less space is a remedy that
+		// fits the actual failure, and it is tried once.
+		if (sameModel && isSaturatedLength(assistantMessage, this.model?.maxTokens ?? 0)) {
+			if (this._saturatedRecoveryAttempted) {
+				return false;
+			}
+			this._saturatedRecoveryAttempted = true;
+			const messages = this.agent.state.messages;
+			if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+				this.agent.state.messages = messages.slice(0, -1);
+			}
+			this.agent.steer({
+				role: "user",
+				content: [
+					{
+						type: "text",
+						text:
+							"Your last response was cut off: it used the entire output budget " +
+							"and never finished. Nothing from it was applied.\n\n" +
+							"Do the same work in a much smaller response. Take one step rather " +
+							"than the whole task, keep the reasoning short, and put long content " +
+							"in a file with a command instead of writing it out in the reply.",
+					},
+				],
+				timestamp: Date.now(),
+			});
+			return true;
 		}
 
 		// Case 3: threshold compaction without retry.

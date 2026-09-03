@@ -563,16 +563,43 @@ describe("AgentSession compaction characterization", () => {
 		expect(harness.getPendingResponseCount()).toBe(0);
 	});
 
-	it("does not compact when a length stop reaches the desired output limit", async () => {
+	it("recovers a saturated length stop by retrying smaller, not by compacting", async () => {
+		// crux: a length stop that used the whole output budget is not a context
+		// problem, so it must not compact -- but leaving it unhandled ended the
+		// turn with nothing applied (four tasks lost on Terminal-Bench 2.1, one on
+		// the very first turn). The response is dropped, a "do it smaller" steer is
+		// injected, and the model is asked once more.
 		const harness = await createHarness({
 			models: [{ id: "faux-1", contextWindow: 1_000_000, maxTokens: 100 }],
 		});
 		harnesses.push(harness);
-		harness.setResponses([fauxAssistantMessage("x".repeat(400), { stopReason: "length" })]);
+		harness.setResponses([
+			fauxAssistantMessage("x".repeat(400), { stopReason: "length" }),
+			fauxAssistantMessage("ok"),
+		]);
 
 		await harness.session.prompt("hello");
 
-		expect(harness.faux.state.callCount).toBe(1);
+		// Retried once (two model calls), and never compacted.
+		expect(harness.faux.state.callCount).toBe(2);
+		expect(harness.eventsOfType("compaction_start")).toHaveLength(0);
+	});
+
+	it("gives up a saturated length stop after a single retry", async () => {
+		// The retry is tried once. A model that saturates the budget again is not
+		// looping forever: the second saturated response is left to end the turn.
+		const harness = await createHarness({
+			models: [{ id: "faux-1", contextWindow: 1_000_000, maxTokens: 100 }],
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage("x".repeat(400), { stopReason: "length" }),
+			fauxAssistantMessage("y".repeat(400), { stopReason: "length" }),
+		]);
+
+		await harness.session.prompt("hello");
+
+		expect(harness.faux.state.callCount).toBe(2);
 		expect(harness.eventsOfType("compaction_start")).toHaveLength(0);
 	});
 

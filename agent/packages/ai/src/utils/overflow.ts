@@ -173,6 +173,27 @@ export function isRecoverableLength(message: AssistantMessage, desiredMaxOutput:
 }
 
 /**
+ * A length stop that used the whole output budget.
+ *
+ * The distinction matters because the two length stops need opposite remedies.
+ * A response truncated below the budget was squeezed by the context, and
+ * compacting the input gives it room. A response that reached the budget was
+ * not squeezed by anything -- the model simply generated until it ran out, and
+ * compacting the input does not make it stop sooner.
+ *
+ * Measured on Terminal-Bench 2.1 with a self-hosted Qwen3.8-27B: five trials
+ * produced exactly 65536 output tokens, four of them scored zero, and one of
+ * those was the very first turn of the task -- where there was no context to
+ * compact in the first place. `isRecoverableLength` correctly returns false for
+ * all of them, and nothing else handled them, so the turn ended there.
+ */
+export function isSaturatedLength(message: AssistantMessage, desiredMaxOutput: number): boolean {
+	return (
+		message.stopReason === "length" && desiredMaxOutput > 0 && message.usage.output >= desiredMaxOutput
+	);
+}
+
+/**
  * Get the overflow patterns for testing purposes.
  */
 export function getOverflowPatterns(): RegExp[] {

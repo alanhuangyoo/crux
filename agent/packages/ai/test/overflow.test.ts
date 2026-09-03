@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AssistantMessage } from "../src/types.ts";
-import { isContextOverflow, isRecoverableLength } from "../src/utils/overflow.ts";
+import { isContextOverflow, isRecoverableLength, isSaturatedLength } from "../src/utils/overflow.ts";
 
 function createErrorMessage(errorMessage: string): AssistantMessage {
 	return {
@@ -158,6 +158,26 @@ describe("isContextOverflow", () => {
 	it("does not recover a length stop that reached the desired output limit", () => {
 		const message = createLengthStopMessage({ input: 4062, cacheRead: 0, output: 1024 });
 		expect(isRecoverableLength(message, 1024)).toBe(false);
+	});
+
+	it("recognises the length stop that reached the desired output limit", () => {
+		// The case isRecoverableLength deliberately rejects: compacting the input
+		// cannot shorten a response that ran to the end of its own budget. It still
+		// needs an answer, which is what isSaturatedLength selects for.
+		const message = createLengthStopMessage({ input: 4062, cacheRead: 0, output: 1024 });
+		expect(isSaturatedLength(message, 1024)).toBe(true);
+		expect(isRecoverableLength(message, 1024)).toBe(false);
+	});
+
+	it("does not call a squeezed length stop saturated", () => {
+		const message = createLengthStopMessage({ input: 4062, cacheRead: 0, output: 16 });
+		expect(isSaturatedLength(message, 128000)).toBe(false);
+		expect(isRecoverableLength(message, 128000)).toBe(true);
+	});
+
+	it("says nothing about a length stop when the budget is unknown", () => {
+		const message = createLengthStopMessage({ input: 4062, cacheRead: 0, output: 1024 });
+		expect(isSaturatedLength(message, 0)).toBe(false);
 	});
 
 	it("treats zero-output length stops as recoverable without context metadata", () => {
