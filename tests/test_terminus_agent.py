@@ -319,11 +319,28 @@ class _StuckStub(CruxTerminusAgent):
         self._crux_steps = 0
 
 
-def test_the_stuck_notice_fires_once_at_the_measured_threshold():
-    # No task solved in a full 89-task run passed 120 steps; the longest solve
-    # was 120 and the median 29, while failures ran 71 median and 323 at p90.
-    # So the threshold is where a trial stops being a slow success.
-    a = _StuckStub()
+def test_the_stuck_notice_is_off_by_default():
+    """It was on, at 120, and 120 was measured. The fixes moved the data.
+
+    Baseline: the longest solve took 120 steps, the median 29, and all six
+    trials past 120 failed. After the parser and blocking-execution fixes,
+    re-derived on 80 trials: the longest solve takes 182 steps, failures stop
+    at 132 rather than 519, and six of the ten trials past 120 solve. Crossing
+    it now correlates with succeeding, and no threshold in the current data
+    separates the two.
+    """
+    from crux.terminus_agent import _STUCK_STEP_THRESHOLD
+
+    assert _STUCK_STEP_THRESHOLD == 0
+    a = _StuckStub(threshold=_STUCK_STEP_THRESHOLD)
+    for _ in range(400):
+        assert a._stuck_notice() == ""
+
+
+def test_the_stuck_notice_still_works_when_asked_for():
+    # Kept as a knob rather than deleted: the measurement is about this model
+    # on this benchmark.
+    a = _StuckStub(threshold=120)
     for _ in range(119):
         assert a._stuck_notice() == ""
     first = a._stuck_notice()
