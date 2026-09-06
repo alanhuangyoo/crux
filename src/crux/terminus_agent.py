@@ -244,7 +244,28 @@ the task ships, its test file, `crux todo verify`, or the smallest command that
 executes the code you changed. Then continue.
 """
 
-_STUCK_STEP_THRESHOLD = 120
+# Off. It was 120, and 120 was measured: across the 89-task baseline no task
+# that was eventually solved took more than 120 steps, the median solve took 29,
+# and every one of the six trials past that point failed.
+#
+# The parser and blocking-execution fixes then removed the waste those long
+# trials were made of, and the distribution moved out from under it. Re-derived
+# on 80 trials of the current code:
+#
+#                    longest solve   past 120 steps: solved / failed
+#     baseline           120 steps          0 / 6      (0% solved)
+#     current            182 steps          6 / 4     (60% solved)
+#
+# Failures used to run to 519 steps and now stop at 132; solves now run to 182.
+# So crossing 120 has stopped meaning the approach failed -- it now correlates
+# with succeeding -- and no threshold in the current data separates the two at
+# all. A nudge that tells a trial its approach has failed, on evidence that its
+# own fixes made false, is worse than no nudge.
+#
+# Kept as a knob rather than deleted: the measurement is about this model on
+# this benchmark, and stuck_step_threshold=<n> turns it back on for anything
+# where the old shape holds.
+_STUCK_STEP_THRESHOLD = 0
 
 
 def _can_block(keystrokes: str) -> bool:
