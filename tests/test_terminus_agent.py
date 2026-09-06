@@ -687,3 +687,99 @@ def test_help_is_not_a_verification():
         a._account_edit_debt(_cmds("cat > /app/a.py << 'EOF'"))
     a._account_edit_debt(_cmds("crux todo --help 2>&1 | head -40"))
     assert a._edit_debt == 2, "reading a manual must not reset the debt"
+
+
+# --------------------------------------------------------------------------
+# the budget the agent has never been able to see
+
+
+def test_budget_is_discovered_from_what_is_already_on_disk(tmp_path):
+    """No plumbing: the trial config has the multiplier, the task has the base.
+
+    harbor enforces the agent timeout outside the agent and never passes the
+    number in, which is why an agent has never been able to answer "how much of
+    my run is left" -- the question the whole submit gate turns on.
+    """
+    import json
+
+    from crux.terminus_agent import _discover_budget
+
+    trial = tmp_path / "trials" / "sometask__hash"
+    (trial / "agent").mkdir(parents=True)
+    (trial / "config.json").write_text(json.dumps({
+        "agent_timeout_multiplier": 8.0,
+        "task": {"name": "terminal-bench/sometask"},
+    }))
+    pkg = tmp_path / "home" / ".cache" / "harbor" / "tasks" / "packages" / "terminal-bench" / "sometask" / "abc"
+    pkg.mkdir(parents=True)
+    (pkg / "task.toml").write_text(
+        '[verifier]\ntimeout_sec = 300.0\n\n[agent]\ntimeout_sec = 900.0\n'
+    )
+
+    class TP:
+        agent_dir = trial / "agent"
+
+    class Env:
+        trial_paths = TP()
+
+    import os
+    old = os.environ.get("HOME")
+    os.environ["HOME"] = str(tmp_path / "home")
+    try:
+        # 900 base x 8 multiplier, and the verifier's own 300 is not it.
+        assert _discover_budget(Env()) == 7200.0
+    finally:
+        if old is not None:
+            os.environ["HOME"] = old
+
+
+def test_an_undiscoverable_budget_is_zero_not_an_exception():
+    from crux.terminus_agent import _discover_budget
+
+    class Env:
+        trial_paths = None
+
+    assert _discover_budget(Env()) == 0.0
+
+
+def test_the_completion_notice_says_what_has_been_spent():
+    import time
+
+    from crux.terminus_agent import CruxTerminusAgent
+
+    a = CruxTerminusAgent.__new__(CruxTerminusAgent)
+    a._parser_name = "xml"
+    a._run_started = time.monotonic() - 540
+    a._crux_steps = 31
+    a._budget_sec = 7200
+    msg = a._get_completion_confirmation_message("terminal output")
+    # upstream's own question survives
+    assert "Are you sure" in msg
+    assert "9m00s" in msg and "31 steps" in msg and "8% of your budget" in msg
+
+
+def test_the_completion_notice_degrades_to_elapsed_only():
+    import time
+
+    from crux.terminus_agent import CruxTerminusAgent
+
+    a = CruxTerminusAgent.__new__(CruxTerminusAgent)
+    a._parser_name = "xml"
+    a._run_started = time.monotonic() - 95
+    a._crux_steps = 4
+    a._budget_sec = 0
+    msg = a._get_completion_confirmation_message("out")
+    assert "1m35s" in msg
+    assert "% of your budget" not in msg
+
+
+def test_no_clock_leaves_upstream_untouched():
+    """A construction path that never ran setup must not gain a notice."""
+    from harbor.agents.terminus_2.terminus_2 import Terminus2
+
+    from crux.terminus_agent import CruxTerminusAgent
+
+    a = CruxTerminusAgent.__new__(CruxTerminusAgent)
+    a._parser_name = "xml"
+    assert a._get_completion_confirmation_message("out") == \
+        Terminus2._get_completion_confirmation_message(a, "out")
