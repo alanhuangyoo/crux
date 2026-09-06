@@ -27,8 +27,10 @@ summarisation are upstream's, and that is the point.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+import time
 
 from pathlib import Path
 
@@ -98,6 +100,66 @@ _HELP_RE = re.compile(r"--help|\bman\b")
 logger = logging.getLogger(__name__)
 
 
+def _discover_budget(environment) -> float:
+    """The trial's wall-clock budget, worked out from what is already on disk.
+
+    harbor enforces the agent timeout outside the agent and never tells it the
+    number, which is why an agent has never been able to answer "how much of my
+    run is left". Nothing needs plumbing to fix that: the trial's own
+    config.json carries the multiplier, and the task package it names carries
+    the base.
+
+        <trial>/config.json         agent_timeout_multiplier, task.name
+        <harbor cache>/.../task.toml  [agent] timeout_sec
+
+    Every step is wrapped: a budget is a nicety, and not knowing it degrades
+    the notice to elapsed-only rather than failing a trial. Returns 0 when it
+    cannot be worked out.
+    """
+    try:
+        trial_dir = Path(environment.trial_paths.agent_dir).parent
+        cfg = json.loads((trial_dir / "config.json").read_text())
+    except Exception:  # noqa: BLE001
+        return 0.0
+    mult = float(cfg.get("agent_timeout_multiplier") or 1.0)
+    name = ((cfg.get("task") or {}).get("name") or "")
+    if not name:
+        return 0.0
+    org, _, task = name.rpartition("/")
+    root = Path.home() / ".cache" / "harbor" / "tasks" / "packages"
+    for candidate in (root / org / task, root / task):
+        try:
+            tomls = sorted(candidate.glob("*/task.toml"))
+        except OSError:
+            continue
+        for t in tomls:
+            try:
+                text = t.read_text(errors="replace")
+            except OSError:
+                continue
+            # A two-line regex rather than a TOML parser: tomllib is 3.11+ and
+            # the file is read only for one number.
+            m = re.search(r"\[agent\][^\[]*?timeout_sec\s*=\s*([0-9.]+)", text, re.S)
+            if m:
+                try:
+                    return float(m.group(1)) * mult
+                except ValueError:
+                    return 0.0
+    return 0.0
+
+
+def _human_secs(sec: float) -> str:
+    """Duration in words. Duplicated from crux.ui deliberately: the agent must
+    not import the terminal front end, which a benchmark trial never loads."""
+    if sec < 60:
+        return f"{sec:.0f}s"
+    m, s = divmod(int(sec), 60)
+    if m < 60:
+        return f"{m}m{s:02d}s"
+    h, m = divmod(m, 60)
+    return f"{h}h{m:02d}m"
+
+
 def _exec_text(result) -> str:
     """Whatever a command printed, whichever stream it used.
 
@@ -123,6 +185,27 @@ container rather than typed into the channel. Any of these work:
   python3 -c "open('f.html','wb').write(b'java\\x00script:')"
 
 Resend the batch with the NUL written that way.
+"""
+
+# What the agent is told at the moment it says it is finished. The numbers are
+# the measurement that motivated it; they are quoted rather than paraphrased
+# because a generic "are you sure" is what upstream already asks, and the
+# trajectories show it being waved through.
+_BUDGET_NOTICE = """\
+
+You have been working {elapsed} over {steps} steps{share}.
+
+Measured on this benchmark: trials that solved the task had used 12-16% of
+their budget when they stopped; trials that failed had used 33-55%, and only
+3 of 17 ran out of time. Failure here is not running out of time. It is
+stopping early, on a check the agent wrote for itself -- `crux submit` printed
+"all N item(s) verified" on 95% of the runs that scored and on 100% of the runs
+that did not.
+
+If time is what you have left, the cheapest thing you can do with it is one
+pass you have not done: re-read the task's own words, list what the grader will
+run, and check the deliverable against that list rather than against the
+checks you already wrote.
 """
 
 _CHECK_BIND_RE = re.compile(r"crux\s+todo\s+add\b[^\n]*?--verify")
@@ -410,6 +493,15 @@ class CruxTerminusAgent(Terminus2):
         )
         self._checklist_fired = False
         self._check_bound = False
+        # Wall-clock budget in seconds, when the caller knows it. harbor
+        # enforces the timeout outside the agent and does not pass it in, so
+        # the agent has never had any idea how much of its run was left --
+        # which is the whole shape of the failure this reports on.
+        try:
+            self._budget_sec = float(kwargs.pop("budget_sec", 0) or 0)
+        except (TypeError, ValueError):
+            self._budget_sec = 0.0
+        self._run_started = 0.0
         self._stuck_fired = False
         self._crux_steps = 0
         # Whether `crux submit` demands a second pass before it will finish.
@@ -515,6 +607,13 @@ class CruxTerminusAgent(Terminus2):
 
     @override
     async def setup(self, environment: BaseEnvironment) -> None:
+        # The clock starts here rather than in run(): setup is once per trial
+        # and run() is once per turn, and the budget harbor enforces covers the
+        # whole trial.
+        if not getattr(self, "_run_started", 0.0):
+            self._run_started = time.monotonic()
+        if not getattr(self, "_budget_sec", 0.0):
+            self._budget_sec = _discover_budget(environment)
         # Before super(), which starts the tmux session and raises if tmux is
         # not there.
         await self._ensure_terminal_tools(environment)
@@ -722,6 +821,41 @@ class CruxTerminusAgent(Terminus2):
         n = debt
         self._edit_debt = 0
         return _EDIT_DEBT_NUDGE.format(n=n)
+
+    @override
+    def _get_completion_confirmation_message(self, terminal_output: str) -> str:
+        """Upstream's "are you sure", with what the run has actually spent.
+
+        This is the exact moment the measurement is about. Fraction of its own
+        budget an agent had used when it stopped, by outcome:
+
+            TB 2.1 baseline    solved 12.4%   failed 54.9%   3 of 27 ran out
+            TB 2.1 fixed       solved 16.3%   failed 33.1%   3 of 17 ran out
+            SWE-bench          solved  5.1%   failed 10.1%   0 of 3 ran out
+
+        Most failures are not timeouts. They are voluntary stops with two
+        thirds of the budget unspent, and on SWE-bench with nine tenths, taken
+        on a green light the agent wrote for itself. Upstream already asks "are
+        you sure" here and the trajectories show it being waved through -- a
+        generic question earns a generic yes -- so what is added is the one
+        thing the agent has never had: how much of its run is left.
+
+        Degrades to elapsed-only when no budget was passed, because harbor
+        enforces the timeout outside the agent and does not tell it the number.
+        """
+        base = super()._get_completion_confirmation_message(terminal_output)
+        started = getattr(self, "_run_started", 0.0)
+        if not started:
+            return base
+        elapsed = time.monotonic() - started
+        budget = getattr(self, "_budget_sec", 0.0)
+        share = ""
+        if budget > 0:
+            share = f", which is {elapsed / budget * 100:.0f}% of your budget"
+        steps = getattr(self, "_crux_steps", 0) or getattr(self, "_turn_steps", 0)
+        return base + _BUDGET_NOTICE.format(
+            elapsed=_human_secs(elapsed), steps=steps, share=share
+        )
 
     async def _execute_commands(
         self,
