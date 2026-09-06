@@ -96,6 +96,7 @@ _HELP_RE = re.compile(r"--help|\bman\b")
 
 _EDIT_DEBT_NUDGE = """\
 You have made {n} edits without running anything that checks them.
+The commands in that last batch were NOT executed -- nothing on disk changed.
 
 Measured on this benchmark: trials that failed edited 17 times and checked 3;
 trials that solved edited 6 and checked 6. The failing shape is not too few
