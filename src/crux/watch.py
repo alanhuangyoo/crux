@@ -127,7 +127,10 @@ def unscored(jobs_dir: str) -> list[str]:
         return []
     scored = set(outcomes(jobs_dir))
     out = []
-    for d in sorted(glob.glob(str(run / "*/"))):
+    # os.path.join, not `run / "*/"`: pathlib drops the trailing slash, so the
+    # glob matches result.json alongside the trial directories and reports it
+    # as a trial that never scored.
+    for d in sorted(glob.glob(os.path.join(str(run), "*", ""))):
         name = Path(d.rstrip("/")).name.rsplit("__", 1)[0]
         if name in scored:
             continue

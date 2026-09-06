@@ -130,14 +130,19 @@ class LocalCruxAgent(CruxTerminusAgent):
     async def _execute_commands(self, commands, session):
         import time
 
-        self._turn_steps += 1
+        # Read defensively for the same reason the gates upstream do: a test
+        # double or a subclass that never ran this __init__ must degrade to
+        # "no display" rather than to an AttributeError. The display is worth
+        # having; it is not worth a crash.
+        emit = getattr(self, "_on_event", None) or (lambda *a, **k: None)
+        self._turn_steps = getattr(self, "_turn_steps", 0) + 1
         allowed = []
         refusals = []
         for command in commands:
             d = self._gate(command.keystrokes)
             if d.verdict is Verdict.BLOCK:
                 self._blocked.append((command.keystrokes, d.reason))
-                self._on_event("refused", keystrokes=command.keystrokes, reason=d.reason)
+                emit("refused", keystrokes=command.keystrokes, reason=d.reason)
                 refusals.append(
                     f"crux refused to run: {command.keystrokes.strip()}\n"
                     f"  reason: {d.reason}"
@@ -151,13 +156,12 @@ class LocalCruxAgent(CruxTerminusAgent):
         output = ""
         if allowed:
             for command in allowed:
-                self._turn_commands += 1
-                self._on_event("command", n=self._turn_commands,
-                               keystrokes=command.keystrokes)
+                self._turn_commands = getattr(self, "_turn_commands", 0) + 1
+                emit("command", n=self._turn_commands, keystrokes=command.keystrokes)
             started = time.monotonic()
             timeout, output = await super()._execute_commands(allowed, session)
-            self._on_event("result", elapsed=time.monotonic() - started,
-                           output=output, timed_out=timeout)
+            emit("result", elapsed=time.monotonic() - started,
+                 output=output, timed_out=timeout)
         if refusals:
             output = (output + "\n" + "\n".join(refusals)).strip()
         return timeout, output
@@ -171,11 +175,14 @@ class LocalCruxAgent(CruxTerminusAgent):
         reading the trajectory afterwards.
         """
         response = await super()._query_llm(*args, **kwargs)
+        emit = getattr(self, "_on_event", None)
+        if emit is None:
+            return response
         try:
-            self._on_event("analysis", text=getattr(response, "content", "") or "")
+            emit("analysis", text=getattr(response, "content", "") or "")
             usage = getattr(response, "usage", None) or {}
             if usage:
-                self._on_event("usage", usage=dict(usage))
+                emit("usage", usage=dict(usage))
         except Exception:  # noqa: BLE001 - display must never break a turn
             pass
         return response
@@ -188,7 +195,7 @@ class LocalCruxAgent(CruxTerminusAgent):
 
     @property
     def turn_stats(self) -> tuple[int, int]:
-        return self._turn_steps, self._turn_commands
+        return getattr(self, "_turn_steps", 0), getattr(self, "_turn_commands", 0)
 
     @property
     def blocked_commands(self) -> list[tuple[str, str]]:

@@ -19,6 +19,7 @@ pattern and is still not something to do unasked.
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 from dataclasses import dataclass
@@ -74,6 +75,35 @@ _OUTWARD = [
 ]
 
 
+def _scratch_roots() -> list[Path]:
+    """Directories that are scratch by design, and are not "outside the project".
+
+    The gate exists because a wrong command is a lost afternoon. Scratch space
+    cannot cost one: /tmp is world-writable by design, nothing of the user's
+    lives there, and the destructive patterns above still cover `rm -rf` on it.
+
+    Treating it as outside was measurably expensive. 6% of all commands in the
+    89-task corpus write to /tmp or /var/tmp -- 427 of 7121, across 42 of the
+    89 trials -- and the shapes are ordinary: an expected-output file to diff
+    against, a probe script, a captured page. The first interactive turn ever
+    run through this gate hit it on its second command, spent a turn reasoning
+    about the refusal, and rewrote a `diff` into the project directory.
+
+    TMPDIR is included because macOS puts it under /var/folders, which no
+    hard-coded list would guess.
+    """
+    out = [Path("/tmp"), Path("/var/tmp"), Path("/dev/shm")]
+    env = os.environ.get("TMPDIR")
+    if env:
+        out.append(Path(env))
+    return [p for p in {q.resolve() for q in out if q.exists()}]
+
+
+# Writing here is not writing to a file: these are sinks, and a redirect to one
+# is how output gets discarded or forwarded.
+_SINKS = {"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/fd"}
+
+
 def _writes_outside(command: str, project_root: Path) -> str | None:
     """Whether an obvious write target escapes the project directory.
 
@@ -81,8 +111,12 @@ def _writes_outside(command: str, project_root: Path) -> str | None:
     well-known writers. A shell can hide a path in a variable and this will not
     see it, which is why it is one signal among several rather than a boundary
     anything should be trusted to.
+
+    Scratch directories and the standard sinks are not "outside" -- see
+    `_scratch_roots`.
     """
     root = project_root.resolve()
+    scratch = _scratch_roots()
     candidates: list[str] = []
 
     for m in re.finditer(r">>?\s*([^\s;|&]+)", command):
@@ -108,8 +142,13 @@ def _writes_outside(command: str, project_root: Path) -> str | None:
             resolved = p.resolve()
         except OSError:
             continue
-        if root not in resolved.parents and resolved != root:
-            return str(resolved)
+        if str(resolved) in _SINKS or str(resolved).startswith("/dev/fd/"):
+            continue
+        if root in resolved.parents or resolved == root:
+            continue
+        if any(sr == resolved or sr in resolved.parents for sr in scratch):
+            continue
+        return str(resolved)
     return None
 
 

@@ -59,7 +59,35 @@ def test_writes_inside_the_project_are_allowed():
 
 def test_writes_outside_the_project_ask():
     assert v("echo hi > /etc/hosts") is Verdict.ASK
-    assert v("touch /tmp/elsewhere") is Verdict.ASK
+    assert v("cp secrets.env ~/Desktop/") is Verdict.ASK
+
+
+def test_scratch_space_is_not_outside_the_project():
+    # The gate exists because a wrong command is a lost afternoon, and scratch
+    # space cannot cost one: /tmp is world-writable by design and nothing of
+    # the user's lives there.
+    #
+    # It was gated at first, and that was measurably expensive. 6% of every
+    # command in the 89-task corpus writes to /tmp or /var/tmp -- 427 of 7121,
+    # across 42 of the 89 trials -- and the shapes are ordinary: an expected
+    # output to diff against, a probe script, a captured page. The first
+    # interactive turn ever run through this gate hit it on its second command,
+    # spent a turn reasoning about the refusal, and rewrote its diff into the
+    # project directory.
+    assert v("touch /tmp/elsewhere") is Verdict.ALLOW
+    assert v("printf 'a\nb' > /tmp/expected.txt") is Verdict.ALLOW
+    assert v("cat > /var/tmp/probe.py <<EOF") is Verdict.ALLOW
+
+
+def test_a_sink_is_not_a_write():
+    assert v("python3 t.py > /dev/null 2>&1") is Verdict.ALLOW
+    assert v("echo hi > /dev/stderr") is Verdict.ALLOW
+
+
+def test_scratch_does_not_excuse_a_destructive_command():
+    # Allowing writes there is not allowing anything there: the destructive
+    # patterns are matched before the path check ever runs.
+    assert v("rm -rf /tmp/build") is Verdict.ASK
 
 
 def test_no_ui_means_no():
