@@ -458,3 +458,49 @@ def test_the_gate_is_off_unless_asked_for(tmp_path):
     out = crux(["submit"], tmp_path)
     assert out.returncode == 0
     assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in out.stdout
+
+
+# ---- what a check is worth at the moment it is bound -------------------------
+
+
+def test_a_check_that_already_passes_says_so(tmp_path):
+    """The retrospective-checklist finding, made visible where it happens.
+
+    Across 87 scored trials the first check is bound at 75-87% of the way
+    through a run, after the last edit, and 88% of trials never see a bound
+    check fail once -- including the ones that solved the task. A checklist
+    written afterwards describes what was built, and a description cannot fail.
+    """
+    (tmp_path / "f.txt").write_text("hello")
+    r = todo(["add", "f.txt exists", "--verify", "test -f f.txt"], tmp_path)
+    assert "already passes" in r.stdout
+    assert "testing what you did rather than what was asked" in r.stdout
+
+
+def test_a_check_that_fails_now_is_the_shape_that_is_wanted(tmp_path):
+    r = todo(["add", "g.txt exists", "--verify", "test -f g.txt"], tmp_path)
+    assert "its check fails now" in r.stdout
+    assert "already passes" not in r.stdout
+
+
+def test_an_item_with_no_check_probes_nothing(tmp_path):
+    r = todo(["add", "just a note"], tmp_path)
+    assert "already passes" not in r.stdout
+    assert "its check fails now" not in r.stdout
+
+
+def test_the_probe_does_not_close_or_reject_the_item(tmp_path):
+    # It states a fact and leaves the judgement where it was: the item is added
+    # either way, and it is still open.
+    (tmp_path / "f.txt").write_text("hello")
+    todo(["add", "f.txt exists", "--verify", "test -f f.txt"], tmp_path)
+    r = todo(["list"], tmp_path)
+    assert "1. [ ] f.txt exists" in r.stdout
+
+
+def test_a_slow_check_is_not_waited_on(tmp_path):
+    # A bound check is meant to be quick; anything slower is a build, and
+    # blocking `todo add` on it would be worse than not probing.
+    r = todo(["add", "slow", "--verify", "sleep 60"], tmp_path)
+    assert "did not finish" in r.stdout
+    assert "already passes" not in r.stdout
