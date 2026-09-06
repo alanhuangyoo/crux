@@ -160,6 +160,49 @@ current as the code it was measured on.
 
 ---
 
+## Neither gate survives attribution
+
+Both gates were tested with a control arm, and both looked like they worked.
+Neither does.
+
+**The submit gate, on SWE-bench.** Sixteen tasks the benchmark had failed, all
+of them a green light with the budget unspent, re-run with `crux submit`
+demanding a second pass. Six of eleven flipped, and every flip went from
+missing one to three tests to passing all of them:
+
+    django__django-11433     141/143  ->  143/143
+    django__django-14155      89/92   ->   92/92
+    django__django-15987      52/53   ->   53/53
+    django__django-16263     102/103  ->  103/103
+    sphinx-doc__sphinx-9229    13/14  ->    14/14
+    sympy__sympy-13878         19/20  ->    20/20
+
+A perfect shape. Then: **the gate fired on 5 of 15 trajectories, and on only
+one of the six that flipped.** Where it fired, 1 of 3 solved; where it did not,
+5 of 8. The tasks were selected because they failed, so a re-run recovers some
+of them by regression to the mean alone -- and that is what this is.
+
+**The edit-debt gate, on Terminal-Bench.** The 29 tasks the baseline failed,
+gate on against gate off, verified as firing 8 times in one arm and 0 in the
+other. 9 of 16 against 6 of 16, three disagreements all one way, tests passed
+65.6% against 50.0%. Then, split by whether the gate fired:
+
+|  | gate on | gate off |
+|---|---:|---:|
+| the 7 tasks it fired on | 4/7 | 3/7 |
+| the 9 it did not | 5/9 | 3/9 |
+
+Most of the gain is on tasks the gate never touched, and one of the three flips
+had it fire. Two flips are what noise predicts on 16 tasks.
+
+**Both are score-supported and mechanism-refuted.** Reading only the scores,
+tonight produces two validated mechanisms. Adding one question -- *did the thing
+actually fire on the tasks whose outcome changed* -- and both fall over. The
+question costs a grep of the observations, and it is the difference between a
+result and a story.
+
+---
+
 ## Resolution
 
 **Two runs of one configuration disagree on 15-16% of tasks.** Measured:
