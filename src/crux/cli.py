@@ -338,6 +338,15 @@ def cmd_bench(args) -> int:
         command += ["--upload"]
     if args.agent_timeout_multiplier != 1.0:
         command += ["--agent-timeout-multiplier", str(args.agent_timeout_multiplier)]
+    # A separate budget because a separate thing is running. SWE-Atlas grades
+    # with an LLM judge against a 900s default, and every one of its trials came
+    # back "Verifier execution timed out after 900" -- with the agent already
+    # finished and its answer written.
+    if getattr(args, "verifier_timeout_multiplier", 1.0) != 1.0:
+        command += [
+            "--verifier-timeout-multiplier",
+            str(args.verifier_timeout_multiplier),
+        ]
     # Datasets registered as a bare name -- aider-polyglot, livecodebench --
     # carry unqualified task ids, and prefixing them with the dataset name
     # matches nothing. harbor reports that as "no tasks matched the filter(s)"
@@ -601,6 +610,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="X",
         help="multiply the agent's budget (default 1.0 = submittable; 8 turns "
              "2.1's 900s median into 7200s, matching TB 3.0's own median)",
+    )
+    p.add_argument(
+        "--verifier-timeout-multiplier",
+        type=float,
+        default=1.0,
+        metavar="X",
+        help="multiply the verifier's own budget, which the agent multiplier "
+             "does not touch (SWE-Atlas judges with an LLM and overruns 900s)",
     )
     p.set_defaults(func=cmd_bench)
 
