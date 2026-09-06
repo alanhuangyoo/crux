@@ -53,34 +53,54 @@ _BLOCKING_THRESHOLD_SEC = 10.0
 #
 # The nudge fires once. Stopping the trial would only save wall clock; telling
 # it what the number means is the part that might change the outcome.
-# Measured across the 89-task run: the trials that failed edited 45 times and
-# verified 3 (15:1), against 19 edits and 7 verifications (2.7:1) for the ones
-# that solved. The longest unverified edit streak was 42 steps for failures and
-# 17 for successes. That is not a difference of degree -- a run that edits forty
-# files without ever asking whether any of it works is not converging, and the
-# extra budget it spends is spent making the working tree worse.
+# Measured across the 89-task run: the trials that failed edited 17 times and
+# ran something that checks the work 3 times; the ones that solved edited 6 and
+# checked 6. The longest run of edits with no verification between them was 17
+# steps for failures and 4 for successes. A run that edits seventeen times
+# without once asking whether any of it works is not converging -- by then the
+# earlier changes have usually been broken by the later ones, with no way to
+# tell which.
 #
-# The threshold sits above the successful median (17) and its 75th percentile
-# (33 is higher, but a run that far out is already unusual), so it fires on the
-# shape that fails and mostly leaves working runs alone.
-_EDIT_DEBT_LIMIT = 20
+# Twelve is not a midpoint, it is the argmax of a sweep replayed over all 89
+# trajectories: it fires on 62% of the failures against 15% of the successes,
+# where 20 caught only 37% and 10 hurt 23%.
+#
+# An earlier version of this constant was 20, derived from an edit/verify
+# classifier that counted any command containing a redirect or a pipe as an
+# edit -- `crux --help | head`, `2>&1`, compile lines. Auditing what the
+# patterns actually matched is what produced the numbers above.
+_EDIT_DEBT_LIMIT = 12
 
+# An edit writes a file. A redirect into a path counts; `2>&1` and `| head` do
+# not, and counting them was what inflated the original measurement.
 _EDIT_RE = re.compile(
-    r"(crux\s+(edit|write)\b|apply_patch\b|sed\s+-i\b|\btee\b|>>?\s*\S)"
+    r"(crux\s+(edit|write)\b"
+    r"|apply_patch\b"
+    r"|\bsed\s+-i\b"
+    r"|\btee\s+[\w./~-]"
+    r"|>>?\s*/?[\w./~-]+\.\w+"
+    r"|cat\s*>\s*[\w./~-])"
 )
+# A verification runs something that can fail and says so; `--help` cannot.
 _VERIFY_RE = re.compile(
-    r"(pytest|unittest|make\s+test|npm\s+(run\s+)?test|crux\s+(submit|todo)\b"
-    r"|\./run|\./test|bash\s+\S*test|python\S*\s+\S*test)"
+    r"(pytest\b|python\S*\s+-m\s+unittest\b|make\s+(test|check)\b"
+    r"|npm\s+(run\s+)?test\b"
+    r"|crux\s+submit\b"
+    r"|crux\s+todo\s+(done|verify|list)\b"
+    r"|\./(run|test)\S*"
+    r"|bash\s+\S*test\S*\.sh"
+    r"|python\S*\s+\S*test\S*\.py)"
 )
+# Reading a manual is neither.
+_HELP_RE = re.compile(r"--help|\bman\b")
 
 _EDIT_DEBT_NUDGE = """\
 You have made {n} edits without running anything that checks them.
 
-Measured on this benchmark: trials that failed averaged 45 edits against 3
-verifications; trials that solved averaged 19 against 7. The failing shape is
-not too few edits, it is edits nobody checked -- by the fortieth one, earlier
-changes have usually been broken by later ones and there is no way to tell
-which.
+Measured on this benchmark: trials that failed edited 17 times and checked 3;
+trials that solved edited 6 and checked 6. The failing shape is not too few
+edits, it is edits nobody checked -- by now the earlier changes have usually
+been broken by the later ones and there is no way to tell which.
 
 Run something that answers "does this work" before editing again: the checker
 the task ships, its test file, `crux todo verify`, or the smallest command that
@@ -498,6 +518,8 @@ class CruxTerminusAgent(Terminus2):
         debt = getattr(self, "_edit_debt", 0)
         for command in commands:
             keys = command.keystrokes or ""
+            if _HELP_RE.search(keys):
+                continue
             if _VERIFY_RE.search(keys):
                 debt = 0
             elif _EDIT_RE.search(keys):
