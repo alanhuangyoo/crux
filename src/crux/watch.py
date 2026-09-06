@@ -140,6 +140,93 @@ def unscored(jobs_dir: str) -> list[str]:
     return out
 
 
+def partial(jobs_dir: str) -> dict[str, tuple[int, int]]:
+    """Task -> (tests passed, tests total), from the graders' own reports.
+
+    The binary reward is all-or-nothing and that is the score the leaderboards
+    use, but it throws away almost everything the grader measured. A task where
+    68 of 69 tests pass and one where 0 of 69 pass are both a zero, and the
+    difference between two agents lives mostly in that gap.
+
+    It matters here because of resolution. Two runs of one configuration
+    disagree on 15-16% of tasks, so an 89-task binary run resolves about ±8
+    points -- wide enough that a real five-point difference cannot be seen.
+    A paired comparison on test fractions uses the same trials and the same
+    GPU hours and is not throwing away the gradient.
+
+    Three shapes are read, because the three benchmarks in use report
+    differently: pytest's CTRF summary, SWE-bench's FAIL_TO_PASS/PASS_TO_PASS
+    report, and SWE-Atlas's rubric count.
+    """
+    run = _latest(jobs_dir)
+    if run is None:
+        return {}
+    out: dict[str, tuple[int, int]] = {}
+    for d in glob.glob(os.path.join(str(run), "*", "")):
+        task = Path(d.rstrip("/")).name.rsplit("__", 1)[0]
+        got = _partial_one(d)
+        if got:
+            out[task] = got
+    return out
+
+
+def _partial_one(trial_dir: str) -> tuple[int, int] | None:
+    v = os.path.join(trial_dir, "verifier")
+
+    ctrf = os.path.join(v, "ctrf.json")
+    if os.path.exists(ctrf):
+        try:
+            summary = json.load(open(ctrf))["results"]["summary"]
+            total = int(summary.get("tests") or 0)
+            if total:
+                return int(summary.get("passed") or 0), total
+        except (OSError, KeyError, ValueError, json.JSONDecodeError):
+            pass
+
+    report = os.path.join(v, "report.json")
+    if os.path.exists(report):
+        try:
+            doc = json.load(open(report))
+            inner = next(iter(doc.values()))
+            st_ = inner.get("tests_status") or {}
+            passed = total = 0
+            for key in ("FAIL_TO_PASS", "PASS_TO_PASS"):
+                part = st_.get(key) or {}
+                ok = len(part.get("success") or [])
+                bad = len(part.get("failure") or [])
+                passed += ok
+                total += ok + bad
+            if total:
+                return passed, total
+        except (OSError, StopIteration, AttributeError, ValueError, json.JSONDecodeError):
+            pass
+
+    rubric = os.path.join(v, "evaluation_results.json")
+    if os.path.exists(rubric):
+        try:
+            doc = json.load(open(rubric))
+            total = int(doc.get("num_rubrics") or 0)
+            if total:
+                return int(doc.get("num_passed") or 0), total
+        except (OSError, ValueError, json.JSONDecodeError):
+            pass
+    return None
+
+
+def _wilcoxon_sign(diffs: list[float]) -> tuple[int, int, float]:
+    """A sign test on the non-zero paired differences.
+
+    Deliberately the sign test again rather than a t-test: the differences are
+    bounded fractions and nothing here has established that they are normal.
+    What the fractions buy is that far more pairs are non-zero than under the
+    binary score, which is where the power comes from -- not from a stronger
+    assumption.
+    """
+    pos = sum(1 for d in diffs if d > 1e-9)
+    neg = sum(1 for d in diffs if d < -1e-9)
+    return pos, neg, _sign_test(pos, neg)
+
+
 def _sign_test(a: int, b: int) -> float:
     n = a + b
     if n == 0:
@@ -241,6 +328,26 @@ def compare(a: str, b: str, baseline: str | None = None) -> str:
         lines.append(ui.hint(f"    only {na}: " + ", ".join(t for t in shared if oa[t] and not ob[t])[:200]))
     if bw:
         lines.append(ui.hint(f"    only {nb}: " + ", ".join(t for t in shared if ob[t] and not oa[t])[:200]))
+
+    # The same trials, read without throwing the gradient away.
+    pa, pb = partial(a), partial(b)
+    both = [t for t in shared if t in pa and t in pb]
+    if both:
+        fa = [pa[t][0] / pa[t][1] for t in both]
+        fb = [pb[t][0] / pb[t][1] for t in both]
+        diffs = [x - y for x, y in zip(fa, fb)]
+        pos, neg, p2 = _wilcoxon_sign(diffs)
+        lines.append(f"  tests passed, same {len(both)} tasks:")
+        lines.append(f"    {na:<24}{st.mean(fa) * 100:.1f}%   "
+                     f"({sum(pa[t][0] for t in both)}/{sum(pa[t][1] for t in both)} tests)")
+        lines.append(f"    {nb:<24}{st.mean(fb) * 100:.1f}%   "
+                     f"({sum(pb[t][0] for t in both)}/{sum(pb[t][1] for t in both)} tests)")
+        verdict2 = ui.ok("significant") if p2 < 0.05 else ui.warn("not significant")
+        lines.append(f"    tasks where they differ: {pos + neg}   {na} {pos}, {nb} {neg}   "
+                     f"sign test p={p2:.4f}  {verdict2}")
+        lines.append(ui.hint(
+            f"    {pos + neg} of {len(both)} tasks carry a signal here against "
+            f"{aw + bw} of {len(shared)} under the binary score"))
     return "\n".join(lines)
 
 
