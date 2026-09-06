@@ -338,17 +338,22 @@ def cmd_bench(args) -> int:
         command += ["--upload"]
     if args.agent_timeout_multiplier != 1.0:
         command += ["--agent-timeout-multiplier", str(args.agent_timeout_multiplier)]
+    # Datasets registered as a bare name -- aider-polyglot, livecodebench --
+    # carry unqualified task ids, and prefixing them with the dataset name
+    # matches nothing. harbor reports that as "no tasks matched the filter(s)"
+    # and lists the available names, which look identical to the ones you asked
+    # for; the prefix is only visible in the filter half of the message.
+    org = args.dataset.split("/", 1)[0] if "/" in args.dataset else ""
     for task in getattr(args, "task", None) or []:
-        command += ["--include-task-name", f"{args.dataset.split('/', 1)[0]}/{task}"]
+        command += ["--include-task-name", f"{org}/{task}" if org else task]
     if args.tasks:
         command += ["--n-tasks", str(args.tasks)]
     if args.env_file and Path(args.env_file).exists():
         command += ["--env-file", args.env_file]
-    org = args.dataset.split("/", 1)[0]
     gpu_tasks = gpu_tasks_for(args.dataset)
     if not args.include_gpu_tasks:
         for task in gpu_tasks:
-            command += ["--exclude-task-name", f"{org}/{task}"]
+            command += ["--exclude-task-name", f"{org}/{task}" if org else task]
 
     src = str(Path(__file__).resolve().parent.parent)
     env = dict(os.environ)
@@ -581,7 +586,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--task",
         action="append",
         metavar="NAME",
-        help="run only this task, repeatable (unqualified; the dataset's org is added)",
+        help="run only this task, repeatable (unqualified; the dataset's org is added when it has one)",
     )
     # 2.1 gives a ~900s median, and on this hardware 76% of its failures are
     # wall clock rather than wrong answers -- tuning against it mostly measures
