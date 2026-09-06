@@ -652,3 +652,38 @@ def test_gate_can_be_disabled():
     a = _mk_agent(limit=0)
     for _ in range(50):
         assert a._account_edit_debt(_cmds("crux edit z.py")) is None
+
+
+def test_pipes_and_stderr_are_not_edits():
+    """The regression an audit of the corpus caught.
+
+    The first classifier counted any command containing a redirect or pipe as
+    an edit, so `crux --help | head`, `2>&1` and compile lines all inflated the
+    debt. The measurements that set the threshold came from that reading, and
+    were wrong by a factor of two and a half.
+    """
+    a = _mk_agent(limit=3)
+    for _ in range(20):
+        assert a._account_edit_debt(_cmds(
+            "crux --help 2>&1 | head -40",
+            "objdump -d /app/bin | head -20",
+            "cd /app && make MARCH='-msoft-float' 2>&1 | tail -5",
+        )) is None
+    assert a._edit_debt == 0
+
+
+def test_writing_to_a_path_is_an_edit():
+    a = _mk_agent(limit=2)
+    a._account_edit_debt(_cmds("cat > /app/solver.py << 'EOF'"))
+    a._account_edit_debt(_cmds("echo x >> /app/notes.txt"))
+    note = a._account_edit_debt(_cmds("sed -i s/a/b/ /app/main.c"))
+    assert note is not None
+
+
+def test_help_is_not_a_verification():
+    """`crux todo --help` was clearing the debt without checking anything."""
+    a = _mk_agent(limit=2)
+    for _ in range(2):
+        a._account_edit_debt(_cmds("cat > /app/a.py << 'EOF'"))
+    a._account_edit_debt(_cmds("crux todo --help 2>&1 | head -40"))
+    assert a._edit_debt == 2, "reading a manual must not reset the debt"
