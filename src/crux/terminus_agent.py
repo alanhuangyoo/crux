@@ -53,6 +53,40 @@ _BLOCKING_THRESHOLD_SEC = 10.0
 #
 # The nudge fires once. Stopping the trial would only save wall clock; telling
 # it what the number means is the part that might change the outcome.
+# Measured across the 89-task run: the trials that failed edited 45 times and
+# verified 3 (15:1), against 19 edits and 7 verifications (2.7:1) for the ones
+# that solved. The longest unverified edit streak was 42 steps for failures and
+# 17 for successes. That is not a difference of degree -- a run that edits forty
+# files without ever asking whether any of it works is not converging, and the
+# extra budget it spends is spent making the working tree worse.
+#
+# The threshold sits above the successful median (17) and its 75th percentile
+# (33 is higher, but a run that far out is already unusual), so it fires on the
+# shape that fails and mostly leaves working runs alone.
+_EDIT_DEBT_LIMIT = 20
+
+_EDIT_RE = re.compile(
+    r"(crux\s+(edit|write)\b|apply_patch\b|sed\s+-i\b|\btee\b|>>?\s*\S)"
+)
+_VERIFY_RE = re.compile(
+    r"(pytest|unittest|make\s+test|npm\s+(run\s+)?test|crux\s+(submit|todo)\b"
+    r"|\./run|\./test|bash\s+\S*test|python\S*\s+\S*test)"
+)
+
+_EDIT_DEBT_NUDGE = """\
+You have made {n} edits without running anything that checks them.
+
+Measured on this benchmark: trials that failed averaged 45 edits against 3
+verifications; trials that solved averaged 19 against 7. The failing shape is
+not too few edits, it is edits nobody checked -- by the fortieth one, earlier
+changes have usually been broken by later ones and there is no way to tell
+which.
+
+Run something that answers "does this work" before editing again: the checker
+the task ships, its test file, `crux todo verify`, or the smallest command that
+executes the code you changed. Then continue.
+"""
+
 _STUCK_STEP_THRESHOLD = 120
 
 
@@ -292,6 +326,9 @@ class CruxTerminusAgent(Terminus2):
         self._carried: list = []
         # Steps past which the agent is told its approach has failed. 0 disables.
         self._stuck_at = int(kwargs.pop("stuck_step_threshold", _STUCK_STEP_THRESHOLD))
+        self._edit_debt_limit = int(kwargs.pop("edit_debt_limit", _EDIT_DEBT_LIMIT))
+        self._edit_debt = 0
+        self._edit_debt_fired = False
         self._stuck_fired = False
         self._crux_steps = 0
         # Whether `crux submit` demands a second pass before it will finish.
@@ -445,6 +482,34 @@ class CruxTerminusAgent(Terminus2):
         self._stuck_fired = True
         return _STUCK_NUDGE.format(steps=steps)
 
+    def _account_edit_debt(self, commands: list[Command]) -> str | None:
+        """Track edits made since the last verification; interrupt once only.
+
+        Fires at most once per run. The point is to break the pattern, not to
+        police it: a run that is told twice is being argued with, and the second
+        interruption costs a step without adding information.
+        """
+        # Read defensively: a subclass or a test double that never ran this
+        # class's __init__ should get the old behaviour rather than an
+        # AttributeError from a gate it did not ask for.
+        limit = getattr(self, "_edit_debt_limit", 0)
+        if limit <= 0 or getattr(self, "_edit_debt_fired", False):
+            return None
+        debt = getattr(self, "_edit_debt", 0)
+        for command in commands:
+            keys = command.keystrokes or ""
+            if _VERIFY_RE.search(keys):
+                debt = 0
+            elif _EDIT_RE.search(keys):
+                debt += 1
+        self._edit_debt = debt
+        if debt <= limit:
+            return None
+        self._edit_debt_fired = True
+        n = debt
+        self._edit_debt = 0
+        return _EDIT_DEBT_NUDGE.format(n=n)
+
     async def _execute_commands(
         self,
         commands: list[Command],
@@ -473,6 +538,13 @@ class CruxTerminusAgent(Terminus2):
         command, which is what keeps this safe for entering a REPL or an ssh
         session.
         """
+        note = self._account_edit_debt(commands)
+        if note is not None:
+            # Returning without executing is the same shape as a refused command,
+            # which the prompt already handles: the model reads the reason and
+            # picks the next action itself.
+            return False, note
+
         for command in commands:
             duration = command.duration_sec
             try:

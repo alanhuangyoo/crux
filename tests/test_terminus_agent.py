@@ -585,3 +585,70 @@ async def test_an_untrimmable_failure_is_not_swallowed():
     for _ in range(3):
         with pytest.raises(RuntimeError):
             await c.chat("go")
+
+
+def _mk_agent(limit=20):
+    from crux.terminus_agent import CruxTerminusAgent
+    a = CruxTerminusAgent.__new__(CruxTerminusAgent)
+    a._edit_debt_limit = limit
+    a._edit_debt = 0
+    a._edit_debt_fired = False
+    return a
+
+
+def _cmds(*keys):
+    from harbor.agents.terminus_2.terminus_2 import Command
+    return [Command(keystrokes=k, duration_sec=0.1) for k in keys]
+
+
+def test_edit_debt_fires_only_on_the_failing_shape():
+    """Measured: failures edited 45 times against 3 verifications, successes 19
+    against 7. The gate has to separate those, not merely count edits."""
+    a = _mk_agent(limit=20)
+    # The shape that solved: edit a bit, then check.
+    for _ in range(3):
+        assert a._account_edit_debt(_cmds("crux edit a.py", "crux edit b.py")) is None
+        assert a._account_edit_debt(_cmds("pytest -q")) is None
+    assert a._edit_debt == 0
+
+    # The shape that failed: edit and edit and never check.
+    note = None
+    for _ in range(30):
+        note = a._account_edit_debt(_cmds("crux edit x.py"))
+        if note:
+            break
+    assert note is not None and "21 edits" in note.replace("\n", " ")
+
+
+def test_edit_debt_interrupts_once_only():
+    """A run told twice is being argued with; the second costs a step and adds
+    nothing."""
+    a = _mk_agent(limit=2)
+    for _ in range(3):
+        a._account_edit_debt(_cmds("sed -i s/a/b/ f.py"))
+    assert a._edit_debt_fired
+    for _ in range(10):
+        assert a._account_edit_debt(_cmds("sed -i s/a/b/ f.py")) is None
+
+
+def test_verification_clears_the_debt():
+    a = _mk_agent(limit=5)
+    for _ in range(4):
+        a._account_edit_debt(_cmds("apply_patch <<EOF"))
+    assert a._edit_debt == 4
+    a._account_edit_debt(_cmds("crux todo verify"))
+    assert a._edit_debt == 0
+
+
+def test_reads_are_not_edits():
+    """Reading is not the failing behaviour -- both groups read about equally."""
+    a = _mk_agent(limit=3)
+    for _ in range(20):
+        assert a._account_edit_debt(_cmds("cat foo.py", "ls -la", "grep -n x y.py")) is None
+    assert a._edit_debt == 0
+
+
+def test_gate_can_be_disabled():
+    a = _mk_agent(limit=0)
+    for _ in range(50):
+        assert a._account_edit_debt(_cmds("crux edit z.py")) is None
