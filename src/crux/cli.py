@@ -513,6 +513,12 @@ def cmd_prompt(args) -> int:
     return 0
 
 
+def _watch(args) -> int:
+    from crux.watch import cmd_watch
+
+    return cmd_watch(args)
+
+
 def _doctor(args) -> int:
     """Imported here so `crux --help` does not pay for the check machinery."""
     from crux.doctor import cmd_doctor
@@ -649,6 +655,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--offline", action="store_true",
                    help="skip anything that talks to the model")
     p.set_defaults(func=_doctor)
+
+    p = sub.add_parser(
+        "watch",
+        help="follow runs in flight, or compare two of them the way that holds up",
+    )
+    p.add_argument("jobs", nargs="*", help="jobs dirs to follow")
+    p.add_argument("-i", "--interval", type=float, default=0,
+                   help="repeat every N seconds (default: print once)")
+    p.add_argument("--compare", nargs=2, metavar=("A", "B"),
+                   help="paired comparison on shared tasks, with a sign test")
+    p.add_argument("--baseline", help="a third run, to say how hard the shared subset is")
+    p.set_defaults(func=_watch)
 
     p = sub.add_parser("prompt", help="print a variant's prompt")
     p.add_argument("--variant", default="default", choices=sorted(VARIANTS))

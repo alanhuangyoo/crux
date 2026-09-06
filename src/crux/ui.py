@@ -169,14 +169,39 @@ def command_result(elapsed: float, output: str, timed_out: bool) -> str:
     return f"      {color}{mark}{RESET} {DIM}{human_secs(elapsed)} · {lines} lines{RESET}"
 
 
+_ANALYSIS_TAG = re.compile(r"<analysis>(.*?)</analysis>", re.S | re.I)
+_ANY_TAG = re.compile(r"</?(response|analysis|commands?|command|explanation|is_task_complete|"
+                      r"keystrokes|duration|timeout_sec)[^>]*>", re.I)
+
+
 def analysis(text: str, limit_lines: int = 6) -> str:
     """The model's own account of what it is doing, indented and trimmed.
 
-    Terminus puts this in the `Analysis:` prefix of every response, and it is
-    the only place the agent says why. Six lines is the point where it stops
-    being a summary and starts being the reasoning again.
+    Terminus's XML protocol wraps this in <response><analysis>, and the raw
+    tags are protocol, not content -- showing them puts the transport on screen
+    and buries the one sentence a person wanted. The tagged form is preferred
+    when present and the `Analysis:` prefix is the fallback, because the model
+    does not always close its tags: that unclosed-tag habit is the fault that
+    cost 21% of all model calls on this benchmark, so the display cannot assume
+    well-formed markup.
+
+    Six lines is the point where it stops being a summary and starts being the
+    reasoning again.
     """
-    body = (text or "").strip()
+    raw = (text or "").strip()
+    m = _ANALYSIS_TAG.search(raw)
+    if m:
+        body = m.group(1).strip()
+    else:
+        # An unclosed <analysis> still tells us where the prose starts.
+        i = raw.lower().find("<analysis>")
+        body = raw[i + len("<analysis>"):] if i >= 0 else raw
+        # Everything from the first command block on is protocol, not prose.
+        cut = re.search(r"<(commands?|command|is_task_complete)\b", body, re.I)
+        if cut:
+            body = body[:cut.start()]
+        body = body.strip()
+    body = _ANY_TAG.sub("", body).strip()
     if body.lower().startswith("analysis:"):
         body = body[len("analysis:"):].strip()
     if not body:
