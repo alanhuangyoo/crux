@@ -50,6 +50,7 @@ class LocalCruxAgent(CruxTerminusAgent):
         project_root: Path | str | None = None,
         interactive: bool = True,
         confirm=None,
+        on_event=None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -58,6 +59,13 @@ class LocalCruxAgent(CruxTerminusAgent):
         self._interactive = interactive
         self._confirm = confirm or _prompt_yes_no
         self._blocked: list[tuple[str, str]] = []
+        # Where the terminal front end listens. A benchmark trial passes
+        # nothing and the calls become no-ops, which keeps the scored path and
+        # the interactive path the same code -- the requirement this project
+        # started from.
+        self._on_event = on_event or (lambda *a, **k: None)
+        self._turn_commands = 0
+        self._turn_steps = 0
 
     async def _claim_session_name(self, environment) -> None:
         """Take a free tmux session name, so a second window is not blocked.
@@ -120,12 +128,16 @@ class LocalCruxAgent(CruxTerminusAgent):
         return d
 
     async def _execute_commands(self, commands, session):
+        import time
+
+        self._turn_steps += 1
         allowed = []
         refusals = []
         for command in commands:
             d = self._gate(command.keystrokes)
             if d.verdict is Verdict.BLOCK:
                 self._blocked.append((command.keystrokes, d.reason))
+                self._on_event("refused", keystrokes=command.keystrokes, reason=d.reason)
                 refusals.append(
                     f"crux refused to run: {command.keystrokes.strip()}\n"
                     f"  reason: {d.reason}"
@@ -138,10 +150,45 @@ class LocalCruxAgent(CruxTerminusAgent):
         timeout = False
         output = ""
         if allowed:
+            for command in allowed:
+                self._turn_commands += 1
+                self._on_event("command", n=self._turn_commands,
+                               keystrokes=command.keystrokes)
+            started = time.monotonic()
             timeout, output = await super()._execute_commands(allowed, session)
+            self._on_event("result", elapsed=time.monotonic() - started,
+                           output=output, timed_out=timeout)
         if refusals:
             output = (output + "\n" + "\n".join(refusals)).strip()
         return timeout, output
+
+    async def _query_llm(self, *args, **kwargs):
+        """Announce what the model said before its commands start running.
+
+        Terminus puts the model's own account of the turn in the `Analysis:`
+        prefix, and until now nothing displayed it: the screen went from the
+        prompt straight to the answer, with the reasoning only reachable by
+        reading the trajectory afterwards.
+        """
+        response = await super()._query_llm(*args, **kwargs)
+        try:
+            self._on_event("analysis", text=getattr(response, "content", "") or "")
+            usage = getattr(response, "usage", None) or {}
+            if usage:
+                self._on_event("usage", usage=dict(usage))
+        except Exception:  # noqa: BLE001 - display must never break a turn
+            pass
+        return response
+
+    def begin_turn(self) -> None:
+        """Reset the per-turn counters the front end reports."""
+        self._turn_commands = 0
+        self._turn_steps = 0
+        self._blocked.clear()
+
+    @property
+    def turn_stats(self) -> tuple[int, int]:
+        return self._turn_steps, self._turn_commands
 
     @property
     def blocked_commands(self) -> list[tuple[str, str]]:

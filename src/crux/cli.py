@@ -513,6 +513,13 @@ def cmd_prompt(args) -> int:
     return 0
 
 
+def _doctor(args) -> int:
+    """Imported here so `crux --help` does not pay for the check machinery."""
+    from crux.doctor import cmd_doctor
+
+    return cmd_doctor(args)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="crux", description=__doc__)
     parser.add_argument("--version", action="version", version=f"crux {__version__}")
@@ -634,6 +641,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("job")
     p.add_argument("other", nargs="?", help="compare against this run")
     p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser(
+        "doctor",
+        help="check the endpoint, the tunnel and the tools, before a run wastes hours",
+    )
+    p.add_argument("--offline", action="store_true",
+                   help="skip anything that talks to the model")
+    p.set_defaults(func=_doctor)
 
     p = sub.add_parser("prompt", help="print a variant's prompt")
     p.add_argument("--variant", default="default", choices=sorted(VARIANTS))
