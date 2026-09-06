@@ -29,6 +29,7 @@ import glob
 import json
 import math
 import os
+import re
 import statistics as st
 import time
 from pathlib import Path
@@ -225,6 +226,51 @@ def _wilcoxon_sign(diffs: list[float]) -> tuple[int, int, float]:
     pos = sum(1 for d in diffs if d > 1e-9)
     neg = sum(1 for d in diffs if d < -1e-9)
     return pos, neg, _sign_test(pos, neg)
+
+
+def commands_of(trajectory_path: str) -> list[str]:
+    """Every command the agent actually sent, and nothing else.
+
+    Exists because the obvious thing is wrong three times over. Grepping a
+    trajectory file for a command counts the system prompt, which documents the
+    tools; for `crux todo add ... --verify` that reports every trial as having
+    used it, including trials that never got past exploring. The same mistake
+    read the prompt's own regex example as a bound check, and its placeholder
+    `cmd` as a command.
+
+    So: step 0 is the prompt and is skipped, and only tool_calls keystrokes are
+    read. Anything asking "did the agent do X" should come through here.
+    """
+    try:
+        steps = json.load(open(trajectory_path)).get("steps", [])
+    except (OSError, json.JSONDecodeError):
+        return []
+    out = []
+    for step in steps[1:]:
+        for call in (step.get("tool_calls") or []):
+            keys = (call.get("arguments") or {}).get("keystrokes", "")
+            if keys:
+                out.append(keys)
+    return out
+
+
+def tool_usage(jobs_dir: str, patterns: dict[str, str]) -> dict[str, tuple[int, int]]:
+    """For each named pattern, (trials that used it, trials looked at)."""
+    run = _latest(jobs_dir)
+    if run is None:
+        return {}
+    compiled = {k: re.compile(v) for k, v in patterns.items()}
+    hits = {k: 0 for k in patterns}
+    trials = 0
+    for p in glob.glob(str(run / "*/agent/trajectory.json")):
+        cmds = commands_of(p)
+        if not cmds:
+            continue
+        trials += 1
+        for name, rx in compiled.items():
+            if any(rx.search(c) for c in cmds):
+                hits[name] += 1
+    return {k: (v, trials) for k, v in hits.items()}
 
 
 def _sign_test(a: int, b: int) -> float:
