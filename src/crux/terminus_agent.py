@@ -27,6 +27,7 @@ summarisation are upstream's, and that is the point.
 
 from __future__ import annotations
 
+import logging
 import re
 
 from pathlib import Path
@@ -93,6 +94,19 @@ _VERIFY_RE = re.compile(
 )
 # Reading a manual is neither.
 _HELP_RE = re.compile(r"--help|\bman\b")
+
+logger = logging.getLogger(__name__)
+
+
+def _exec_text(result) -> str:
+    """Whatever a command printed, whichever stream it used.
+
+    harbor's ExecResult carries stdout and stderr separately and either may be
+    None; callers here only ever look for a sentinel word, so the two are read
+    as one string.
+    """
+    return (getattr(result, "stdout", "") or "") + (getattr(result, "stderr", "") or "")
+
 
 _EDIT_DEBT_NUDGE = """\
 You have made {n} edits without running anything that checks them.
@@ -455,9 +469,75 @@ class CruxTerminusAgent(Terminus2):
 
     @override
     async def setup(self, environment: BaseEnvironment) -> None:
+        # Before super(), which starts the tmux session and raises if tmux is
+        # not there.
+        await self._ensure_terminal_tools(environment)
         await super().setup(environment)
         if self._crux_tools:
             await self._install_crux(environment)
+
+    async def _ensure_terminal_tools(self, environment: BaseEnvironment) -> None:
+        """Install tmux, and asciinema if it can be had, in images without them.
+
+        Terminus drives a live tmux session and assumes the task image ships
+        tmux. Terminal-Bench and SWE-bench images do; the SWE-Atlas images do
+        not, and every one of 124 trials died in setup with "Failed to start
+        tmux session. Error: None" -- an empty error, because the failure is a
+        missing binary rather than a tmux that ran and complained.
+
+        Recording is a separate question. asciinema has no candidate in Debian
+        11, which is what those images are built on, so it is attempted and then
+        given up on: the .cast file is an artifact for a human to replay, and
+        trajectory.json -- what every measurement in this project reads -- is
+        written either way. Losing the recording is worth 124 tasks.
+
+        The check comes first so this costs one `command -v` on the images that
+        already have both, which is all of them except this one family.
+        """
+        probe = await environment.exec("command -v tmux >/dev/null 2>&1 && echo yes")
+        if "yes" in _exec_text(probe):
+            return
+
+        # Whichever package manager the image has. `|| true` throughout: this
+        # runs before the agent starts, so a failure here has to surface as the
+        # tmux check below rather than as an exception from a shell command.
+        await environment.exec(
+            "sh -lc '"
+            "if command -v apt-get >/dev/null 2>&1; then "
+            "  apt-get update -qq >/dev/null 2>&1 || true; "
+            "  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux >/dev/null 2>&1 || true; "
+            "elif command -v apk >/dev/null 2>&1; then apk add --no-cache tmux >/dev/null 2>&1 || true; "
+            "elif command -v dnf >/dev/null 2>&1; then dnf install -y -q tmux >/dev/null 2>&1 || true; "
+            "elif command -v yum >/dev/null 2>&1; then yum install -y -q tmux >/dev/null 2>&1 || true; "
+            "fi' || true"
+        )
+        after = await environment.exec("command -v tmux >/dev/null 2>&1 && echo yes")
+        if "yes" not in _exec_text(after):
+            # super() is about to raise anyway; saying why first turns an empty
+            # "Error: None" into something a person can act on.
+            logger.warning(
+                "tmux is missing from this image and could not be installed; "
+                "the tmux session is about to fail to start"
+            )
+            return
+
+        if not getattr(self, "_record_terminal_session", False):
+            return
+        await environment.exec(
+            "sh -lc '"
+            "command -v asciinema >/dev/null 2>&1 && exit 0; "
+            "if command -v apt-get >/dev/null 2>&1; then "
+            "  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq asciinema >/dev/null 2>&1 || true; "
+            "elif command -v apk >/dev/null 2>&1; then apk add --no-cache asciinema >/dev/null 2>&1 || true; "
+            "fi; "
+            "command -v asciinema >/dev/null 2>&1 || "
+            "  (command -v pip3 >/dev/null 2>&1 && pip3 install -q asciinema >/dev/null 2>&1) || true"
+            "' || true"
+        )
+        rec = await environment.exec("command -v asciinema >/dev/null 2>&1 && echo yes")
+        if "yes" not in _exec_text(rec):
+            logger.warning("asciinema unavailable in this image; running without a recording")
+            self._record_terminal_session = False
 
     async def _install_crux(self, environment: BaseEnvironment) -> None:
         """Put the crux helper on PATH inside the task container.
