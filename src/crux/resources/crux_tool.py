@@ -401,13 +401,29 @@ def cmd_submit(args):
         )
         sys.exit(1)
 
-    # Off unless asked for. The gate was built on a reading of the trajectories
-    # that the finished runs disproved: crux was said to stop earlier than the
-    # arm that solved the same task, and on the full 89 it stops LATER on nine
-    # of the ten tasks it loses. What remains true is the coverage measurement
-    # it also rests on -- 206 grader tests against 35 bound checks -- but that
-    # is a reason to measure the gate, not to leave it in the default path
-    # while something else is being measured through it.
+    # Off unless asked for, but the case for it is no longer the one it was
+    # built on. That case was a cross-arm step count -- crux said to stop
+    # earlier than the arm that solved the same task -- and the finished runs
+    # disproved it: on the full 89 it stops LATER on nine of the ten tasks it
+    # loses. Steps were the wrong unit.
+    #
+    # Wall-clock is the right one, and it says something the step count could
+    # not. Fraction of the agent's own budget used, by outcome:
+    #
+    #                       solved      failed     ran to the wall
+    #     TB 2.1 baseline    12.4%       54.9%        10 of 27
+    #     TB 2.1 fixed       16.3%       33.1%         3 of 17
+    #     SWE-bench           5.1%       10.1%         0 of 3
+    #
+    # Most failures are not timeouts. They are voluntary stops with two thirds
+    # of the budget unspent, and on SWE-bench with nine tenths of it. The agent
+    # quits early, and it quits on a green light it wrote itself: `crux submit`
+    # printed "all N item(s) verified" on 95% of the runs that scored and on
+    # 100% of the runs that did not.
+    #
+    # So this gate is asking for something the run can afford. That is a reason
+    # to measure it, still not a reason to leave it in the default path while
+    # something else is being measured through it.
     if os.environ.get("CRUX_SUBMIT_GATE", "0") not in ("1", "true", "yes"):
         print(f"all {len(items)} item(s) verified")
         print(SUBMIT_SENTINEL)
