@@ -108,6 +108,30 @@ def _exec_text(result) -> str:
     return (getattr(result, "stdout", "") or "") + (getattr(result, "stderr", "") or "")
 
 
+# `crux todo add ... --verify '<cmd>'` -- binding a check, as opposed to adding
+# a checklist line with nothing behind it.
+_CHECK_BIND_RE = re.compile(r"crux\s+todo\s+add\b[^\n]*?--verify")
+
+_CHECKLIST_FIRST_NUDGE = """\
+Nothing was executed. There is no bound check yet, and this batch edits.
+
+Measured across 87 scored trials on this benchmark: the first check gets bound
+at 75-87% of the way through a run, after the last edit. 88% of trials never
+see a bound check fail even once -- including the ones that solved the task.
+`crux submit` printed "all N item(s) verified" on 95% of the runs that scored
+and on 100% of the runs that did not.
+
+A checklist written after the work is a description of what you built, and a
+description cannot fail. Written before, it is a test: red now, green when the
+work is done, and the difference is the information.
+
+Bind one check for the task's first requirement, then edit:
+
+  crux todo add "<requirement, in the task's own words>" --verify '<command>'
+
+It is expected to fail right now. That is what makes it worth anything.
+"""
+
 _EDIT_DEBT_NUDGE = """\
 You have made {n} edits without running anything that checks them.
 The commands in that last batch were NOT executed -- nothing on disk changed.
@@ -364,6 +388,13 @@ class CruxTerminusAgent(Terminus2):
         self._edit_debt_limit = int(kwargs.pop("edit_debt_limit", _EDIT_DEBT_LIMIT))
         self._edit_debt = 0
         self._edit_debt_fired = False
+        # Hold the first edit until a check is bound. Off by default: it moves
+        # the order the agent works in, and only the timing is measured.
+        self._checklist_first = str(kwargs.pop("checklist_first", False)).lower() not in (
+            "false", "0", "no", "none",
+        )
+        self._checklist_fired = False
+        self._check_bound = False
         self._stuck_fired = False
         self._crux_steps = 0
         # Whether `crux submit` demands a second pass before it will finish.
@@ -583,6 +614,38 @@ class CruxTerminusAgent(Terminus2):
         self._stuck_fired = True
         return _STUCK_NUDGE.format(steps=steps)
 
+    def _account_checklist_first(self, commands: list[Command]) -> str | None:
+        """Hold the first edit until one check is bound. Fires at most once.
+
+        The gate below counts edits made since the last verification. This one
+        is upstream of it and answers a different question: whether the thing
+        being verified was ever going to be able to say no.
+
+        Off unless asked for. It changes the order the agent works in, which is
+        a larger claim than anything measured so far supports -- the timing is
+        measured, the benefit is not.
+        """
+        if not getattr(self, "_checklist_first", False):
+            return None
+        if getattr(self, "_checklist_fired", False) or getattr(self, "_check_bound", False):
+            return None
+        edits = False
+        for command in commands:
+            keys = command.keystrokes or ""
+            if _HELP_RE.search(keys):
+                continue
+            if _CHECK_BIND_RE.search(keys):
+                # Binding and editing in one batch is the order being asked for;
+                # let it through and stop watching.
+                self._check_bound = True
+                return None
+            if _EDIT_RE.search(keys):
+                edits = True
+        if not edits:
+            return None
+        self._checklist_fired = True
+        return _CHECKLIST_FIRST_NUDGE
+
     def _account_edit_debt(self, commands: list[Command]) -> str | None:
         """Track edits made since the last verification; interrupt once only.
 
@@ -641,7 +704,7 @@ class CruxTerminusAgent(Terminus2):
         command, which is what keeps this safe for entering a REPL or an ssh
         session.
         """
-        note = self._account_edit_debt(commands)
+        note = self._account_checklist_first(commands) or self._account_edit_debt(commands)
         if note is not None:
             # Returning without executing is the same shape as a refused command,
             # which the prompt already handles: the model reads the reason and
