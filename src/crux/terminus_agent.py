@@ -510,11 +510,22 @@ class CruxTerminusAgent(Terminus2):
     async def _ensure_terminal_tools(self, environment: BaseEnvironment) -> None:
         """Install tmux, and asciinema if it can be had, in images without them.
 
-        Terminus drives a live tmux session and assumes the task image ships
-        tmux. Terminal-Bench and SWE-bench images do; the SWE-Atlas images do
-        not, and every one of 124 trials died in setup with "Failed to start
-        tmux session. Error: None" -- an empty error, because the failure is a
-        missing binary rather than a tmux that ran and complained.
+        Upstream already installs tmux when it is missing. It installs it in
+        the same apt-get as asciinema:
+
+            apt-get install -y tmux asciinema
+
+        and on Debian 11 -- what the SWE-Atlas images are built on -- asciinema
+        has no candidate, so the whole command fails, upstream reads that as
+        "the package manager did not work", and falls back to building tmux
+        from source in an image with no toolchain. That runs out its budget and
+        the trial dies with "Failed to start tmux session. Error: None". All 124
+        SWE-Atlas trials died there.
+
+        So this is not "upstream forgot to install tmux". It is one apt-get
+        carrying two packages, where the one that cannot be had takes down the
+        one that can. Installing them separately is the whole fix: tmux is
+        required, asciinema is not.
 
         Recording is a separate question. asciinema has no candidate in Debian
         11, which is what those images are built on, so it is attempted and then
