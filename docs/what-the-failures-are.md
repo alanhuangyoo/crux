@@ -60,6 +60,41 @@ Fraction of its own wall-clock budget used when it stopped:
 Most failures are not timeouts. They are voluntary stops with two thirds of the
 budget unspent, and on SWE-bench with nine tenths.
 
+### The same shape on a different benchmark
+
+SWE-bench Verified finished: **73 of 89 scored, 82.0%**, on a random 100 of the
+500 (seed 20260906; 10 trials were lost to an operator error and their absence
+moves the number by 0.2 points). Official swebench 4.0.3 grading, which resets
+the agent's edits to the test files before applying the real test patch. Median
+trial: 18 minutes against a 400-minute budget.
+
+Its 16 failures are the chain again, harder:
+
+| | | |
+|---|---:|---|
+| green light, more than half the budget unspent | 15 | 94% |
+| green light, less than half unspent | 0 | |
+| no green light, ran to the wall | 0 | |
+| no green light, stopped early | 1 | 6% |
+
+**Not one failure was a timeout.** And 15 of the 16 missed by two tests or
+fewer:
+
+    pydata__xarray-4687      1717/1718 tests   green   3.2% of budget used
+    astropy__astropy-14369    733/735          green  10.1%
+    django__django-13513       83/84           green   5.1%
+    django__django-15987       52/53           green   2.9%
+    django__django-13512       33/35           green   2.1%
+
+The first line is the whole argument in one row: 1717 tests passed, one failed,
+the agent declared itself finished on its own green light and stopped with 96.8%
+of its budget unspent.
+
+One thing differs from Terminal-Bench and is worth noting, because it rules
+something out: **the number of bound checks does not separate here** — solved
+and failed trials both bind a median of 4. The problem is not verifying too
+little. It is verifying the wrong thing.
+
 ### Two tasks that show it
 
 Both are tasks claude-code solved and crux did not.
