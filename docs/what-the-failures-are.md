@@ -160,6 +160,37 @@ current as the code it was measured on.
 
 ---
 
+## The variance nobody set
+
+crux has never set a sampling temperature. Terminus passes one only when it is
+explicitly configured, and crux never configures it, so **every number this
+project has produced was sampled at the server default** -- the
+maximum-variance setting. Measured on the endpoint, same prompt five times:
+
+    no temperature set (what every run used)   3 different answers
+    temperature=0                              1 answer
+
+That is the likeliest single explanation of everything variance-shaped here:
+
+| | |
+|---|---|
+| 60% | of SWE-bench failures solve on a plain re-run, nothing changed |
+| 15-16% | of tasks flip between two runs of one configuration |
+| ±8 points | is all an 89-task run can resolve |
+
+It also explains why both gates looked effective. In a system this noisy,
+anything selected on failure looks better when it is run again.
+
+And it puts a number on the headroom. On SWE-bench Verified: pass@1 is 82.0%,
+and 9 of the 15 failures re-run solve, so pass@2 is bounded at 92.1%. **The
+tasks this agent genuinely cannot do are 6 of 89 -- 7%.** The other 11% is
+sampling.
+
+So the lever is not more verification. It is less variance, and it has never
+been touched.
+
+---
+
 ## Neither gate survives attribution
 
 Both gates were tested with a control arm, and both looked like they worked.
