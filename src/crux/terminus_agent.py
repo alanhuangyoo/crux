@@ -110,6 +110,21 @@ def _exec_text(result) -> str:
 
 # `crux todo add ... --verify '<cmd>'` -- binding a check, as opposed to adding
 # a checklist line with nothing behind it.
+_NUL_NOTE = """\
+Nothing was executed. Command {i} contains a literal NUL byte, which cannot
+travel through the terminal channel -- the send raises ValueError("embedded
+null byte") and the trial ends there, with no score.
+
+The byte itself is fine to test; it just has to be produced inside the
+container rather than typed into the channel. Any of these work:
+
+  printf 'java\\000script:' > f.html
+  printf 'java\\x00script:' > f.html          # printf(1), not the shell
+  python3 -c "open('f.html','wb').write(b'java\\x00script:')"
+
+Resend the batch with the NUL written that way.
+"""
+
 _CHECK_BIND_RE = re.compile(r"crux\s+todo\s+add\b[^\n]*?--verify")
 
 _CHECKLIST_FIRST_NUDGE = """\
@@ -625,6 +640,27 @@ class CruxTerminusAgent(Terminus2):
         self._stuck_fired = True
         return _STUCK_NUDGE.format(steps=steps)
 
+    def _guard_null_bytes(self, commands: list[Command]) -> str | None:
+        """Refuse a batch carrying a raw NUL rather than letting it kill the trial.
+
+        `filter-js-from-html` is an HTML sanitiser, so the agent tested null-byte
+        scheme injection -- `<a href="java\x00script:alert(1)">` -- which is a
+        real vector and exactly the right thing to try. The NUL reached the send
+        path, which raised ValueError("embedded null byte"), and harbor recorded
+
+            Trial filter-js-from-html__Rkjb5eM failed: embedded null byte
+
+        The trial was scored zero for doing the task properly.
+
+        Not once-only, unlike the two gates below: this is a property of the
+        channel, not a habit worth interrupting once. If the model writes another
+        NUL it needs telling again.
+        """
+        for i, command in enumerate(commands, start=1):
+            if "\x00" in (command.keystrokes or ""):
+                return _NUL_NOTE.format(i=i)
+        return None
+
     def _account_checklist_first(self, commands: list[Command]) -> str | None:
         """Hold the first edit until one check is bound. Fires at most once.
 
@@ -715,7 +751,11 @@ class CruxTerminusAgent(Terminus2):
         command, which is what keeps this safe for entering a REPL or an ssh
         session.
         """
-        note = self._account_checklist_first(commands) or self._account_edit_debt(commands)
+        note = (
+            self._guard_null_bytes(commands)
+            or self._account_checklist_first(commands)
+            or self._account_edit_debt(commands)
+        )
         if note is not None:
             # Returning without executing is the same shape as a refused command,
             # which the prompt already handles: the model reads the reason and
