@@ -31,6 +31,10 @@ import re
 import subprocess
 import sys
 
+# A check is run when it is bound, and a bound check is meant to be quick;
+# anything slower than this is a build, and is left for `todo done` to run.
+BIND_PROBE_TIMEOUT_SEC = 20
+
 # Two independent limits, whichever binds first (pi's design). Lines alone let
 # one enormous line through; bytes alone truncate a file of short lines far too
 # early.
@@ -277,6 +281,55 @@ def _print_todo(items):
         print(f"— all {len(items)} done")
 
 
+def _report_green_at_bind(verify, number):
+    """Run a check the moment it is bound, and say if it passes already.
+
+    A check written before the work is red when it is written and green when
+    the work is done, and that transition is the only part of it worth
+    anything. Across 87 scored trials the first check gets bound at 75-87% of
+    the way through a run -- after the last edit -- and 88% of trials never see
+    a bound check fail even once, including the ones that solved the task. A
+    checklist written afterwards describes what was built, and a description
+    cannot fail.
+
+    Two of the tasks lost to claude-code show what that costs. On
+    sanitize-git-repo the agent bound `grep -rq '<your-aws-access-key-id>' .`
+    -- a case-sensitive search for the placeholder it had just substituted in
+    -- and the grader ran the same idea lowercased, over text the agent had not
+    looked at, for a token it had never heard of. It submitted after four
+    minutes of a two-hour budget. On cancel-async-tasks it bound its own
+    test_a.py and sigint_test.py; the grader asserted a count of two under
+    concurrency, which none of those scripts exercised.
+
+    This does not refuse anything. It states one fact the agent cannot
+    otherwise see -- that this check has never been observed to fail -- and
+    leaves the judgement where it was.
+    """
+    if not verify:
+        return
+    try:
+        result = subprocess.run(verify, shell=True, capture_output=True, text=True,
+                                timeout=BIND_PROBE_TIMEOUT_SEC)
+    except subprocess.TimeoutExpired:
+        print(f"item {number}: its check did not finish in "
+              f"{BIND_PROBE_TIMEOUT_SEC}s, so it was not run at bind time")
+        return
+    except OSError as exc:
+        print(f"item {number}: could not run its check ({exc})")
+        return
+    if result.returncode != 0:
+        print(f"item {number}: its check fails now (exit {result.returncode}), "
+              "which is what a check bound before the work should do")
+        return
+    print(
+        f"item {number}: its check already passes.\n"
+        "  A check that has never failed has not shown it can tell right from\n"
+        "  wrong -- it may be testing what you did rather than what was asked.\n"
+        "  Worth one look: does it use the task's own wording and data, or\n"
+        "  yours? Would it still pass against a deliberately broken version?"
+    )
+
+
 def cmd_todo(args):
     items = _load_todo()
 
@@ -286,6 +339,7 @@ def cmd_todo(args):
         for text in args.text:
             items.append({"text": text, "done": False, "verify": args.verify})
         _save_todo(items)
+        _report_green_at_bind(args.verify, len(items))
     elif args.action == "done":
         if not args.text:
             _fail("todo done needs an item number")
