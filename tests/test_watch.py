@@ -12,6 +12,7 @@ Each test below is a mistake that was actually made, once, on real data:
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -128,3 +129,80 @@ def test_render_warns_that_a_partial_score_is_biased_up(tmp_path):
 @pytest.mark.parametrize("a,b,expected", [(0, 0, 1.0), (5, 0, 0.0625), (1, 1, 1.0)])
 def test_sign_test_values(a, b, expected):
     assert watch._sign_test(a, b) == pytest.approx(expected, abs=1e-4)
+
+
+# --------------------------------------------------------------------------
+# partial credit, and where it is worth having
+
+
+def _with_ctrf(tmp_path, name, per_task):
+    """A jobs dir whose trials carry pytest's CTRF report."""
+    jobs = tmp_path / name
+    run = jobs / "2026-01-01__00-00-00"
+    run.mkdir(parents=True)
+    for task, (passed, total) in per_task.items():
+        v = run / f"{task}__hash" / "verifier"
+        v.mkdir(parents=True)
+        (v / "ctrf.json").write_text(json.dumps({
+            "results": {"summary": {"tests": total, "passed": passed, "failed": total - passed}}
+        }))
+    (jobs / "result.json").write_text(json.dumps({
+        "n_total_trials": len(per_task),
+        "stats": {"n_completed_trials": len(per_task), "n_running_trials": 0,
+                  "n_errored_trials": 0, "evals": {}},
+    }))
+    return str(jobs)
+
+
+def test_partial_reads_the_pytest_report(tmp_path):
+    jobs = _with_ctrf(tmp_path, "tb", {"a": (3, 3), "b": (1, 4)})
+    assert watch.partial(jobs) == {"a": (3, 3), "b": (1, 4)}
+
+
+def test_partial_reads_the_swebench_report(tmp_path):
+    jobs = tmp_path / "swe"
+    v = jobs / "run" / "django__django-1__h" / "verifier"
+    v.mkdir(parents=True)
+    (v / "report.json").write_text(json.dumps({"django__django-1": {"tests_status": {
+        "FAIL_TO_PASS": {"success": ["t1", "t2"], "failure": ["t3"]},
+        "PASS_TO_PASS": {"success": ["p1"], "failure": []},
+    }}}))
+    (jobs / "result.json").write_text(json.dumps({"n_total_trials": 1, "stats": {}}))
+    # 3 of 4 across both groups, and the task name keeps its repo prefix.
+    assert watch.partial(str(jobs)) == {"django__django-1": (3, 4)}
+
+
+def test_partial_reads_the_rubric_report(tmp_path):
+    jobs = tmp_path / "atlas"
+    v = jobs / "run" / "task-1__h" / "verifier"
+    v.mkdir(parents=True)
+    (v / "evaluation_results.json").write_text(
+        json.dumps({"num_rubrics": 6, "num_passed": 5, "reward": 0})
+    )
+    (jobs / "result.json").write_text(json.dumps({"n_total_trials": 1, "stats": {}}))
+    # The binary reward is 0; five of six rubrics is what it threw away.
+    assert watch.partial(str(jobs)) == {"task-1": (5, 6)}
+
+
+def test_a_trial_with_no_report_is_simply_absent(tmp_path):
+    jobs = tmp_path / "none"
+    (jobs / "run" / "t__h" / "verifier").mkdir(parents=True)
+    (jobs / "result.json").write_text(json.dumps({"n_total_trials": 1, "stats": {}}))
+    assert watch.partial(str(jobs)) == {}
+
+
+def test_the_comparison_reports_both_scores(tmp_path):
+    a = _run(tmp_path, "a", {"x": True, "y": False})
+    b = _run(tmp_path, "b", {"x": True, "y": False})
+    # give both a CTRF report under the same run dir the binary fixture made
+    for jobs, frac in ((a, (3, 3)), (b, (1, 3))):
+        run = sorted((tmp_path / Path(jobs).name).glob("2026-*"))[0]
+        for d in run.glob("y__*"):
+            (d / "verifier").mkdir(exist_ok=True)
+            (d / "verifier" / "ctrf.json").write_text(json.dumps({
+                "results": {"summary": {"tests": frac[1], "passed": frac[0]}}
+            }))
+    out = watch.compare(a, b)
+    assert "tests passed" in out
+    # binary says they tie on y; the fractions do not
+    assert "carry a signal here" in out
