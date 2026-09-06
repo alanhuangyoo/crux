@@ -206,3 +206,63 @@ def test_the_comparison_reports_both_scores(tmp_path):
     assert "tests passed" in out
     # binary says they tie on y; the fractions do not
     assert "carry a signal here" in out
+
+
+# --------------------------------------------------------------------------
+# counting what the agent did, not what the prompt described
+
+
+def _traj(tmp_path, name, prompt, commands):
+    d = tmp_path / "jobs" / "run" / f"{name}__h" / "agent"
+    d.mkdir(parents=True)
+    steps = [{"message": prompt, "tool_calls": []}]
+    for c in commands:
+        steps.append({"tool_calls": [{"arguments": {"keystrokes": c}}]})
+    (d / "trajectory.json").write_text(json.dumps({"steps": steps}))
+    (tmp_path / "jobs" / "result.json").write_text(
+        json.dumps({"n_total_trials": 1, "stats": {}}))
+    return str(tmp_path / "jobs")
+
+
+def test_the_prompt_is_not_counted_as_usage(tmp_path):
+    """The mistake this exists to stop, made three times on real data.
+
+    The system prompt documents the tools, so grepping the trajectory file for
+    `crux todo add ... --verify` reports every trial as having used it --
+    including trials that never got past exploring.
+    """
+    jobs = _traj(
+        tmp_path, "t",
+        prompt="Finish with `crux submit`. It re-runs every check you bound "
+               "with `crux todo add ... --verify`.",
+        commands=["ls -la", "cat README.md"],
+    )
+    used = watch.tool_usage(jobs, {"bind": r"todo add.*--verify", "submit": r"crux submit"})
+    assert used["bind"] == (0, 1)
+    assert used["submit"] == (0, 1)
+
+
+def test_real_usage_is_counted(tmp_path):
+    jobs = _traj(
+        tmp_path, "t",
+        prompt="Finish with `crux submit`.",
+        commands=["ls", "crux todo add 'req' --verify 'pytest -q'", "crux submit"],
+    )
+    used = watch.tool_usage(jobs, {"bind": r"todo add.*--verify", "submit": r"crux submit"})
+    assert used["bind"] == (1, 1)
+    assert used["submit"] == (1, 1)
+
+
+def test_commands_of_skips_step_zero(tmp_path):
+    jobs = _traj(tmp_path, "t", prompt="crux submit is how you finish", commands=["ls"])
+    p = glob.glob(jobs + "/run/*/agent/trajectory.json")[0] if False else None
+    import glob as g
+    p = g.glob(jobs + "/run/*/agent/trajectory.json")[0]
+    assert watch.commands_of(p) == ["ls"]
+
+
+def test_commands_of_survives_a_broken_file(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json")
+    assert watch.commands_of(str(bad)) == []
+    assert watch.commands_of(str(tmp_path / "missing.json")) == []
