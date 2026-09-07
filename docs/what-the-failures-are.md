@@ -568,6 +568,30 @@ Both the cap and the timeout are worth keeping -- an unbounded generation and
 an unbounded request are real hazards whatever else is true. Neither is the
 cause of this.
 
+**Two more eliminated.** The endpoint is not involved: during a stall it runs
+22 requests at 1,365 tok/s with an empty queue and no errors, while 29
+containers are up. The seven missing requests are the stalled trials -- they
+never reach the server at all.
+
+Inside a stalled container, `tmux list-panes` reports `pane_current_command` as
+`python3` while no python3 process exists. That looked decisive -- Terminus
+decides a command has finished from exactly this -- until the same field was
+read across every live container:
+
+    build-pov-ray          python3   (progressing)
+    circuit-fibsqrt        python3   (stalled)
+    train-fasttext         python3   (progressing)
+    regex-chess            python3   (stalled)
+    ... all 20 the same
+
+`asciinema rec` is a python3 program wrapping the shell, so the field reads
+`python3` everywhere and separates nothing.
+
+Six explanations checked, six eliminated: the call timeout, container activity,
+resource limits, the OOM killer, runaway generation, reasoning length -- plus
+the endpoint and the pane command. What is left is unexplained, and the list of
+what it is not is the only product of this line.
+
 ---
 
 ## Resolution
