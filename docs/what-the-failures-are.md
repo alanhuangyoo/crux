@@ -352,7 +352,15 @@ Measured across both finished runs and claude-code's, with no GPU:
 | crux, SWE-bench | 6,826 | 83% | 1% |
 | claude-code, TB 2.1 | 4,013 | 18% are Read/Edit/Write/Grep | — |
 
-Reading a file alone is 41-49% of every command crux issues: `cat`, `head`,
+Paired on the 72 tasks both scored, in units that are the same on both sides:
+
+| | steps (median) | tool calls (median) | calls per step |
+|---|---:|---:|---:|
+| crux | 50 | 81 | 1.55 |
+| claude-code | 27 | 29 | 1.06 |
+
+**1.85x the steps and 2.8x the tool calls, on 92% of the tasks, for the same
+score.** Reading a file alone is 41-49% of every command crux issues: `cat`, `head`,
 `sed -n '50,100p'`, a slice at a time. **claude-code finishes the same 89 tasks
 in 4,013 tool calls against crux's 6,826 -- 70% fewer -- for the same score.**
 
@@ -367,11 +375,24 @@ thing has already happened once tonight: the stuck notice's threshold of 120
 was correctly measured and then invalidated by the parser fixes, which
 collapsed the failure tail from 519 steps to 132.
 
-It is worth re-measuring, and it points the same way as the parser change: more
-actions means a longer trajectory, and trajectory length is where the variance
-lives -- the 13.5 points between 82.0% and the 95.5% ceiling.
+Then it turned out the switch was not reachable at all.
+`build_terminus_template` has no `file_tools` parameter, so the Terminus prompt
+never named `crux read`, `crux grep`, `crux files`, `crux edit` or `crux write`
+-- while `_install_crux` put all five in every container. **0% uptake was a
+statement about the prompt.** The binaries were installed and never mentioned.
 
-Not measured on current code. No GPU.
+So the chain reads:
+
+    the prompt never named the file tools
+      -> 70-83% of actions go through the shell, a slice of a file at a time
+      -> 1.85x the steps, 2.8x the tool calls
+      -> a longer trajectory
+      -> more variance
+      -> the 13.5 points between 82.0% and the 95.5% ceiling
+
+Every link is measured except the last. Whether fewer actions actually reduce
+the variance is the question a run answers, and it is now reachable:
+`--agent-kwarg file_tools=1`. Off by default until it is measured.
 
 ---
 
