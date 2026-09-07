@@ -370,6 +370,29 @@ Output text is not a result. A command that printed something plausible and
 returned 1 looks, in the terminal, exactly like one that worked. That same
 comparison run wrote `echo "exit=$?"` after every state-changing command; this
 one wrote it zero times in 512 steps and inferred success from prose.
+
+**In an existing repository, run its suite the way the repository runs it.**
+`crux tests` reads that out of the CI workflow, tox.ini, the Makefile or
+CONTRIBUTING and prints it. Use what it finds, flags and all.
+
+The reason is measured. On a finished run of 89 real GitHub issues, the
+failures were not trials that skipped testing: 88 of 89 ran the repository's
+own suite, a median of 7 times when they solved and 10 when they failed, and
+for 11 of the 16 failures the module holding the broken test was one the trial
+had run. One of them ran a 1243-test sweep, saw `Ran 1243 tests OK`, and was
+still failed on a module inside that sweep.
+
+What differed was the command. The grader ran
+
+    ./tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1 <modules>
+
+and of eight failures none passed `--parallel` and two passed `--settings`. A
+different settings module and a different isolation policy make the same tests
+not the same tests, and a pass under yours is not the pass that will be scored.
+
+This is worth doing first because it is the one thing here you do not have to
+judge. Whether your work is right is a judgement; how this repository runs its
+tests is written down in it.
 """
 
 
