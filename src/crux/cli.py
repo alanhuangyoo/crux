@@ -518,6 +518,22 @@ def cmd_report(args) -> int:
         # lost is a wash that the means alone would report as no change.
         if result["lost"]:
             print("regressed:", ", ".join(result["lost"]))
+        # Not a regression: a task one side never got to run. Reported apart
+        # from the score because it is a fault in the harness, and because it
+        # silently subtracts from whichever side it lands on.
+        if result["broke_setup"]:
+            print(
+                "\n  ! never reached the agent on one side: "
+                + ", ".join(result["broke_setup"])
+                + "\n    These are not evidence about the agent. Fix the setup"
+                  " failure and re-run before reading the delta."
+            )
+        if abs(result["full_candidate_score"] - result["full_baseline_score"]) > 1e-9:
+            print(
+                f"\n  whole-job means (different task sets, not comparable): "
+                f"{result['full_baseline_score'] * 100:.2f}% vs "
+                f"{result['full_candidate_score'] * 100:.2f}%"
+            )
         return 0
 
     solved = sorted(t.task for t in job.trials if t.solved)

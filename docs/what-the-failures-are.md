@@ -694,3 +694,76 @@ run's own recorded task filter.
 environment, so a submit gate that was correctly armed read as unarmed. The
 check has to be at the layer the thing runs in — `tmux show-environment`, not
 `docker exec env`.
+
+## One flag, two tasks, six days
+
+Every trial that ran with `confirm_gate` on a qemu task died before the agent
+typed a character. Not most: all of them.
+
+    qemu trials with confirm_gate      38 / 38 dead in setup
+    qemu trials without it             73 / 73 reached the agent
+    non-qemu trials with confirm_gate  396 / 396 unaffected
+
+Perfect separation over 111 qemu trials and 434 gated ones. The error every one
+of them recorded:
+
+    RuntimeError: Failed to start tmux session. Error: None
+
+`confirm_gate` sets one environment variable inside the task container.
+Terminus delivers `extra_env` as `tmux new-session -e KEY=value`, and `-e`
+arrived in tmux 3.2. Both qemu images are Debian 11, which ships 3.1c:
+
+    $ docker run --rm alexgshaw/qemu-alpine-ssh:20251031 tmux -V
+    tmux 3.1c
+    $ ... tmux new-session -e FOO=1 -d -s t bash
+    tmux: unknown option -- e
+
+**`Error: None` is not tmux staying quiet.** harbor builds its docker exec with
+`stderr=asyncio.subprocess.STDOUT`, so `ExecResult.stderr` is structurally
+always `None` and `ExecResult.stdout` holds everything — and the one line that
+reports the failure formats `stderr`. `unknown option -- e`, `tmux: command not
+found` and a container that died all print the same nine characters. That is
+why this sat for six days looking like an environment flake: the record of 38
+identical deaths contained no information at all, so there was nothing to
+notice, and a task that fails in setup on every run stops looking like a
+failure and starts looking like the weather.
+
+Two fixes, in `terminus_agent.py`:
+
+- `_route_env_around_old_tmux` feature-tests the flag — a probe session, not a
+  version string, because "3.2 or newer" is a claim about a changelog — and on
+  a tmux without it writes the variables to `/etc/profile.d/crux-env.sh`, which
+  the session's `bash --login` sources, then clears `extra_env` so the rejected
+  flag is never built. Verified in the image itself: `GATE=1` inside the pane.
+  Whether profile.d is reached is a property of the image, so it is checked and
+  a variable that did not arrive is logged rather than assumed.
+- `_why_tmux_failed` re-runs the start command and reports what it printed, so
+  the next failure of this shape names itself.
+
+### What it cost the measurements
+
+`analysis.py` counts an errored trial as zero, which is what a leaderboard
+does. So every arm carrying `confirm_gate` — `all-on`, `submit-gate`, `ft-on`,
+`ft-on2`, `think-*`, `both-*`, `json*` — ran against controls that did not,
+with two tasks pre-set to zero on the treatment side only. qemu solves 47% when
+it starts, so the bias is about one task in 89: −1.1 points, always in the same
+direction.
+
+That is too small to have moved any verdict here; `p=1.0` does not become
+significant on one task. It is worth writing down anyway, because it is a
+different animal from the noise everything else in this file is measured
+against. The 15% flip rate is symmetric and averages out with samples. This
+does not average out — it is a constant subtraction applied to one arm, and the
+only reason it did not matter is that the effects being measured were smaller
+still. A mechanism worth +2 would have been reported as +1.
+
+### The general shape
+
+Every mechanism in this project has been judged on a score. A mechanism can
+also change whether the trial *runs*, and that failure does not look like a bad
+score — it looks like infrastructure. The check that would have caught it in a
+minute is not about scores at all:
+
+    does the set of tasks that produced a score change when the flag flips?
+
+It changed by exactly two, every time, for six days.

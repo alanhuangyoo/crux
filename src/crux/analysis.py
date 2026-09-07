@@ -268,6 +268,20 @@ def compare(baseline: Job, candidate: Job) -> dict:
     The aggregate delta is the headline, but the regressions matter more: a
     change that solves two new tasks and breaks two others has not helped, and
     the means alone would call that a tie.
+
+    Two things this reports that it used to hide.
+
+    **The scores are over the shared tasks.** They were the whole-job means,
+    which is a delta between two different denominators — the exact total-vs-
+    total comparison this project rules out everywhere else. `full_*_score` is
+    still here, named for what it is.
+
+    **A task that never reached the agent is not a regression.** `confirm_gate`
+    set an environment variable that tmux 3.1c rejects, so both qemu tasks died
+    in setup on every gated run; they appeared in `lost` beside real ones, and
+    a mechanism was judged on two tasks it had silently deleted. `broke_setup`
+    separates them, because the two call for opposite responses: one is a
+    finding about the agent, the other a bug in the harness.
     """
     base = {t.task: t for t in baseline.trials}
     cand = {t.task: t for t in candidate.trials}
@@ -275,17 +289,33 @@ def compare(baseline: Job, candidate: Job) -> dict:
 
     gained = [t for t in shared if cand[t].solved and not base[t].solved]
     lost = [t for t in shared if base[t].solved and not cand[t].solved]
+    # Trials the change stopped from running at all, either way round.
+    broke_setup = [
+        t for t in shared
+        if (cand[t].category == "environment") != (base[t].category == "environment")
+    ]
+    lost = [t for t in lost if t not in set(broke_setup)]
     moved = [
         (t, (base[t].completion or 0), (cand[t].completion or 0))
         for t in shared
         if abs((cand[t].completion or 0) - (base[t].completion or 0)) > 0.05
     ]
+
+    def _mean(job_by_task):
+        if not shared:
+            return 0.0
+        return sum(1.0 for t in shared if job_by_task[t].solved) / len(shared)
+
+    b, c = _mean(base), _mean(cand)
     return {
         "shared_tasks": len(shared),
-        "baseline_score": baseline.score,
-        "candidate_score": candidate.score,
-        "delta": candidate.score - baseline.score,
+        "baseline_score": b,
+        "candidate_score": c,
+        "delta": c - b,
+        "full_baseline_score": baseline.score,
+        "full_candidate_score": candidate.score,
         "gained": gained,
         "lost": lost,
+        "broke_setup": broke_setup,
         "completion_moved": sorted(moved, key=lambda m: m[2] - m[1], reverse=True),
     }

@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shlex
 import time
 
 from pathlib import Path
@@ -748,7 +749,13 @@ class CruxTerminusAgent(Terminus2):
         # Before super(), which starts the tmux session and raises if tmux is
         # not there.
         await self._ensure_terminal_tools(environment)
-        await super().setup(environment)
+        await self._route_env_around_old_tmux(environment)
+        try:
+            await super().setup(environment)
+        except RuntimeError as exc:
+            if "tmux session" not in str(exc):
+                raise
+            raise RuntimeError(f"{exc} {await self._why_tmux_failed(environment)}") from exc
         if self._crux_tools:
             await self._install_crux(environment)
 
@@ -825,6 +832,97 @@ class CruxTerminusAgent(Terminus2):
         if "yes" not in _exec_text(rec):
             logger.warning("asciinema unavailable in this image; running without a recording")
             self._record_terminal_session = False
+
+    async def _why_tmux_failed(self, environment: BaseEnvironment) -> str:
+        """The line upstream cannot print, because it reads the wrong stream.
+
+        `Failed to start tmux session. Error: None` is not a case where tmux
+        said nothing. harbor creates its docker exec with
+        `stderr=asyncio.subprocess.STDOUT`, so `ExecResult.stderr` is always
+        None and `ExecResult.stdout` holds everything -- and the message
+        formats stderr. Every tmux failure in this corpus, on every task,
+        reported `Error: None`: `unknown option -- e` and `command not found`
+        are indistinguishable from the trial record.
+
+        This re-runs the same start command and reports what it prints. Failing
+        twice costs a few milliseconds against a trial that is already lost.
+        """
+        try:
+            session = getattr(self, "_session", None)
+            cmd = getattr(session, "_tmux_start_session", None) or "tmux -V"
+            out = _exec_text(await environment.exec(cmd)).strip()
+        except Exception as exc:  # noqa: BLE001 - a diagnostic must not raise
+            return f"(diagnosis failed: {type(exc).__name__}: {exc})"
+        first = next((ln for ln in out.splitlines() if ln.strip()), "")
+        return f"tmux said: {first[:200]}" if first else "(tmux printed nothing)"
+
+    async def _route_env_around_old_tmux(self, environment: BaseEnvironment) -> None:
+        """Deliver `extra_env` through the login shell when tmux has no `-e`.
+
+        Upstream starts the session with `tmux new-session -e KEY=value`, and
+        `-e` arrived in tmux 3.2. The two qemu images on this benchmark ship
+        Debian 11's tmux 3.1c, which answers:
+
+            tmux: unknown option -- e
+
+        and exits 1. Upstream then raises `Failed to start tmux session. Error:
+        None` -- None because harbor's docker exec is created with
+        `stderr=asyncio.subprocess.STDOUT`, so `ExecResult.stderr` is
+        structurally always None and the one line reporting the failure can
+        never carry the reason for it.
+
+        Cost of not knowing that: `confirm_gate` sets one variable, and across
+        the corpus 434 trials ran with it. Every one of the 38 qemu trials among
+        them died in setup, before the agent typed anything; the other 396 were
+        untouched. The separation is exact -- confirm_gate on <-> qemu trial
+        dead, 111 of 111 qemu trials either way -- which is what made a
+        two-variable mechanism look like an environment flake for six days.
+
+        `bash --login` is what the session runs, so `/etc/profile.d` reaches it
+        without `-e`. The flag is feature-tested rather than version-compared:
+        a probe session says what this build does, where "3.2 or newer" is a
+        claim about a changelog.
+        """
+        env = dict(getattr(self, "_extra_env", None) or {})
+        if not env:
+            return
+
+        probe = await environment.exec(
+            "tmux -f /dev/null new-session -e CRUX_TMUX_PROBE=1 -d -s crux_env_probe "
+            "true >/dev/null 2>&1 && "
+            "{ tmux kill-session -t crux_env_probe >/dev/null 2>&1; echo yes; }"
+        )
+        if "yes" in _exec_text(probe):
+            return
+
+        exports = "\n".join(
+            f"export {k}={shlex.quote(str(v))}" for k, v in sorted(env.items())
+        )
+        # harbor runs an exec through `bash -c`, so the heredoc needs no
+        # wrapper of its own; one is a layer of quoting to get wrong.
+        await environment.exec(
+            "mkdir -p /etc/profile.d && cat > /etc/profile.d/crux-env.sh "
+            "<<'CRUXENV'\n" + exports + "\nCRUXENV\n"
+            "chmod 0644 /etc/profile.d/crux-env.sh"
+        )
+
+        # Whether profile.d is reached is a property of the image, not of tmux,
+        # so it is checked rather than assumed: a login shell is asked to name
+        # the variables back.
+        names = " ".join(f"${{{k}:-}}" for k in sorted(env))
+        seen = _exec_text(
+            await environment.exec("bash -lc " + shlex.quote("echo " + names))
+        )
+        missing = [k for k, v in sorted(env.items()) if str(v) not in seen]
+        if missing:
+            logger.warning(
+                "tmux here has no -e and /etc/profile.d did not reach the login "
+                "shell; %s will be unset inside the session",
+                ", ".join(missing),
+            )
+        # Clearing it is what keeps the session from being started with a flag
+        # this tmux rejects. Anything that did not arrive is already reported.
+        self._extra_env = {}
 
     async def _install_crux(self, environment: BaseEnvironment) -> None:
         """Put the crux helper on PATH inside the task container.
