@@ -186,8 +186,25 @@ and 9 of the 15 failures re-run solve, so pass@2 is bounded at 92.1%. **The
 tasks this agent genuinely cannot do are 6 of 89 -- 7%.** The other 11% is
 sampling.
 
-So the lever is not more verification. It is less variance, and it has never
-been touched.
+So the lever is not more verification. It is less variance.
+
+**And the obvious knob pulls the wrong way.** The same 16 tasks a third time at
+`temperature=0.2`, against the two arms at the server default:
+
+| | consecutive repeats (median) | repeated commands | most-repeated command |
+|---|---:|---:|---:|
+| temperature 0.2 | 2 | 14.7% | 22x |
+| server default | 1 | 4.7% | 7x |
+| server default, gate on | 1 | 5.5% | 9x |
+
+Command repetition triples, and the first four tasks scored 0 against 8-of-14
+and 9-of-15 at the default. This is the failure Qwen3's own card warns about:
+low temperature in thinking mode falls into repetition loops. Lowering the
+temperature does not remove the variance, it trades sampling variance for
+loops.
+
+So the 60% re-run recovery and the 92.1% pass@2 bound both stand, and this is
+not the way to reach them.
 
 ---
 
