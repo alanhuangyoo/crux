@@ -286,3 +286,67 @@ def test_category_counts_match_the_solved_list(tmp_path):
     write_trial(tmp_path, "c__z", reward=0.0)
     job = load_job(tmp_path)
     assert job.by_category()["solved"] == sum(1 for t in job.trials if t.solved) == 2
+
+
+# --------------------------------------------------------------------------
+# a diff must not price a task that never ran
+
+
+def _trial(task, reward=None, exception=None):
+    from crux.analysis import Trial
+
+    return Trial(task=task, reward=reward, exception=exception)
+
+
+def _job(trials):
+    from pathlib import Path
+
+    from crux.analysis import Job
+
+    return Job(path=Path("/tmp/x"), trials=trials)
+
+
+def test_compare_scores_the_shared_tasks_not_the_whole_jobs():
+    """A delta between two denominators is not a delta.
+
+    The candidate ran one extra task and solved it. Its whole-job mean is
+    higher; on the tasks both actually ran, the two agree.
+    """
+    from crux.analysis import compare
+
+    base = _job([_trial("a", 1.0), _trial("b", 0.0)])
+    cand = _job([_trial("a", 1.0), _trial("b", 0.0), _trial("c", 1.0)])
+    r = compare(base, cand)
+    assert r["shared_tasks"] == 2
+    assert r["delta"] == 0.0
+    assert r["full_candidate_score"] > r["full_baseline_score"]
+
+
+def test_a_task_that_died_in_setup_is_not_a_regression():
+    """The shape that cost `confirm_gate` two tasks on every gated run.
+
+    tmux 3.1c rejects the `-e` the gate's environment variable travelled on, so
+    both qemu tasks failed before the agent typed anything -- and landed in
+    `lost` looking like the mechanism had broken them.
+    """
+    from crux.analysis import compare
+
+    base = _job([_trial("qemu-startup", 1.0), _trial("x", 1.0)])
+    cand = _job([
+        _trial("qemu-startup", None, exception="RuntimeError"),
+        _trial("x", 1.0),
+    ])
+    r = compare(base, cand)
+    assert r["broke_setup"] == ["qemu-startup"]
+    assert r["lost"] == []
+
+
+def test_a_real_regression_still_reads_as_one():
+    from crux.analysis import compare
+
+    base = _job([_trial("x", 1.0)])
+    cand = _job([_trial("x", 0.0)])
+    r = compare(base, cand)
+    assert r["lost"] == ["x"]
+    assert r["broke_setup"] == []
+    assert r["delta"] == -1.0
