@@ -348,6 +348,40 @@ def build_instance_template(
 # it. A frozen copy was in the tree and matched upstream exactly, which is the
 # problem: it would go on matching a prompt harbor had since changed, silently.
 
+# Measured against claude-code on the same 89 tasks, same model. Segments per
+# command, counting `&&` and `;`:
+#
+#                    every command   the first command
+#     claude-code         3.0              3.0
+#     crux                2.0              1.0
+#
+# crux's opening move is one segment -- `ls` -- where the other agent's is
+# three. Its first commands look like
+#
+#     ls -la /app && head -5 /app/data.csv && wc -l /app/data.csv
+#     ls -la /app/ && file /app/a.out
+#     python3 --version && which python3 && ls -la /app
+#
+# and that is the whole of the 1.85x step count and 2.8x tool calls measured
+# between the two: fewer things per step means more steps. Unlike the file
+# tools, this asks the model to adopt nothing new -- only to put what it was
+# going to run anyway into one command.
+TERMINUS_BATCH_SECTION = """## One command, several answers
+
+Chain your probes. A turn costs a model call whatever it carries, so a step
+that answers one question wastes the other three it could have asked:
+
+    ls -la /app && head -5 /app/data.csv && wc -l /app/data.csv
+    python3 --version && which python3 && pip list 2>/dev/null | head
+
+This matters most on the first command. Opening with `ls` alone buys one fact
+and a whole turn; opening with a chain buys the shape of the task.
+
+Keep them separate when a later part depends on reading an earlier one, or when
+one part is slow and you want its output before deciding. Chaining is for the
+questions you already know you will ask.
+"""
+
 TERMINUS_HARNESS_SECTION = """## Use what the task already gives you
 
 Read the task for anything that checks the work -- a script it names, a test
@@ -527,6 +561,7 @@ def build_terminus_template(
     harness: bool = True,
     edit: bool = True,
     file_tools: bool = False,
+    batch: bool = False,
 ) -> str:
     """Insert the crux sections into upstream's Terminus template.
 
@@ -564,6 +599,8 @@ def build_terminus_template(
         parts += [TERMINUS_SUBMIT_SECTION.strip(), ""]
     if harness:
         parts += [TERMINUS_HARNESS_SECTION.strip(), ""]
+    if batch:
+        parts += [TERMINUS_BATCH_SECTION.strip(), ""]
     if edit:
         parts += [TERMINUS_EDIT_SECTION.strip(), ""]
     if file_tools:
