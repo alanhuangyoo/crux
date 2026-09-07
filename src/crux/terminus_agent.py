@@ -503,6 +503,13 @@ class CruxTerminusAgent(Terminus2):
         self._crux_edit = str(kwargs.pop("edit_section", True)).lower() not in (
             "false", "0", "no",
         )
+        # The five file tools are installed by _install_crux and, until now,
+        # were never named in the Terminus prompt -- build_terminus_template
+        # had no parameter for them. Off by default because it is unmeasured
+        # on this path, on by `--agent-kwarg file_tools=1`.
+        self._crux_file_tools = str(kwargs.pop("file_tools", False)).lower() in (
+            "1", "true", "yes",
+        )
         # Carry the conversation across run() calls, for the interactive path.
         # Off by default: the benchmark scores one instruction per trial, and
         # every number in this repo was measured with a fresh chat per run.
@@ -555,6 +562,7 @@ class CruxTerminusAgent(Terminus2):
                 submit=self._crux_submit,
                 harness=self._crux_harness,
                 edit=self._crux_edit,
+                file_tools=self._crux_file_tools,
             )
         # Upstream sends no output cap at all, which leaves a thinking turn
         # unbounded. Measured on this deployment, `write-compressor` spent its

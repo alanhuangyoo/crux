@@ -800,3 +800,46 @@ def test_no_clock_leaves_upstream_untouched():
     a._parser_name = "xml"
     assert a._get_completion_confirmation_message("out") == \
         Terminus2._get_completion_confirmation_message(a, "out")
+
+
+def test_the_file_tools_can_be_named_in_the_prompt():
+    """They could not be, and the measurement that turned them off said the
+    model did not use them.
+
+    `build_terminus_template` had no `file_tools` parameter, so the Terminus
+    prompt never mentioned `crux read`, `crux grep`, `crux files`, `crux edit`
+    or `crux write` -- while `_install_crux` put all five in the container. The
+    recorded reason for the default, "over 206 tool calls read/grep/edit/write
+    accounted for under 2%", was a statement about the prompt.
+
+    What it costs: 70-83% of every command crux issues is a file operation and
+    0-1% of them go through a structured tool. claude-code finishes the same 89
+    tasks in 4,013 tool calls against 6,826.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from crux.terminus_agent import CruxTerminusAgent
+
+    d = Path(tempfile.mkdtemp())
+    off = CruxTerminusAgent(logs_dir=d, model_name="openai/x")
+    on = CruxTerminusAgent(logs_dir=d, model_name="openai/x", file_tools=1)
+    for name in ("crux read", "crux grep", "crux files"):
+        assert name not in off._prompt_template
+        assert name in on._prompt_template
+    # and the sections that were already there survive either way
+    for t in (off._prompt_template, on._prompt_template):
+        assert "crux submit" in t and "crux todo" in t
+
+
+def test_file_tools_is_off_unless_asked_for():
+    import tempfile
+    from pathlib import Path
+
+    from crux.terminus_agent import CruxTerminusAgent
+
+    d = Path(tempfile.mkdtemp())
+    for value in (None, 0, "0", "false", "no"):
+        kw = {} if value is None else {"file_tools": value}
+        a = CruxTerminusAgent(logs_dir=d, model_name="openai/x", **kw)
+        assert "crux read" not in a._prompt_template

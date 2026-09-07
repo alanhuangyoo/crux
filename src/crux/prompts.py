@@ -516,8 +516,26 @@ def build_terminus_template(
     submit: bool = True,
     harness: bool = True,
     edit: bool = True,
+    file_tools: bool = False,
 ) -> str:
     """Insert the crux sections into upstream's Terminus template.
+
+    `file_tools` defaults off, and the reason recorded for that was not true.
+    It said the model did not take the tools up -- "over 206 tool calls,
+    read/grep/edit/write together accounted for under 2%" -- but this function
+    had no `file_tools` parameter at all, so the Terminus prompt never named
+    `crux read`, `crux grep`, `crux files`, `crux edit` or `crux write`. The
+    binaries were installed and never mentioned. 0% uptake was a statement
+    about the prompt.
+
+    What that costs is measurable. Across both finished runs, 70-83% of every
+    command crux issues is a file operation and 0-1% of them go through a
+    structured tool; reading a file alone is 41-49% of all commands, one slice
+    at a time. claude-code finishes the same 89 tasks in 4,013 tool calls
+    against 6,826, for the same score.
+
+    Still off by default: it is now reachable and unmeasured, which is an arm,
+    not a change to the one being scored.
 
     `submit` is separable from `scoring` because they are not the same claim.
     The scoring section states a fact about the grader -- partial work scores
@@ -538,5 +556,7 @@ def build_terminus_template(
         parts += [TERMINUS_HARNESS_SECTION.strip(), ""]
     if edit:
         parts += [TERMINUS_EDIT_SECTION.strip(), ""]
+    if file_tools:
+        parts += [FILE_TOOLS_SECTION.strip(), ""]
     parts += [sep + tail]
     return "\n".join(parts)
