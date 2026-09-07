@@ -510,6 +510,16 @@ def build_sections(names) -> str:
         PROMPT_SECTIONS[n].strip() for n in _SECTION_ORDER if n in wanted
     )
 
+def _escape_braces(text: str) -> str:
+    """Make literal braces survive a later `str.format`.
+
+    Sections that show JSON to the model contain `{` and `}` that are content,
+    not placeholders. Anything inserted into a template upstream will format
+    has to double them.
+    """
+    return text.replace("{", "{{").replace("}", "}}")
+
+
 def build_terminus_template(
     upstream: str,
     scoring: bool = True,
@@ -557,6 +567,14 @@ def build_terminus_template(
     if edit:
         parts += [TERMINUS_EDIT_SECTION.strip(), ""]
     if file_tools:
-        parts += [FILE_TOOLS_SECTION.strip(), ""]
+        # Braces doubled. Upstream runs `.format(instruction=..., terminal_state=...)`
+        # over this template, and the `crux edit` example in this section is a
+        # JSON object -- `{"edits": [...]}` -- which format() reads as a field
+        # name and raises KeyError('"edits"') on. That took out 16 of 89 trials
+        # on the first run of this arm.
+        #
+        # The mini-swe-agent path does not need this: it substitutes with
+        # str.replace and never formats.
+        parts += [_escape_braces(FILE_TOOLS_SECTION.strip()), ""]
     parts += [sep + tail]
     return "\n".join(parts)
