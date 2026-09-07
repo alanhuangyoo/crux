@@ -342,6 +342,39 @@ as working.
 
 ---
 
+## Where the actions go
+
+Measured across both finished runs and claude-code's, with no GPU:
+
+| | commands / tool calls | file operations | through a structured tool |
+|---|---:|---:|---:|
+| crux, TB 2.1 | 6,956 | 70% | 0% |
+| crux, SWE-bench | 6,826 | 83% | 1% |
+| claude-code, TB 2.1 | 4,013 | 18% are Read/Edit/Write/Grep | — |
+
+Reading a file alone is 41-49% of every command crux issues: `cat`, `head`,
+`sed -n '50,100p'`, a slice at a time. **claude-code finishes the same 89 tasks
+in 4,013 tool calls against crux's 6,826 -- 70% fewer -- for the same score.**
+
+`crux read/grep/edit/write` are installed and the prompt turns them off. The
+comment on that decision:
+
+> the model does not take them up: over 206 tool calls in one evaluation,
+> read/grep/edit/write together accounted for under 2%
+
+That was measured on the code that still had the XML parse faults, and the same
+thing has already happened once tonight: the stuck notice's threshold of 120
+was correctly measured and then invalidated by the parser fixes, which
+collapsed the failure tail from 519 steps to 132.
+
+It is worth re-measuring, and it points the same way as the parser change: more
+actions means a longer trajectory, and trajectory length is where the variance
+lives -- the 13.5 points between 82.0% and the 95.5% ceiling.
+
+Not measured on current code. No GPU.
+
+---
+
 ## Resolution
 
 **Two runs of one configuration disagree on 15-16% of tasks.** Measured:
