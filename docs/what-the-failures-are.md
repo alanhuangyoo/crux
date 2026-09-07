@@ -444,6 +444,47 @@ score says the actions matter.
 
 ---
 
+## Trials that stop, and the slot they hold
+
+Across 524 trials in twelve runs, 28 stopped without ever finishing -- no
+verifier output, and a trajectory that ends early and is never written to
+again. They are not spread evenly:
+
+| task | stalled | seen | rate | steps when it stopped |
+|---|---:|---:|---:|---:|
+| regex-chess | 6 | 11 | 55% | 3 |
+| adaptive-rejection-sampler | 4 | 10 | 40% | 6 |
+| dna-assembly | 3 | 11 | 27% | 11 |
+| fifteen others | 1 each | | | |
+
+Three tasks account for 13 of the 28, and all of them stop early rather than
+part-way. Each stall holds a concurrency slot for about 100 minutes, so 28 of
+them is roughly 47 slot-hours.
+
+**What it is not.** Four explanations were checked and none of them holds:
+
+- *the model call hanging without a timeout* -- `timeout` does reach litellm
+  and does work: 5 seconds gives a Timeout in 5.2s, and no timeout hangs
+  forever. The 600s limit crux now sets is real, and these trials outlast it.
+- *the container waiting on a long command* -- inside a stalled container the
+  only processes are `sleep infinity`, tmux, and an idle `bash --login`.
+  Nothing is running.
+- *resource limits* -- the stalling tasks have exactly the config of tasks that
+  never stall: 1 cpu, 2048 MB.
+- *the OOM killer* -- two containers were OOM-killed across the whole set, and
+  neither is one of the three.
+
+**What it is.** The pane, the asciinema recording and the trajectory all stop
+being written in the same minute, and the container goes idle. That places it
+in harbor's own coroutine rather than in the model call or the container. It is
+not diagnosed further here.
+
+One thing worth carrying: `regex-chess`'s image has no `ps`. It is a stripped
+image, and it is the worst offender at 55%. That is a correlation with one
+sample of a stripped image, not a finding.
+
+---
+
 ## Resolution
 
 **Two runs of one configuration disagree on 15-16% of tasks.** Measured:
