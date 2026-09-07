@@ -917,3 +917,33 @@ def test_the_models_own_reasoning_can_be_handed_back():
         assert CruxTerminusAgent(
             logs_dir=d, model_name="openai/x", interleaved_thinking=off
         )._interleaved_thinking is False
+
+
+def test_one_response_has_a_ceiling():
+    """Without one, a runaway generation runs to the context limit.
+
+    Found by reading claude-code's trajectory on `regex-chess` -- a task that
+    stalls in every crux run and stalled for it too, 7 steps and one tool call
+    over 240 minutes. Its trajectory says why:
+
+        API Error: Claude's response exceeded the 64000 output token maximum.
+
+    Same wall, different outcome: it fails loudly, crux had no ceiling and
+    generates until the context runs out, which reads as two hours of silence.
+
+    Stalled trials generate 2-3x what scored ones do in a single step -- 28,234
+    median against 12,408, up to 41,157.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from crux.terminus_agent import _MAX_OUTPUT_TOKENS, CruxTerminusAgent
+
+    d = Path(tempfile.mkdtemp())
+    a = CruxTerminusAgent(logs_dir=d, model_name="openai/x")
+    assert a._llm_call_kwargs.get("max_tokens") == _MAX_OUTPUT_TOKENS
+    # above every scored trial's largest turn, well under the 262k window
+    assert 20_000 < _MAX_OUTPUT_TOKENS < 100_000
+
+    b = CruxTerminusAgent(logs_dir=d, model_name="openai/x", max_tokens=8192)
+    assert b._llm_call_kwargs.get("max_tokens") == 8192
