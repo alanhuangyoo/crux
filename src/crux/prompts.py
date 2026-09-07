@@ -366,6 +366,17 @@ def build_instance_template(
 # between the two: fewer things per step means more steps. Unlike the file
 # tools, this asks the model to adopt nothing new -- only to put what it was
 # going to run anyway into one command.
+#
+# Probed before spending a run on it: five first commands from the real prompt
+# against the real endpoint, thinking off.
+#
+#     default            [1, 1, 1, 1, 1]   median 1.0
+#     batch_section=1    [3, 2, 1, 1, 1]   median 1.0
+#
+# Two of five move; the median does not. That is the same shape as the file
+# tools -- uptake 0.3% to 4.3%, and a score of 81.1% against 78.4% at p=0.77 --
+# so this is written down and left off rather than given an arm. A section
+# nudges a strong prior and does not replace it.
 TERMINUS_BATCH_SECTION = """## One command, several answers
 
 Chain your probes. A turn costs a model call whatever it carries, so a step
