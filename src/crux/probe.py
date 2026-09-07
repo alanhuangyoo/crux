@@ -70,6 +70,7 @@ SIGNALS: dict[str, tuple[str, str]] = {
     # kwarg            (what to count, one line of why)
     "batch_section":   ("segments", "probes chained into one command"),
     "file_tools":      ("crux_tools", "calls to crux read/grep/files/edit"),
+    "look_section":    ("reads_data", "the first command touching the data"),
 }
 
 # Everything else changes something this cannot see on turn one, and says so
@@ -94,6 +95,11 @@ def _count(kind: str, command: str, prompt: str) -> float:
         return len(_SEGMENTS.split(command.strip())) if command.strip() else 0
     if kind == "crux_tools":
         return len(re.findall(r"\bcrux\s+(read|grep|files|edit|write)\b", command))
+    if kind == "reads_data":
+        # A listing names a file; these open one.
+        return 1.0 if re.search(
+            r"\b(cat|head|tail|file|strings|xxd|od|hexdump|wc|python3?\s+-c|"
+            r"crux\s+read|Image\.open|cv2\.)\b", command) else 0.0
     if kind == "prompt_len":
         return len(prompt)
     return 0.0
