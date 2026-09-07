@@ -208,6 +208,53 @@ not the way to reach them.
 
 ---
 
+## What the SWE-bench failures are, exactly
+
+Sixteen failures, traced one at a time. Each step below killed a hypothesis.
+
+**They are regressions, not missing features.** Classifying each failure by
+whether the test it failed existed at the base commit:
+
+| | |
+|---|---:|
+| broke a test that already existed | 11 |
+| missed a behaviour the test patch adds | 2 |
+| both | 3 |
+
+**It is not that the agent skips testing.** It runs the repo's own suite a
+median of 7 times when it solves and 10 when it fails; 88 of 89 trials run it
+at least once. As a separator that is worth 0.06.
+
+**It is not that it edits after testing.** 71% of solves and 69% of failures
+run a test after their last edit.
+
+**It is not the wrong runner.** Every django trial uses `runtests.py`, 39 of 41
+solves and 8 of 8 failures. None reaches for pytest on a repo that needs
+django's own harness.
+
+**It is not testing too narrow a scope.** For 11 of the 16, the module holding
+the broken test is one the agent ran.
+
+**It ran that module and its run passed.** `django__django-16263` ran a
+1243-test regression sweep -- `Ran 1243 tests in 6.554s / OK` -- and the grader
+still failed it on `aggregation.tests`. Same module, same code, opposite
+result.
+
+**The difference is the invocation.** The grader runs
+
+    ./tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1 <modules>
+
+and of the eight django failures, **none used `--parallel`** and only two used
+`--settings`. Of the 41 solves, six used `--parallel`. Different settings module
+and different test isolation, so the same tests are not the same tests.
+
+That points somewhere the gates do not. How the grader runs the suite is not a
+judgement the agent has to make about its own work -- it is a fact in the
+repository, in CI config, tox.ini, or CONTRIBUTING. It is an external signal,
+which is the thing every mechanism in the section below turned out to lack.
+
+---
+
 ## Neither gate survives attribution
 
 Both gates were tested with a control arm, and both looked like they worked.
