@@ -15,6 +15,18 @@ the score question is worth asking.
 This is not a substitute for measuring the score. It is the filter in front of
 it: a mechanism that does not move behaviour cannot move the score, and one
 that moves behaviour a little will move the score less than the noise.
+
+**It measures a ceiling, not an effect.** The probe reads turn one, where the
+model has read nothing and has no habits yet. On file tools it reports two
+draws in four reaching for `crux read`; across 160 real trajectories the tools
+are used in 37%, and the first use lands at 41% of the way through -- only 4 of
+59 inside the first tenth. The opening command is `ls -la /app` 35 times out of
+39.
+
+So the model can be moved and mostly is not, and the gap between those two is
+where the score went: a mechanism that saves actions cannot save them after the
+actions are spent. A probe that says "worth an arm" is saying the ceiling is
+above zero, which is the least it could usefully say.
 """
 
 from __future__ import annotations
