@@ -606,6 +606,36 @@ that is where this line stops.
 
 ---
 
+## Stopping a loss you cannot fix
+
+The stall has ten eliminated explanations and no cause. What it does have is a
+price, and the price can be asked a different question: *what are these tasks
+worth?*
+
+Over 432 scored trials in 21 runs:
+
+| task | solved | stalls |
+|---|---:|---:|
+| regex-chess | 0 of 4 | 6 of 11 |
+| adaptive-rejection-sampler | 0 of 6 | 4 of 10 |
+| write-compressor | 5 of 6 | yes |
+| circuit-fibsqrt | 3 of 4 | yes |
+
+The first two have never solved. The last two stall as well and solve most of
+the time, so capping them would trade real scores for wall-clock. Only the two
+with nothing to trade get a shorter budget: 30 minutes instead of 120, run in
+their own job rather than excluded, because a task that starts solving under a
+new configuration has to be able to show up and a quietly skipped one never
+can.
+
+That is the whole mechanism, and it is worth stating because it generalises:
+**a cost you cannot remove can still be priced, and something priced at zero is
+not worth an explanation.** Ten hours went into looking for the cause of these
+stalls. Ten minutes of asking what the tasks score would have capped them on
+the first night.
+
+---
+
 ## Resolution
 
 **Two runs of one configuration disagree on 15-16% of tasks.** Measured:
