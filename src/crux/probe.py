@@ -45,15 +45,62 @@ _DEFAULT_TASK = (
 )
 
 
+# What to measure depends on what the change claims to do. A probe that reports
+# the same number for every configuration is not measuring the configuration --
+# the first version counted command segments for everything, and answered
+# "median unmoved at 1.0" for file tools, interleaved thinking, the harness
+# section and the submit gate alike. Three of those do not touch the first
+# command at all.
+#
+# Same fault as the sampling check in `crux doctor`, which asked a question with
+# one obvious answer and reported determinism it had never tested.
+SIGNALS: dict[str, tuple[str, str]] = {
+    # kwarg            (what to count, one line of why)
+    "batch_section":   ("segments", "probes chained into one command"),
+    "file_tools":      ("crux_tools", "calls to crux read/grep/files/edit"),
+}
+
+# Everything else changes something this cannot see on turn one, and says so
+# instead of printing a number.
+#
+# `interleaved_thinking` is the instructive case: it was listed here with a
+# prompt-length signal, and reported 9268 == 9268 -- correctly, because on the
+# first turn there is no prior reasoning to carry. The effect is real and
+# measured (context grows 555 tokens a step, reasoning is 26% shorter) and it
+# begins on turn two. A probe that reads turn one can only mislead about it.
+NO_FIRST_TURN_SIGNAL = {
+    "interleaved_thinking": "acts from turn two, when there is reasoning to carry",
+    "submit_gate": "fires at the end of a run",
+    "edit_debt_limit": "fires at the 13th unchecked edit",
+    "confirm_gate": "fires at submit",
+    "harness_section": "changes what is read, not what is typed first",
+}
+
+
+def _count(kind: str, command: str, prompt: str) -> float:
+    if kind == "segments":
+        return len(_SEGMENTS.split(command.strip())) if command.strip() else 0
+    if kind == "crux_tools":
+        return len(re.findall(r"\bcrux\s+(read|grep|files|edit|write)\b", command))
+    if kind == "prompt_len":
+        return len(prompt)
+    return 0.0
+
+
 @dataclass
 class ProbeResult:
     label: str
     commands: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    kind: str = "segments"
+    prompt: str = ""
 
     @property
-    def segments(self) -> list[int]:
-        return [len(_SEGMENTS.split(c.strip())) for c in self.commands if c.strip()]
+    def segments(self) -> list[float]:
+        if self.kind == "prompt_len":
+            # One prompt per configuration, not one per draw.
+            return [_count(self.kind, "", self.prompt)]
+        return [_count(self.kind, c, self.prompt) for c in self.commands if c.strip()]
 
     @property
     def median_segments(self) -> float:
@@ -61,13 +108,15 @@ class ProbeResult:
         return st.median(s) if s else 0.0
 
     def summary(self) -> str:
-        if not self.commands:
+        if not self.commands and self.kind != "prompt_len":
             why = f"  ({self.errors[0]})" if self.errors else ""
             return f"  {self.label:<22} no commands returned{why}"
+        vals = [f"{v:.0f}" for v in self.segments]
+        head = f"  {self.label:<22} [{', '.join(vals)}]  median {self.median_segments:.1f}"
+        if self.kind == "prompt_len":
+            return head
         firsts = [ui.first_line(c, 46) for c in self.commands[:3]]
-        return (f"  {self.label:<22} segments {self.segments}  "
-                f"median {self.median_segments:.1f}\n"
-                + "\n".join(f"      $ {f}" for f in firsts))
+        return head + "\n" + "\n".join(f"      $ {f}" for f in firsts)
 
 
 def _one_call(base_url: str, api_key: str, model: str, prompt: str,
@@ -101,7 +150,8 @@ def _one_call(base_url: str, api_key: str, model: str, prompt: str,
 
 
 def probe(agent_kwargs: dict, label: str, base_url: str, api_key: str,
-          model: str, task: str = _DEFAULT_TASK, n: int = 5) -> ProbeResult:
+          model: str, task: str = _DEFAULT_TASK, n: int = 5,
+          kind: str = "segments") -> ProbeResult:
     """Draw `n` first commands from the prompt a given configuration produces."""
     import tempfile
     from pathlib import Path
@@ -115,8 +165,11 @@ def probe(agent_kwargs: dict, label: str, base_url: str, api_key: str,
     prompt = agent._prompt_template.format(
         instruction=task, terminal_state=_FRESH_TERMINAL
     )
-    out = ProbeResult(label=label)
-    for _ in range(n):
+    out = ProbeResult(label=label, kind=kind, prompt=prompt)
+    # A prompt-length signal is a property of the prompt, not of what the model
+    # does with it, so it needs no calls at all.
+    draws = 0 if kind == "prompt_len" else n
+    for _ in range(draws):
         keys, err = _one_call(base_url, api_key, model, prompt)
         if keys:
             out.commands.append(keys)
@@ -141,13 +194,28 @@ def cmd_probe(args) -> int:
         kwargs[k] = v or True
 
     print(ui.rule("crux probe"))
-    print(ui.hint(f"  {model}  ·  {args.n} draws  ·  first command only\n"))
-    base_res = probe({}, "default", base, key, model, args.task, args.n)
-    print(base_res.summary())
     if not kwargs:
-        return 0
+        print(ui.hint("  nothing to compare; pass --agent-kwarg K=V"))
+        return 1
+
+    known = [k for k in kwargs if k in SIGNALS]
+    if not known:
+        print(ui.warn(f"  no first-turn signal for {', '.join(kwargs)}"))
+        for k in kwargs:
+            why = NO_FIRST_TURN_SIGNAL.get(k)
+            if why:
+                print(ui.hint(f"    {k}: {why}"))
+        print(ui.hint(
+            "  This reads the first command only, so a change that acts later\n"
+            "  needs an arm. Readable here: " + ", ".join(SIGNALS)))
+        return 1
+    kind, why = SIGNALS[known[0]]
+    print(ui.hint(f"  {model}  ·  {args.n} draws  ·  counting {why}\n"))
+
+    base_res = probe({}, "default", base, key, model, args.task, args.n, kind)
+    print(base_res.summary())
     on = probe(kwargs, ",".join(f"{k}={v}" for k, v in kwargs.items()),
-               base, key, model, args.task, args.n)
+               base, key, model, args.task, args.n, kind)
     print(on.summary())
 
     b, o = base_res.median_segments, on.median_segments

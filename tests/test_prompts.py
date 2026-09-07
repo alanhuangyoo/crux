@@ -119,3 +119,29 @@ def test_a_probe_result_reports_nothing_rather_than_zero():
     assert empty.median_segments == 0.0
     assert "no commands returned" in empty.summary()
     assert "Timeout" in empty.summary()
+
+
+def test_the_probe_picks_a_signal_per_mechanism():
+    """A probe that answers the same for every configuration measures nothing.
+
+    The first version counted command segments for everything and replied
+    "median unmoved at 1.0" for file tools, interleaved thinking, the harness
+    section and the submit gate alike -- three of which do not touch the first
+    command at all.
+    """
+    from crux.probe import NO_FIRST_TURN_SIGNAL, SIGNALS
+
+    assert SIGNALS["file_tools"][0] == "crux_tools"
+    assert SIGNALS["batch_section"][0] == "segments"
+    # and the ones it cannot see say so rather than getting a meaningless number
+    for k in ("interleaved_thinking", "submit_gate", "edit_debt_limit"):
+        assert k not in SIGNALS
+        assert k in NO_FIRST_TURN_SIGNAL
+
+
+def test_the_probe_counts_the_tool_it_claims_to():
+    from crux.probe import _count
+
+    assert _count("crux_tools", "ls -la /app", "") == 0
+    assert _count("crux_tools", "crux read /app/solver.py", "") == 1
+    assert _count("crux_tools", "crux grep x . && crux files '*.py'", "") == 2
