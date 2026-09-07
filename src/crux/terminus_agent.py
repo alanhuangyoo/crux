@@ -543,8 +543,23 @@ class CruxTerminusAgent(Terminus2):
         # 4,938 carry reasoning_content, and every one of them was discarded.
         # The model re-derives its reasoning from scratch each turn.
         #
-        # Off by default here too, because it is unmeasured on this benchmark:
-        # `--agent-kwarg interleaved_thinking=1` makes it an arm.
+        # Measured across 124 trajectories against 123 without it, and the
+        # effect is not the one the card describes:
+        #
+        #                  steps   reasoning   context growth/step
+        #     returned      49     1,737 ch        2,174 tok
+        #     discarded     43     1,174 ch        1,085 tok
+        #
+        # Context per step doubles, as expected -- that is the reasoning going
+        # back. But the reasoning itself grows 48% rather than shrinking, and
+        # the run takes more steps, not fewer. An early read on 20 trajectories
+        # said reasoning was 26% *shorter*; the full corpus reverses it.
+        #
+        # So "reduced redundant reasoning" does not reproduce here. All three
+        # measurable effects are costs. Score is 37/48 against a 65/85 control,
+        # which is inside the noise either way.
+        #
+        # Off by default: `--agent-kwarg interleaved_thinking=1` makes it an arm.
         kwargs.setdefault(
             "interleaved_thinking",
             str(kwargs.pop("interleaved_thinking", False)).lower() in ("1", "true", "yes"),
