@@ -400,6 +400,14 @@ def _harden_parser(parser):
     keeps the rest, which is what the surrounding code does with anything it
     cannot identify.
     """
+    # Both repairs below are about hand-matched XML tags, and the JSON parser
+    # has none: it hands the text to a strict parser that either accepts it or
+    # does not. Applying them there is not merely useless, it crashed the
+    # constructor -- `parser_name="json"`, which is upstream's default, could
+    # not be selected at all.
+    if not hasattr(parser, "_find_top_level_tags"):
+        return
+
     original = parser._find_top_level_tags
 
     def _safe(content):

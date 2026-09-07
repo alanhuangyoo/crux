@@ -111,3 +111,42 @@ def test_the_edit_section_names_the_tool_and_its_format():
     # And it has to say when NOT to use it, or the model patches files it is
     # creating and the context never matches.
     assert "creating" in s
+
+
+def test_the_json_parser_can_be_selected_at_all():
+    """It could not. The constructor crashed on it.
+
+    Both repairs in _harden_parser are about hand-matched XML tags -- an
+    unclosed <commands> and a nameless <  > -- and the JSON parser has neither:
+    it hands the text to a strict parser that either accepts it or does not.
+    Reaching for `_find_top_level_tags` on it raised AttributeError before the
+    agent finished constructing, so `parser_name="json"`, which is upstream's
+    own default, was unreachable.
+
+    That matters beyond a crash. Every one of the three harness faults this
+    project found was specific to the XML protocol, and the alternative was
+    unusable.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from crux.terminus_agent import CruxTerminusAgent
+
+    d = Path(tempfile.mkdtemp())
+    for parser_name, expected in (("xml", "TerminusXMLPlainParser"),
+                                  ("json", "TerminusJSONPlainParser")):
+        a = CruxTerminusAgent(logs_dir=d, model_name="openai/x", parser_name=parser_name)
+        assert type(a._parser).__name__ == expected
+        # and crux's own prompt sections survive either template
+        assert "crux submit" in a._prompt_template
+
+
+def test_hardening_is_a_no_op_on_a_parser_without_tags():
+    from crux.terminus_agent import _harden_parser
+
+    class Bare:
+        pass
+
+    bare = Bare()
+    _harden_parser(bare)          # must not raise
+    assert not hasattr(bare, "_find_top_level_tags")
