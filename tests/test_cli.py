@@ -382,3 +382,25 @@ def test_repl_is_a_subcommand_with_the_same_approval_default():
     a = parse(["repl"])
     assert a.approval == "dangerous"
     assert parse(["solve", "x"]).approval == "dangerous"
+
+
+def test_it_names_the_tasks_that_burn_their_budget(capsys, monkeypatch):
+    """Two tasks have never solved in 10 scored attempts and stall on most.
+
+    regex-chess 0 of 4, adaptive-rejection-sampler 0 of 6, both stalling at 3-6
+    steps and then holding a concurrency slot until the agent budget runs out.
+    Ten explanations for the stall have been checked and eliminated, so this is
+    loss control rather than a fix -- and it is a note rather than a silent
+    exclusion, because which tasks are worth their wall-clock is a judgement
+    about one corpus.
+    """
+    from crux.cli import STALL_CAP_MULTIPLIER, stall_capped_for
+
+    capped = stall_capped_for("terminal-bench/terminal-bench-2-1")
+    assert "regex-chess" in capped
+    assert "adaptive-rejection-sampler" in capped
+    # tasks that stall but do solve must not be here
+    for t in ("write-compressor", "circuit-fibsqrt", "dna-assembly"):
+        assert t not in capped
+    assert stall_capped_for("swe-bench/swe-bench-verified") == ()
+    assert 0 < STALL_CAP_MULTIPLIER < 8

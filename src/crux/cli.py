@@ -86,6 +86,39 @@ GPU_TASKS_BY_ORG = {
 }
 
 
+# Tasks that have never once solved and reliably burn their whole budget.
+#
+# Measured over 432 scored trials in 21 runs:
+#
+#     regex-chess                  0 of 4    stalls 6 of 11 trials
+#     adaptive-rejection-sampler   0 of 6    stalls 4 of 10
+#
+# Both stall early -- 3 and 6 steps -- and then hold a concurrency slot until
+# the agent budget runs out, two hours later. Ten explanations for the stall
+# have been checked and eliminated; the cause is unknown, so this is loss
+# control, not a fix.
+#
+# Deliberately not the whole stall list. `write-compressor` stalls too and
+# solves 5 of 6; `circuit-fibsqrt` 3 of 4. Capping those would trade real
+# scores for wall-clock. These two have no score to trade.
+#
+# It shortens their budget rather than skipping them: a task that starts
+# solving under a different configuration should show up, and a skipped task
+# never can.
+STALL_CAPPED_TASKS: dict[str, tuple[str, ...]] = {
+    "terminal-bench": ("regex-chess", "adaptive-rejection-sampler"),
+}
+
+# 30 minutes covers p90 of every solved trial in the corpus except the tail
+# these two have never reached.
+STALL_CAP_MULTIPLIER = 2.0
+
+
+def stall_capped_for(dataset: str) -> tuple[str, ...]:
+    """Tasks whose budget is shortened for this dataset's org."""
+    return STALL_CAPPED_TASKS.get(dataset.split("/", 1)[0], ())
+
+
 def gpu_tasks_for(dataset: str) -> tuple[str, ...]:
     """The GPU-requiring task names to exclude, for this dataset's org.
 
@@ -363,6 +396,25 @@ def cmd_bench(args) -> int:
     if not args.include_gpu_tasks:
         for task in gpu_tasks:
             command += ["--exclude-task-name", f"{org}/{task}" if org else task]
+
+    # The budget multiplier harbor takes is one number for the whole run, so a
+    # task that reliably burns its budget can only be given a shorter one by
+    # being run separately. `--split-stall-capped` prints that second command
+    # rather than running it: which tasks are worth their wall-clock is a
+    # judgement about a specific corpus, and it should be visible at the point
+    # it is made, not buried in a flag.
+    capped = [t for t in stall_capped_for(args.dataset) if not args.task or t in args.task]
+    if capped and args.agent_timeout_multiplier > STALL_CAP_MULTIPLIER:
+        print(
+            f"note   {len(capped)} task(s) here have never solved and stall on most "
+            f"attempts:\n"
+            f"       {', '.join(capped)}\n"
+            f"       At x{args.agent_timeout_multiplier:g} each stall holds a slot for "
+            f"{args.agent_timeout_multiplier * 15:.0f} minutes.\n"
+            f"       To cap them, run them separately at "
+            f"--agent-timeout-multiplier {STALL_CAP_MULTIPLIER:g}.",
+            file=sys.stderr,
+        )
 
     src = str(Path(__file__).resolve().parent.parent)
     env = dict(os.environ)
