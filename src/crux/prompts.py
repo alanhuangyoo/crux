@@ -377,6 +377,45 @@ def build_instance_template(
 # tools -- uptake 0.3% to 4.3%, and a score of 81.1% against 78.4% at p=0.77 --
 # so this is written down and left off rather than given an arm. A section
 # nudges a strong prior and does not replace it.
+# Read the artifact before describing it.
+#
+# From claude-code's trajectories: on `chess-best-move` its first move is
+# `Read /app/chess_board.png`; on the four tasks it still wins its openers are
+#
+#     ls -la /app && head -5 /app/data.csv && wc -l /app/data.csv
+#     ls -la /app/ && file /app/a.out
+#
+# Every one of them touches the data on the first command. crux opens with a
+# bare `ls -la /app` in 35 of 39 runs and does not read anything until later --
+# and in the file-tools arms the first structured read lands at 41% of the way
+# through the trajectory.
+#
+# Probed before spending a run: six first commands, counting whether any of
+# them opens a file rather than listing one.
+#
+#     default          [0, 0, 0, 0, 0, 0]   all `ls -la /app`
+#     look_section=1   [0, 0, 0, 0, 0, 0]   all `ls -la /app`
+#
+# Nothing moved -- weaker even than the batching section, which moved one draw
+# in five. Three prompt sections have now been written against this same habit
+# and all three bounce off it. The opening `ls` is not something the prompt is
+# competing with; it is what the model does when it has read nothing yet, and a
+# paragraph asking otherwise is read after that decision is already made.
+#
+# Kept, off, and unmeasured. One minute of probing rather than six hours of GPU.
+TERMINUS_LOOK_SECTION = """## Look at the thing itself, first
+
+Your first command should show you the data, not just its name. A directory
+listing tells you a file exists; the file tells you what the task is.
+
+    ls -la /app && head -20 /app/input.csv && wc -l /app/input.csv
+    ls -la /app && file /app/a.out && strings -n 8 /app/a.out | head
+
+For a format you cannot read as text -- an image, a binary, a video -- open it
+the cheapest way that returns a fact: dimensions, a header, a byte count, the
+first frame. One such fact usually decides what the whole task is.
+"""
+
 TERMINUS_BATCH_SECTION = """## One command, several answers
 
 Chain your probes. A turn costs a model call whatever it carries, so a step
@@ -573,6 +612,7 @@ def build_terminus_template(
     edit: bool = True,
     file_tools: bool = False,
     batch: bool = False,
+    look: bool = False,
 ) -> str:
     """Insert the crux sections into upstream's Terminus template.
 
@@ -612,6 +652,8 @@ def build_terminus_template(
         parts += [TERMINUS_HARNESS_SECTION.strip(), ""]
     if batch:
         parts += [TERMINUS_BATCH_SECTION.strip(), ""]
+    if look:
+        parts += [TERMINUS_LOOK_SECTION.strip(), ""]
     if edit:
         parts += [TERMINUS_EDIT_SECTION.strip(), ""]
     if file_tools:

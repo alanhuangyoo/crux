@@ -581,6 +581,12 @@ class CruxTerminusAgent(Terminus2):
         self._crux_batch = str(kwargs.pop("batch_section", False)).lower() in (
             "1", "true", "yes",
         )
+        # Open on the data rather than on a listing. claude-code touches the
+        # artifact in its first command on every task it still wins; crux opens
+        # with a bare `ls -la /app` in 35 of 39 runs.
+        self._crux_look = str(kwargs.pop("look_section", False)).lower() in (
+            "1", "true", "yes",
+        )
         # Carry the conversation across run() calls, for the interactive path.
         # Off by default: the benchmark scores one instruction per trial, and
         # every number in this repo was measured with a fresh chat per run.
@@ -635,6 +641,7 @@ class CruxTerminusAgent(Terminus2):
                 edit=self._crux_edit,
                 file_tools=self._crux_file_tools,
                 batch=self._crux_batch,
+                look=self._crux_look,
             )
         # Upstream sends no output cap at all, which leaves a thinking turn
         # unbounded. Measured on this deployment, `write-compressor` spent its
