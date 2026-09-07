@@ -191,8 +191,26 @@ sampling.
 
 So the lever is not more verification. It is less variance.
 
-**And the obvious knob pulls the wrong way.** The same 16 tasks a third time at
-`temperature=0.2`, against the two arms at the server default:
+**And the obvious knob pulls the wrong way -- because there was nothing wrong
+with the setting.** The framing this experiment started from was that crux had
+never set a temperature and therefore ran at the highest-variance setting.
+Reading the model's own files says otherwise:
+
+    generation_config.json:  temperature 1.0, top_k 20, top_p 0.95
+    sglang:                  sampling_defaults='model'
+
+and the model card's recommendation, verbatim:
+
+> Thinking Mode: `temperature=1.0`, `top_p=0.95`, `top_k=20`, `min_p=0.0`,
+> `presence_penalty=0.0`, `repetition_penalty=1.0`
+
+**The deployment already runs exactly the recommended thinking-mode sampling.**
+Qwen's own SWE-bench Pro and DeepSWE 1.1 numbers are reported at temp=1.0 and
+top_p=0.95 through the Claude Code harness -- the same settings measured here.
+
+So `temperature=0.2` was not tightening a loose knob, it was departing from the
+vendor's recommendation, and the result is what the card warns about. The same
+16 tasks a third time at `temperature=0.2`, against the two arms at the default:
 
 | | consecutive repeats (median) | repeated commands | most-repeated command |
 |---|---:|---:|---:|
