@@ -587,10 +587,22 @@ read across every live container:
 `asciinema rec` is a python3 program wrapping the shell, so the field reads
 `python3` everywhere and separates nothing.
 
-Six explanations checked, six eliminated: the call timeout, container activity,
-resource limits, the OOM killer, runaway generation, reasoning length -- plus
-the endpoint and the pane command. What is left is unexplained, and the list of
-what it is not is the only product of this line.
+Ten explanations checked, ten eliminated: the call timeout, container
+activity, resource limits, the OOM killer, runaway generation, reasoning
+length, the endpoint, the pane command, terminal encoding, and output volume.
+
+What the stall actually looks like, stated precisely enough to hand to someone
+else:
+
+    the command completed          pane ends `\x1b[?2004h` + prompt
+    the command was ordinary       `Rscript --version`, `python3 -c "import chess"`
+    the endpoint has no request    22 in flight for 29 containers
+    the container is idle          only sleep infinity, tmux, an idle bash
+    all three output streams stop  pane, cast and trajectory, same minute
+
+It is stuck after harbor has the terminal output and before it issues the next
+model call. Ten guesses in, the list of what it is not is the only product, and
+that is where this line stops.
 
 ---
 
