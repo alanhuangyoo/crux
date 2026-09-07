@@ -123,6 +123,8 @@ the same reasoning wrote both.
 | budget notice | at "are you sure you are done", how much of the run is left | on |
 | submit gate | `crux submit` refuses once and asks for one more check from the task's own words | off by default, an arm |
 | checklist-first gate | holds the first edit until one check is bound | off by default, an arm |
+| `crux tests` | reads the repository's own test invocation out of its CI config | on, in the prompt |
+| `crux falsify` | empties the file a check names and reports whether the check notices | on, unmeasured |
 
 The gate threshold of 12 is the argmax of a sweep over 89 trajectories: it
 catches 62% of failures at a 15% false-fire rate. 20 would have caught 37%.

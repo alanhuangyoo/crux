@@ -629,3 +629,64 @@ def test_it_says_what_it_is_not_authoritative_about(tmp_path):
     (tmp_path / "tox.ini").write_text("[testenv]\ncommands = pytest\n")
     out = _tool(["tests", str(tmp_path)], tmp_path).stdout
     assert "leaves to you" in out
+
+
+# ---- falsify: does a bound check notice a broken deliverable ----------------
+
+
+def _tool_env(args, cwd):
+    import os
+
+    env = dict(os.environ, CRUX_TODO_PATH=str(cwd / "todo.json"))
+    return subprocess.run([sys.executable, str(TOOL), *args],
+                          capture_output=True, text=True, cwd=cwd, env=env)
+
+
+def test_falsify_names_a_check_that_cannot_fail(tmp_path):
+    """The measurement this exists for.
+
+    88% of trials never see a bound check go red -- including the ones that
+    solved the task -- and `crux submit` printed "all N item(s) verified" on
+    95% of runs that scored and 100% of runs that did not. `mteb-retrieve`'s
+    whole verification was that a file existed; it submitted confidently and
+    was wrong.
+    """
+    (tmp_path / "answer.txt").write_text("crux\n")
+    todo(["add", "answer says crux", "--verify", "grep -q crux answer.txt"], tmp_path)
+    todo(["add", "answer exists", "--verify", "test -f answer.txt"], tmp_path)
+    out = _tool_env(["falsify"], tmp_path).stdout
+    assert "ok -- fails when answer.txt is emptied" in out
+    assert "VACUOUS" in out
+    assert "1 of 2 checks pass whatever the file says" in out
+
+
+def test_falsify_restores_the_file(tmp_path):
+    """It breaks the deliverable on purpose, so this is the test that matters."""
+    f = tmp_path / "answer.txt"
+    f.write_text("crux\n")
+    before = f.read_bytes()
+    todo(["add", "x", "--verify", "test -f answer.txt"], tmp_path)
+    _tool_env(["falsify"], tmp_path)
+    assert f.read_bytes() == before
+    assert not list(tmp_path.glob("*.crux-falsify-backup"))
+
+
+def test_falsify_says_when_a_check_names_no_file(tmp_path):
+    todo(["add", "python runs", "--verify", "python3 -c 'print(1)'"], tmp_path)
+    out = _tool_env(["falsify"], tmp_path).stdout
+    assert "names no file that exists here" in out
+    assert "VACUOUS" not in out
+
+
+def test_falsify_refuses_system_paths(tmp_path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("crux_tool", TOOL)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    for cmd in ("test -f /etc/hosts", "grep x /usr/bin/env", "cat .git/HEAD"):
+        assert mod._breakable_targets(cmd, str(tmp_path)) == []
+
+
+def test_falsify_with_no_checklist_says_so(tmp_path):
+    assert "no checklist" in _tool_env(["falsify"], tmp_path).stdout

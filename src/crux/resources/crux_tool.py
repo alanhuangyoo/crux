@@ -28,6 +28,7 @@ import json
 import pathlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -328,6 +329,130 @@ def _report_green_at_bind(verify, number):
         "  Worth one look: does it use the task's own wording and data, or\n"
         "  yours? Would it still pass against a deliberately broken version?"
     )
+
+
+# Paths a check names, which are the files it might actually be testing.
+_CHECK_PATHS = re.compile(r"(?<![\w-])((?:\.{0,2}/)?[\w.-]+(?:/[\w.-]+)*\.[A-Za-z0-9_]{1,8})")
+
+# Never touch these, whatever a check names.
+_NEVER_BREAK = re.compile(r"^/(etc|usr|bin|sbin|lib|proc|sys|dev|boot|var/lib)/|(^|/)\.git(/|$)")
+
+
+def _breakable_targets(command, cwd):
+    """Files a check names that exist, are ordinary, and are safe to disturb."""
+    out = []
+    for m in _CHECK_PATHS.finditer(command or ""):
+        raw = m.group(1)
+        path = raw if os.path.isabs(raw) else os.path.join(cwd, raw)
+        path = os.path.normpath(path)
+        if _NEVER_BREAK.search(path):
+            continue
+        try:
+            if not os.path.isfile(path) or os.path.islink(path):
+                continue
+            if os.path.getsize(path) > 4_000_000:
+                continue
+        except OSError:
+            continue
+        out.append(path)
+    return list(dict.fromkeys(out))
+
+
+def _falsifies(command, cwd, target):
+    """Whether the check notices `target` being wrong.
+
+    The whole mechanism, and the reason it needs no judgement: a check that
+    passes against a deliberately corrupted deliverable is not testing the
+    deliverable. Measured on this benchmark, 88% of trials never see a bound
+    check fail even once -- including the ones that solved the task -- so
+    "it passed" has been carrying no information.
+
+    The file is restored from a byte-for-byte copy in a finally block, and the
+    copy is made before anything is written. If the restore fails the caller is
+    told loudly, because a silently corrupted deliverable is far worse than an
+    unverified check.
+    """
+    backup = target + ".crux-falsify-backup"
+    try:
+        shutil.copy2(target, backup)
+    except OSError as exc:
+        return None, f"could not back up {target} ({exc}); not touching it"
+    try:
+        with open(target, "wb") as fh:
+            fh.write(b"")           # emptied, not deleted: a missing file and a
+                                    # wrong one fail differently
+        try:
+            r = subprocess.run(command, shell=True, capture_output=True, text=True,
+                               timeout=BIND_PROBE_TIMEOUT_SEC, cwd=cwd)
+            noticed = r.returncode != 0
+        except subprocess.TimeoutExpired:
+            return None, f"the check did not finish in {BIND_PROBE_TIMEOUT_SEC}s"
+        except OSError as exc:
+            return None, f"could not run the check ({exc})"
+        return noticed, ""
+    finally:
+        try:
+            shutil.copy2(backup, target)
+            os.unlink(backup)
+        except OSError as exc:
+            print(f"!! could not restore {target} from {backup}: {exc}", file=sys.stderr)
+            print(f"!! restore it by hand before doing anything else", file=sys.stderr)
+
+
+def cmd_falsify(args):
+    """Check that each bound check can fail, by breaking what it tests.
+
+    A check written after the work describes the work, and a description
+    cannot fail. Across 87 scored trials the first check is bound at 75-87% of
+    the way through a run -- after the last edit -- and 88% of trials never see
+    one go red. `crux submit` printed "all N item(s) verified" on 95% of runs
+    that scored and 100% of runs that did not: as evidence, worth nothing.
+
+    This asks the one question that settles it without any judgement about
+    whether the work is right. Empty the file a check names, run the check, put
+    the file back. A check that still passes was not testing that file.
+
+    Read-only in effect: every file is restored from a copy taken first, and a
+    failure to restore is reported loudly rather than swallowed.
+    """
+    items = _load_todo()
+    if not items:
+        print("no checklist to falsify")
+        return
+    cwd = os.getcwd()
+    vacuous = tested = 0
+    for i, item in enumerate(items, start=1):
+        check = item.get("verify")
+        if not check:
+            print(f"  {i}. {item['text'][:60]}\n      no bound check")
+            continue
+        targets = _breakable_targets(check, cwd)
+        if not targets:
+            print(f"  {i}. {item['text'][:60]}\n"
+                  f"      names no file that exists here, so nothing to break.\n"
+                  f"      That is worth knowing: {check[:70]}")
+            continue
+        target = targets[0]
+        noticed, err = _falsifies(check, cwd, target)
+        tested += 1
+        rel = os.path.relpath(target, cwd)
+        if err:
+            print(f"  {i}. {item['text'][:60]}\n      inconclusive: {err}")
+        elif noticed:
+            print(f"  {i}. {item['text'][:60]}\n"
+                  f"      ok -- fails when {rel} is emptied")
+        else:
+            vacuous += 1
+            print(f"  {i}. {item['text'][:60]}\n"
+                  f"      VACUOUS -- still passes with {rel} emptied.\n"
+                  f"      {check[:70]}")
+    print()
+    if vacuous:
+        print(f"{vacuous} of {tested} checks pass whatever the file says.")
+        print("They are not evidence. Replace them with something that reads the")
+        print("deliverable and compares it against what the task asked for.")
+    elif tested:
+        print(f"all {tested} checks noticed a broken deliverable")
 
 
 def cmd_todo(args):
@@ -797,6 +922,12 @@ def main():
         ),
     )
     p.set_defaults(func=cmd_todo)
+
+    p = sub.add_parser(
+        "falsify",
+        help="check that each bound check can fail, by breaking what it tests",
+    )
+    p.set_defaults(func=cmd_falsify)
 
     p = sub.add_parser("tests", help="how this repository runs its own tests")
     p.add_argument("path", nargs="?", default=".")
