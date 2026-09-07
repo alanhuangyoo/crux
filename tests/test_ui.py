@@ -107,3 +107,27 @@ def test_turn_summary_says_what_was_spent():
     line = ui.turn_summary(7, 12, 84.2, 12000, 3400, 9800)
     for want in ("7 steps", "12 commands", "1m24s", "12.0k", "3.4k", "9.8k cached"):
         assert want in line
+
+
+# --------------------------------------------------------------------------
+# the doctor's own checks have to be able to fail
+
+
+def test_the_sampling_probe_uses_an_ambiguous_prompt():
+    """A check that cannot fail reports health it has not tested.
+
+    The first version asked for "a command that lists files", got `ls` four
+    times out of four at the server's default temperature, and called the
+    endpoint deterministic -- on a deployment where a prompt with real choices
+    gives three different answers in five. That is the same fault the project
+    found in the agent's own checklists, in its own tooling.
+    """
+    from crux import doctor
+
+    # Tested on the constant, not the source: the source also explains the
+    # mistake, and quoting the old prompt in a comment must not read as using
+    # it.
+    probe = doctor._SAMPLING_PROBE.lower()
+    assert "modified today" in probe          # more than one right answer
+    assert "list" in probe and "python" in probe
+    assert doctor._SAMPLING_DRAWS >= 4        # enough draws to see a difference

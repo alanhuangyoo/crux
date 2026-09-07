@@ -237,6 +237,80 @@ def _check_model(rep: Report, env: dict[str, str]) -> None:
             if status == WARN else "")
 
 
+# The prompt the sampling probe uses. It has to have more than one good answer,
+# or the probe reports a determinism it never tested: the first version asked
+# the model to name a command for listing files, got `ls` four times out of
+# four, and called the endpoint deterministic -- on the very deployment whose
+# measured behaviour is three different answers in five. A check with one
+# overwhelming right answer cannot fail, which is the fault this project found
+# in the agent's own checklists, reproduced in its own tooling.
+_SAMPLING_PROBE = (
+    "Write one short bash command that lists python files modified today. "
+    "Output only the command."
+)
+
+# Enough draws to see a difference without making `crux doctor` slow.
+_SAMPLING_DRAWS = 5
+
+
+def _check_sampling(rep: Report, env: dict[str, str]) -> None:
+    """Whether anything sets a sampling temperature, and what that costs.
+
+    Nothing did, for the whole life of this project. Terminus passes a
+    temperature only when one is explicitly configured and crux never
+    configured one, so every number it produced was sampled at the server
+    default -- the maximum-variance setting -- and nothing anywhere said so.
+
+    What that bought, measured: 60% of SWE-bench failures solve on a plain
+    re-run with nothing changed, 15-16% of tasks flip between two runs of one
+    configuration, and an 89-task run resolves about ±8 points. It is also why
+    two separate gates looked effective and neither survived attribution: in a
+    system this noisy, anything selected on failure looks better re-run.
+
+    Probed rather than read off a config, because the default lives on the
+    server and the client cannot see it.
+    """
+    import urllib.request
+
+    base = (env.get("OPENAI_BASE_URL") or "").rstrip("/")
+    key = env.get("OPENAI_API_KEY", "EMPTY")
+    if not base:
+        rep.add(SKIP, "sampling", "no base url")
+        return
+
+    def ask(extra):
+        body = {
+            "model": env.get("CRUX_MODEL", "qwen3.8-27b"),
+            "messages": [{"role": "user", "content": _SAMPLING_PROBE}],
+            "max_tokens": 64,
+            "chat_template_kwargs": {"enable_thinking": False},
+            **extra,
+        }
+        req = urllib.request.Request(
+            base + "/chat/completions", data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
+        d = json.load(urllib.request.urlopen(req, timeout=90))
+        return (d["choices"][0]["message"].get("content") or "").strip()
+
+    try:
+        seen = {ask({}) for _ in range(_SAMPLING_DRAWS)}
+    except Exception as exc:  # noqa: BLE001
+        rep.add(SKIP, "sampling", f"could not probe: {exc}")
+        return
+    if len(seen) == 1:
+        rep.add(OK, "sampling", "the default is deterministic here")
+    else:
+        rep.add(WARN, "sampling",
+                f"no temperature set: {_SAMPLING_DRAWS} samples gave {len(seen)} different answers",
+                "Every run inherits the server default, which is the highest-variance\n"
+                "setting. Measured downstream: 60% of failures solve on a plain re-run,\n"
+                "15-16% of tasks flip between identical configurations, and an 89-task\n"
+                "run resolves only ±8 points.\n"
+                "  crux bench --agent-kwarg temperature=0.2 ...\n"
+                "(0.2 rather than 0: Qwen3's card warns greedy decoding in thinking mode\n"
+                "can fall into repetition loops.)")
+
+
 def _check_local_tools(rep: Report) -> None:
     for tool, why in (("tmux", "Terminus types into a live tmux session"),
                       ("docker", "benchmark trials each get a container"),
@@ -325,6 +399,7 @@ def cmd_doctor(args) -> int:
     _check_tunnel(rep, env)
     if not getattr(args, "offline", False):
         _check_model(rep, env)
+        _check_sampling(rep, env)
     else:
         rep.add(SKIP, "model", "--offline")
     _check_compose_patch(rep)
