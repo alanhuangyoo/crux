@@ -298,6 +298,47 @@ result and a story.
 
 ---
 
+## The ceiling
+
+The same 16 SWE-bench tasks were run four times -- once in the main run and
+three more with the submit gate on, off, and at a lower temperature. Across all
+four:
+
+| | | |
+|---|---:|---|
+| solved on the first attempt | 73 | 82.0% |
+| solved in some run but not the first | 12 | 13.5% |
+| never solved in any of four runs | 4 | 4.5% |
+
+**What this agent genuinely cannot do is 4 tasks of 89.** Its ceiling is 95.5%,
+it sits at 82.0%, and the 13.5 points between are sampling.
+
+Which is why every mechanism tried tonight failed, and why they failed the same
+way. There is nothing wrong with the work that more checking would find; the
+same agent, given the same task again with nothing changed, does it correctly
+60% of the time. The problem is not that it verifies too little. It is that the
+run it happened to take was one of the bad ones, and it had no way to know.
+
+Reducing that needs one of two things:
+
+  * **less variance at the source.** Tried: temperature 0.2 triples command
+    repetition and scores 2 of 12 against 9 of 15. Qwen3's card warns of
+    exactly this in thinking mode, and it is what happened.
+  * **a signal that a run went badly.** Everything tried here asks the agent to
+    judge its own work, and its green light has a likelihood ratio of 1.
+
+The one candidate that produces a signal without asking for a judgement is
+**disagreement**: solve it twice and compare. On these 16 tasks, four runs
+disagree on 11 of 15 -- and disagreement is exactly the set that needs more
+work. It costs a second pass, which the budget already has: failures stop with
+two thirds of their wall-clock unspent, and on SWE-bench with nine tenths.
+
+It is not implemented here. It changes the agent's main loop rather than adding
+a command, and the honest state of it is: measured as promising, not measured
+as working.
+
+---
+
 ## Resolution
 
 **Two runs of one configuration disagree on 15-16% of tasks.** Measured:
