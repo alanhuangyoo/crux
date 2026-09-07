@@ -44,3 +44,40 @@ arrangement that lets a flip be attributed.
 Paired on shared tasks with a sign test. Never total against total: the arms do
 not finish the same tasks at the same time, and a partly finished run reads
 high because failed trials take about twice as long as solved ones.
+
+
+## The full set
+
+| script | benchmark | task set | edit-debt gate | submit gate | temperature |
+|---|---|---|---|---|---|
+| `full_run.sh` | TB 2.1 | all 89 | on (12) | off | server default |
+| `gate_test.sh` | TB 2.1 | the 29 the baseline failed | on (12) | off | server default |
+| `gateoff.sh` | TB 2.1 | the same 29 | **off** | off | server default |
+| `submitgate.sh` | TB 2.1 | the same 29 | off | **on** | server default |
+| `allon.sh` | TB 2.1 | all 89 | on (12) | **on** | server default |
+| `allon_redo.sh` | TB 2.1 | what `allon` lost to a loaded box | on (12) | on | server default |
+| `swegate.sh` | SWE-bench | the 16 it failed | on (12) | **on** | server default |
+| `swenogate.sh` | SWE-bench | the same 16 | on (12) | off | server default |
+| `swetemp.sh` | SWE-bench | the same 16 | on (12) | off | **0.2** |
+
+## Two operational mistakes these scripts carry
+
+**A guard that could not match.** `allon_redo.sh` waits for the main run to
+finish before re-running what it lost. Its first version was
+
+    while ps -eo args | grep -q -- "[h]arbor run.*jobs-dir /scratch/all-on\$"
+
+inside a quoted heredoc, so `\$` reached grep as an escaped dollar -- which
+matches a literal `$` and therefore nothing. The guard fired immediately.
+
+**Too many arms at once.** `all-on` lost 24 of 89 trials to
+`Agent setup timed out after 360` and `Environment start timed out after 600`.
+Zero of those appear in the four runs before it. What was different is that six
+other arms were running alongside and the load average peaked at 153; setup
+pulls an image, starts a container, opens tmux and uploads two files, and at
+that load 360 seconds is not enough. The tmux probe crux adds to setup costs
+94ms, measured, so it is not that.
+
+The endpoint is the real constraint and it is fixed: four GPUs at 100%, 62
+tok/s single-stream against 300 idle with 45 containers, 120 tok/s with 24.
+Parallelism is free in coverage and not in the wall-clock of any one arm.
