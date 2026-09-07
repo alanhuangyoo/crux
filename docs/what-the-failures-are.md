@@ -528,6 +528,48 @@ that no amount of reading our own code will.
 
 ---
 
+## The output cap was the wrong cause
+
+The chapter above reads claude-code's `regex-chess` trajectory, finds
+
+    API Error: Claude's response exceeded the 64000 output token maximum.
+
+and concludes that runaway generation is what stalls these trials. A 32k cap
+went in on that basis. It works and it changes nothing.
+
+    completion tokens     over 32,768
+    all-on (old code)     9 of 4,938 steps
+    ft6, think6, both2    0 of 1,396 steps
+
+The cap is in force -- the old arms exceed it, the new ones never do -- and the
+same three tasks stall for the same 45-48 minutes.
+
+**The second guess was also wrong.** Reading further, claude-code's stalled
+steps take 53-60 minutes each and issue *zero tool calls*: the model is
+thinking and never emitting a command. That looked like the answer, so: does a
+long reasoning block predict a step with no command?
+
+| reasoning length | steps | no command |
+|---|---:|---:|
+| 0-2k | 2,992 | 1.7% |
+| 2-6k | 771 | 2.1% |
+| 6-12k | 513 | 0.2% |
+| >12k | 662 | 2.9% |
+
+No separation. And the single longest reasoning block in the corpus -- 138,617
+characters -- is in a trial that *scored*.
+
+What survives is one observation, not a cause: claude-code stalls on the same
+tasks crux stalls on, spending 50-60 minutes per step with no tool call, and
+ending in an API error that crux has no equivalent of. Same behaviour, and
+only one of the two is instrumented to notice.
+
+Both the cap and the timeout are worth keeping -- an unbounded generation and
+an unbounded request are real hazards whatever else is true. Neither is the
+cause of this.
+
+---
+
 ## Resolution
 
 **Two runs of one configuration disagree on 15-16% of tasks.** Measured:
