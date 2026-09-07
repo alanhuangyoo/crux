@@ -386,6 +386,13 @@ to the wall, so every absolute count is higher in them. Seven different signals
 all returned exactly 57:1 before the confound was visible. Rates, and paired on
 shared tasks.
 
+**Two questions that look like one.** "Which trials came back without a
+score" and "what does a resume have to re-run" differ by every task the run
+never reached. `unscored` answers the first; using it for the second dropped 72
+of 89 tasks silently, because an 89-task run stopped at 6 scored had only
+created 17 directories. `crux.watch.remaining` answers the second, from the
+run's own recorded task filter.
+
 **Verifying the wrong layer.** `docker exec` cannot see a tmux session's
 environment, so a submit gate that was correctly armed read as unarmed. The
 check has to be at the layer the thing runs in — `tmux show-environment`, not

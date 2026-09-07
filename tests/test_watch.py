@@ -266,3 +266,67 @@ def test_commands_of_survives_a_broken_file(tmp_path):
     bad.write_text("{not json")
     assert watch.commands_of(str(bad)) == []
     assert watch.commands_of(str(tmp_path / "missing.json")) == []
+
+
+# --------------------------------------------------------------------------
+# resuming an interrupted run
+
+
+def _interrupted(tmp_path, name, asked, scored):
+    """A run launched over `asked` that only got as far as `scored`."""
+    jobs = tmp_path / name
+    run = jobs / "2026-01-01__00-00-00"
+    run.mkdir(parents=True)
+    by_reward = {}
+    for task, ok in scored.items():
+        trial = f"{task}__h"
+        by_reward.setdefault("1.0" if ok else "0.0", []).append(trial)
+        (run / trial / "verifier").mkdir(parents=True)
+        (run / trial / "verifier" / "reward.txt").write_text("1" if ok else "0")
+    cfg = {
+        "agent_timeout_multiplier": 8.0,
+        "datasets": [{"name": "d", "task_names": [f"org/{t}" for t in asked]}],
+        "agents": [{"name": "a", "kwargs": {}}],
+    }
+    (jobs / "config.json").write_text(json.dumps(cfg))
+    (run / "config.json").write_text(json.dumps(cfg))
+    res = {"n_total_trials": len(asked),
+           "stats": {"n_completed_trials": len(scored), "n_running_trials": 0,
+                     "n_errored_trials": 0,
+                     "evals": {"e": {"reward_stats": {"reward": by_reward}}}}}
+    (jobs / "result.json").write_text(json.dumps(res))
+    (run / "result.json").write_text(json.dumps(res))
+    return str(jobs)
+
+
+def test_resuming_counts_tasks_the_run_never_reached(tmp_path):
+    """The bug this exists for.
+
+    An 89-task run stopped at 6 scored had created 17 trial directories, so
+    `unscored` -- which only looks at directories -- reported 11 to redo. The
+    other 72 tasks were dropped from the resume without a word.
+    """
+    asked = [f"t{i}" for i in range(20)]
+    jobs = _interrupted(tmp_path, "run", asked, {"t0": True, "t1": False})
+    assert sorted(watch.planned(jobs)) == sorted(asked)
+    assert len(watch.remaining(jobs)) == 18
+    # the started-but-unscored question is a different, smaller answer
+    assert watch.unscored(jobs) == []
+
+
+def test_remaining_accepts_an_explicit_task_list(tmp_path):
+    # A run launched over a whole dataset records no filter.
+    jobs = _interrupted(tmp_path, "whole", [], {"a": True})
+    assert watch.planned(jobs) == []
+    assert sorted(watch.remaining(jobs, ["a", "b", "c"])) == ["b", "c"]
+
+
+def test_remaining_falls_back_when_it_cannot_know(tmp_path):
+    jobs = _interrupted(tmp_path, "blind", [], {"a": True})
+    # No filter and no list: it can only report what started, and does.
+    assert watch.remaining(jobs) == watch.unscored(jobs)
+
+
+def test_planned_strips_the_dataset_org(tmp_path):
+    jobs = _interrupted(tmp_path, "org", ["x", "y"], {})
+    assert sorted(watch.planned(jobs)) == ["x", "y"]
