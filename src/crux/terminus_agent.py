@@ -502,6 +502,27 @@ class CruxTerminusAgent(Terminus2):
         # Overridable so a slower endpoint can raise it; 0 restores litellm's
         # 6000s default for anyone who wants the old behaviour back.
         self._llm_timeout = float(kwargs.pop("llm_timeout", _LLM_CALL_TIMEOUT_SEC))
+        # Whether the model's own reasoning is handed back to it on the next
+        # turn. Upstream defaults this to False, which on this model throws
+        # away something it was built to keep:
+        #
+        #   By default, Qwen3.8 retains thinking blocks from all historical
+        #   messages ... especially beneficial for agent scenarios where
+        #   decision consistency and reduced redundant reasoning are critical.
+        #   It also improves KV cache utilization.
+        #
+        # sglang's qwen3 reasoning parser splits that thinking out into
+        # `reasoning_content`, and harbor only puts it back when this flag is
+        # on. Measured on two live runs: 2,097 of 2,100 steps and 4,934 of
+        # 4,938 carry reasoning_content, and every one of them was discarded.
+        # The model re-derives its reasoning from scratch each turn.
+        #
+        # Off by default here too, because it is unmeasured on this benchmark:
+        # `--agent-kwarg interleaved_thinking=1` makes it an arm.
+        kwargs.setdefault(
+            "interleaved_thinking",
+            str(kwargs.pop("interleaved_thinking", False)).lower() in ("1", "true", "yes"),
+        )
         reasoning_effort = kwargs.pop("reasoning_effort", None)
         # Whether to keep the `crux submit` gate. Separable from the scoring
         # section because the evidence against them differs: see prompts.py.

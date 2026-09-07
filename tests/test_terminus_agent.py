@@ -884,3 +884,36 @@ def test_the_timeout_survives_the_truncation_retry():
     body = src.split("_crux_truncation_depth = depth + 1")[0]
     # It has to be set inside _query_llm, after the kwargs are restored.
     assert '_llm_call_kwargs["timeout"]' in body
+
+
+def test_the_models_own_reasoning_can_be_handed_back():
+    """Upstream defaults this off, and on this model that discards something it
+    was built to keep.
+
+    The card: "By default, Qwen3.8 retains thinking blocks from all historical
+    messages ... especially beneficial for agent scenarios where decision
+    consistency and reduced redundant reasoning are critical."
+
+    sglang's qwen3 reasoning parser splits that thinking into
+    `reasoning_content`; harbor only returns it to the conversation when
+    `interleaved_thinking` is set. Measured live: 2,097 of 2,100 steps and
+    4,934 of 4,938 carry reasoning_content, and all of it was dropped.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from crux.terminus_agent import CruxTerminusAgent
+
+    d = Path(tempfile.mkdtemp())
+    # Off by default: unmeasured on this benchmark, so it is an arm.
+    assert CruxTerminusAgent(
+        logs_dir=d, model_name="openai/x"
+    )._interleaved_thinking is False
+    for on in (1, "1", "true", "yes"):
+        assert CruxTerminusAgent(
+            logs_dir=d, model_name="openai/x", interleaved_thinking=on
+        )._interleaved_thinking is True
+    for off in (0, "0", "false", "no"):
+        assert CruxTerminusAgent(
+            logs_dir=d, model_name="openai/x", interleaved_thinking=off
+        )._interleaved_thinking is False
