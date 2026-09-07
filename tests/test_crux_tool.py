@@ -539,10 +539,10 @@ def test_tests_finds_the_ci_invocation(tmp_path):
 
 
 def test_tests_reads_tox_and_makefile(tmp_path):
-    (tmp_path / "tox.ini").write_text("[testenv]\ncommands = pytest -q {posargs}\n")
+    (tmp_path / "tox.ini").write_text("[testenv]\ncommands = pytest -q --strict\n")
     (tmp_path / "Makefile").write_text("test:\n\tpython -m pytest tests/\n")
     out = _tool(["tests", str(tmp_path)], tmp_path).stdout
-    assert "pytest -q" in out
+    assert "pytest -q --strict" in out
     assert "python -m pytest tests/" in out
 
 
@@ -575,3 +575,57 @@ def test_a_cd_prefix_is_still_a_command(tmp_path):
         "To run the suite:\n\n    cd tests && ./runtests.py --settings=test_sqlite\n")
     out = _tool(["tests", str(tmp_path)], tmp_path).stdout
     assert "runtests.py --settings=test_sqlite" in out
+
+
+def test_tests_walks_up_to_the_repository_root(tmp_path):
+    """Run from /testbed/tests, the first version looked only there.
+
+    It reported "no test invocation stated" on a repository whose CI config was
+    one directory up, which is how it was actually invoked in a live run.
+    """
+    (tmp_path / ".git").mkdir()
+    wf = tmp_path / ".github" / "workflows"; wf.mkdir(parents=True)
+    (wf / "ci.yml").write_text("jobs:\n  t:\n    steps:\n      - run: pytest -q\n")
+    sub = tmp_path / "tests"; sub.mkdir()
+    out = _tool(["tests", str(sub)], sub).stdout
+    assert "pytest -q" in out
+    assert "no test invocation" not in out
+
+
+def test_an_unexpanded_ci_template_is_not_a_command(tmp_path):
+    """`tox ${{ matrix.toxenv }}` is not something anyone can run.
+
+    astropy's CI is written that way, and the first version printed it as an
+    invocation.
+    """
+    (tmp_path / "setup.py").write_text("")
+    wf = tmp_path / ".github" / "workflows"; wf.mkdir(parents=True)
+    (wf / "ci.yml").write_text(
+        "jobs:\n  t:\n    steps:\n"
+        "      - run: tox ${{ matrix.toxargs }} -e ${{ matrix.toxenv }}\n"
+        "      - run: python -m pytest astropy\n"
+    )
+    out = _tool(["tests", str(tmp_path)], tmp_path).stdout
+    assert "${{" not in out
+    assert "python -m pytest astropy" in out
+
+
+def test_another_ecosystem_is_not_offered_to_this_one(tmp_path):
+    """django's tox.ini has a javascript env, and `npm test` was the first
+    thing the tool told a python repository to run."""
+    (tmp_path / "setup.py").write_text("")
+    (tmp_path / "tox.ini").write_text(
+        "[testenv:javascript]\ncommands = npm test\n\n"
+        "[testenv]\ncommands = python tests/runtests.py\n"
+    )
+    out = _tool(["tests", str(tmp_path)], tmp_path).stdout
+    assert "npm test" not in out
+    assert "python tests/runtests.py" in out
+
+
+def test_it_says_what_it_is_not_authoritative_about(tmp_path):
+    # django's own docs say `./runtests.py`; --settings and --parallel are the
+    # caller's choice, and the tool must not imply otherwise.
+    (tmp_path / "tox.ini").write_text("[testenv]\ncommands = pytest\n")
+    out = _tool(["tests", str(tmp_path)], tmp_path).stdout
+    assert "leaves to you" in out
