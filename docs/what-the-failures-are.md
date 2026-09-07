@@ -485,6 +485,49 @@ sample of a stripped image, not a finding.
 
 ---
 
+## Reading the other agent's trajectories
+
+claude-code's full trajectories for all 89 tasks have been on disk the whole
+time and had only ever been counted, never read. Read side by side on
+`chess-best-move` -- a task it solved in 36 steps and crux failed in 55 -- three
+differences looked obvious:
+
+| | claude-code | crux |
+|---|---|---|
+| step 1 | `Read /app/chess_board.png` | `ls -la /app` |
+| dependency probes | one command | three steps |
+| step 5-10 | already scanning 64 squares | `pip install`, then four idle steps, then `C-c` |
+
+Two of the three did not survive the corpus.
+
+**Installing dependencies.** crux does it *less* than claude-code -- 1.0% of
+commands against 2.9% -- and across the whole run "install then idle" happens
+for a total of one step. The four idle steps in that trajectory are one task's
+behaviour, not a shape.
+
+**Reading the artifact first.** One task. Not measured further.
+
+**Idle steps survived, and are not what they looked like.**
+
+    claude-code    1 idle command out of 2,939     0.0%
+    crux         176 idle commands out of 7,151    2.5%
+
+But 176 steps in 147 runs, median length 1: not one long wait for an install,
+but a hundred and forty-seven single steps that send nothing in order to look
+at the terminal again. What precedes them is `crux submit`, `crux todo list`,
+`C-c`, a slow query.
+
+Terminus's protocol allows an empty keystroke as a way to refresh terminal
+state. claude-code's tool protocol has no such move -- every call must be a
+Bash, a Read, an Edit. **The difference is not judgement, it is whether the
+protocol offers a way to spend a turn on nothing.**
+
+Worth 2.5% of commands. Recorded because the method is right even when the
+lever is small: the other agent's trajectories answer questions about our own
+that no amount of reading our own code will.
+
+---
+
 ## Resolution
 
 **Two runs of one configuration disagree on 15-16% of tasks.** Measured:
