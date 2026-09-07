@@ -121,8 +121,54 @@ def _stalled(jobs_dir: str, quiet_sec: float = 1800) -> list[tuple[str, float, i
     return sorted(out, key=lambda x: -x[1])
 
 
+def planned(jobs_dir: str) -> list[str]:
+    """Every task the run was asked to do, whether or not it reached them.
+
+    From the run's own config, which records the filter it was launched with.
+    An empty list means the run took the whole dataset and the caller has to
+    supply the task list itself.
+    """
+    files = sorted(glob.glob(os.path.join(jobs_dir, "*/config.json")), key=os.path.getmtime)
+    if not files:
+        return []
+    try:
+        cfg = json.load(open(files[-1]))
+    except (OSError, json.JSONDecodeError):
+        return []
+    out = []
+    for ds in cfg.get("datasets") or []:
+        for name in ds.get("task_names") or []:
+            out.append(name.split("/")[-1])
+    return out
+
+
+def remaining(jobs_dir: str, all_tasks: list[str] | None = None) -> list[str]:
+    """What a resume has to re-run: everything asked for that has no score.
+
+    Not `unscored`, which is the different question of which *started* trials
+    lack one. Resuming from it silently drops every task the run never reached:
+    an 89-task run stopped at 6 scored had created 17 directories, so `unscored`
+    reported 11 to redo and the other 72 were lost without a word.
+
+    The task list comes from the run's own config; pass `all_tasks` when the
+    run took a whole dataset and recorded no filter.
+    """
+    scored = set(outcomes(jobs_dir))
+    asked = list(all_tasks or []) or planned(jobs_dir)
+    if not asked:
+        # Nothing to compare against; fall back to what did start, and say so
+        # by returning the same thing `unscored` would.
+        return unscored(jobs_dir)
+    return [t for t in asked if t not in scored]
+
+
 def unscored(jobs_dir: str) -> list[str]:
-    """Trials with a directory and no score -- the denominator that shrank."""
+    """Trials that started and have no score -- the denominator that shrank.
+
+    This is a question about a *finished* run: which of the trials it actually
+    ran came back without a reward. For resuming an interrupted run use
+    `remaining`, which counts the tasks it never reached as well.
+    """
     run = _latest(jobs_dir)
     if run is None:
         return []
