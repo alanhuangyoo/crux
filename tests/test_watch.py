@@ -123,7 +123,19 @@ def test_render_warns_that_a_partial_score_is_biased_up(tmp_path):
     jobs = _run(tmp_path, "partial", {"a": True}, extra_dirs=("b", "c"), unfinished=2)
     out = watch.render([jobs], show_stalled=False)
     assert "biased up" in out
-    assert "no score" in out
+    # `extra_dirs` are trial directories with nothing in them, which is what a
+    # trial looks like while it is running. They are in flight, not lost -- the
+    # display used to call them "will not be retried".
+    assert "2 in flight" in out
+    assert "no score" not in out
+
+
+def test_render_still_warns_when_a_trial_finished_empty(tmp_path):
+    jobs = _run(tmp_path, "empty", {"a": True}, extra_dirs=("b",))
+    run = next(p for p in Path(jobs).iterdir() if p.is_dir())
+    (run / "b__deadhash" / "result.json").write_text("{}")
+    out = watch.render([jobs], show_stalled=False)
+    assert "finished with no score" in out
 
 
 @pytest.mark.parametrize("a,b,expected", [(0, 0, 1.0), (5, 0, 0.0625), (1, 1, 1.0)])
@@ -330,3 +342,39 @@ def test_remaining_falls_back_when_it_cannot_know(tmp_path):
 def test_planned_strips_the_dataset_org(tmp_path):
     jobs = _interrupted(tmp_path, "org", ["x", "y"], {})
     assert sorted(watch.planned(jobs)) == ["x", "y"]
+
+
+# --------------------------------------------------------------------------
+# a live run's healthy state must not read as an alarm
+
+
+def test_a_running_trial_is_not_reported_as_a_loss(tmp_path):
+    """The display warned that every in-flight trial "will not be retried".
+
+    At concurrency 15 that is fifteen healthy trials announced as losses on
+    every refresh of a fresh run.
+    """
+    from crux.watch import unscored_split
+
+    run = tmp_path / "2026-09-08__00-00-00"
+    (run / "running__aaa").mkdir(parents=True)          # no result.json yet
+    done = run / "finished__bbb"
+    done.mkdir()
+    (done / "result.json").write_text("{}")             # ended, no reward
+
+    dead, live = unscored_split(str(tmp_path))
+    assert dead == ["finished"]
+    assert live == ["running"]
+
+
+def test_a_scored_trial_is_in_neither_list(tmp_path):
+    from crux.watch import unscored_split
+
+    run = tmp_path / "2026-09-08__00-00-00"
+    t = run / "solved__ccc"
+    (t / "verifier").mkdir(parents=True)
+    (t / "verifier" / "reward.txt").write_text("1.0")
+    (t / "result.json").write_text("{}")
+
+    dead, live = unscored_split(str(tmp_path))
+    assert dead == [] and live == []

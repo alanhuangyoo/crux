@@ -187,6 +187,30 @@ def unscored(jobs_dir: str) -> list[str]:
     return out
 
 
+def unscored_split(jobs_dir: str) -> tuple[list[str], list[str]]:
+    """Split `unscored` into trials that finished empty and trials still going.
+
+    `unscored` answers a question about a finished run, and its docstring says
+    so; the live display asked it anyway and warned that every trial currently
+    running "will not be retried". On a fresh 89-task run at concurrency 15
+    that is fifteen healthy trials reported as losses.
+
+    `result.json` is written when a trial ends, whatever the outcome, so its
+    presence is the line between the two.
+    """
+    run = _latest(jobs_dir)
+    if run is None:
+        return [], []
+    names = set(unscored(jobs_dir))
+    dead, live = [], []
+    for d in sorted(glob.glob(os.path.join(str(run), "*", ""))):
+        name = Path(d.rstrip("/")).name.rsplit("__", 1)[0]
+        if name not in names:
+            continue
+        (dead if os.path.exists(os.path.join(d, "result.json")) else live).append(name)
+    return dead, live
+
+
 def partial(jobs_dir: str) -> dict[str, tuple[int, int]]:
     """Task -> (tests passed, tests total), from the graders' own reports.
 
@@ -369,10 +393,17 @@ def render(jobs: list[str], show_stalled: bool = True) -> str:
             r = _resolution(p["total"])
             lines.append(ui.hint(
                 f"    a single {p['total']}-task run resolves about ±{r:.1f} points"))
-        miss = unscored(jd)
-        if miss:
+        # A live run has unscored trials by construction -- they are the ones
+        # currently running. Saying "will not be retried" about those reads as
+        # an alarm about the healthy state. Only a trial that finished and
+        # produced no reward is worth the warning.
+        dead, live = unscored_split(jd)
+        if dead:
             lines.append(ui.warn(
-                f"    {len(miss)} trial(s) have no score and will not be retried"))
+                f"    {len(dead)} trial(s) finished with no score and will not"
+                " be retried"))
+        if live:
+            lines.append(ui.hint(f"    {len(live)} in flight"))
         if show_stalled:
             for name_, age, steps in _stalled(jd)[:3]:
                 lines.append(ui.warn(
