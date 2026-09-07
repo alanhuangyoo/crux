@@ -843,3 +843,44 @@ def test_file_tools_is_off_unless_asked_for():
         kw = {} if value is None else {"file_tools": value}
         a = CruxTerminusAgent(logs_dir=d, model_name="openai/x", **kw)
         assert "crux read" not in a._prompt_template
+
+
+def test_a_model_call_has_a_timeout():
+    """litellm's default is 6000s and harbor overrides it nowhere.
+
+    A call that never returns holds its trial and one of the run's concurrency
+    slots for a hundred minutes. Three were observed at 115, 117 and 106
+    minutes, each stopped with its terminal at a prompt. Against a
+    Terminal-Bench budget of 7200s that is 83% of the task.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from crux.terminus_agent import _LLM_CALL_TIMEOUT_SEC, CruxTerminusAgent
+
+    d = Path(tempfile.mkdtemp())
+    a = CruxTerminusAgent(logs_dir=d, model_name="openai/x")
+    assert a._llm_timeout == _LLM_CALL_TIMEOUT_SEC
+    assert 0 < _LLM_CALL_TIMEOUT_SEC < 6000  # anything is better than the default
+
+    b = CruxTerminusAgent(logs_dir=d, model_name="openai/x", llm_timeout=120)
+    assert b._llm_timeout == 120
+    # 0 is the escape hatch back to litellm's own default
+    c = CruxTerminusAgent(logs_dir=d, model_name="openai/x", llm_timeout=0)
+    assert c._llm_timeout == 0
+
+
+def test_the_timeout_survives_the_truncation_retry():
+    """Upstream clears and restores the call kwargs around its retry.
+
+    A timeout written once at construction would be wiped before the retry --
+    the call most likely to hang, since it follows a turn that already ran long.
+    """
+    import inspect
+
+    from crux.terminus_agent import CruxTerminusAgent
+
+    src = inspect.getsource(CruxTerminusAgent._query_llm)
+    body = src.split("_crux_truncation_depth = depth + 1")[0]
+    # It has to be set inside _query_llm, after the kwargs are restored.
+    assert '_llm_call_kwargs["timeout"]' in body

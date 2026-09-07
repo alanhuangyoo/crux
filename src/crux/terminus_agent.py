@@ -265,6 +265,20 @@ executes the code you changed. Then continue.
 # Kept as a knob rather than deleted: the measurement is about this model on
 # this benchmark, and stuck_step_threshold=<n> turns it back on for anything
 # where the old shape holds.
+# How long one model call may take before it is abandoned.
+#
+# litellm's default is 6000 seconds and harbor overrides it nowhere, so a call
+# that never returns holds its trial -- and one of the run's concurrency slots
+# -- for a hundred minutes. Three trials were observed sitting at 115, 117 and
+# 106 minutes, each stopped mid-task with its terminal at a prompt and its next
+# request never answered.
+#
+# Against a Terminal-Bench budget of 7200s that is 83% of the task gone to one
+# hung request. 600s is generous for this deployment -- 5,358 requests, the
+# slowest completed turn well inside it -- and a turn that needs longer has
+# already lost the task.
+_LLM_CALL_TIMEOUT_SEC = 600.0
+
 _STUCK_STEP_THRESHOLD = 0
 
 
@@ -485,6 +499,9 @@ class CruxTerminusAgent(Terminus2):
         kwargs.setdefault("parser_name", "xml")
         self._crux_tools = bool(kwargs.pop("crux_tools", True))
         max_tokens = kwargs.pop("max_tokens", None)
+        # Overridable so a slower endpoint can raise it; 0 restores litellm's
+        # 6000s default for anyone who wants the old behaviour back.
+        self._llm_timeout = float(kwargs.pop("llm_timeout", _LLM_CALL_TIMEOUT_SEC))
         reasoning_effort = kwargs.pop("reasoning_effort", None)
         # Whether to keep the `crux submit` gate. Separable from the scoring
         # section because the evidence against them differs: see prompts.py.
@@ -1004,6 +1021,15 @@ class CruxTerminusAgent(Terminus2):
             template_kwargs["enable_thinking"] = False
             body["chat_template_kwargs"] = template_kwargs
             self._llm_call_kwargs["extra_body"] = body
+
+        # litellm reads `timeout` out of the call kwargs. Set here rather than
+        # once at construction because upstream clears and restores this dict
+        # around the truncation retry, so a value written earlier would not
+        # survive into the retry -- which is exactly the call most likely to
+        # hang.
+        t = getattr(self, "_llm_timeout", _LLM_CALL_TIMEOUT_SEC)
+        if t > 0:
+            self._llm_call_kwargs["timeout"] = t
 
         self._crux_truncation_depth = depth + 1
         try:
