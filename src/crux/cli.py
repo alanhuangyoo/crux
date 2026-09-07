@@ -571,6 +571,14 @@ def _watch(args) -> int:
     return cmd_watch(args)
 
 
+def _probe(args) -> int:
+    from crux.probe import cmd_probe, _DEFAULT_TASK
+
+    if args.task is None:
+        args.task = _DEFAULT_TASK
+    return cmd_probe(args)
+
+
 def _doctor(args) -> int:
     """Imported here so `crux --help` does not pay for the check machinery."""
     from crux.doctor import cmd_doctor
@@ -719,6 +727,17 @@ def build_parser() -> argparse.ArgumentParser:
                    help="paired comparison on shared tasks, with a sign test")
     p.add_argument("--baseline", help="a third run, to say how hard the shared subset is")
     p.set_defaults(func=_watch)
+
+    p = sub.add_parser(
+        "probe",
+        help="does a change move the model at all -- five calls, before an arm",
+    )
+    p.add_argument("-m", "--model", help="model id (default: from the endpoint)")
+    p.add_argument("-n", type=int, default=5, help="draws per configuration")
+    p.add_argument("--task", default=None, help="the instruction to probe with")
+    p.add_argument("--agent-kwarg", action="append", metavar="K=V",
+                   help="the configuration to compare against the default")
+    p.set_defaults(func=_probe)
 
     p = sub.add_parser("prompt", help="print a variant's prompt")
     p.add_argument("--variant", default="default", choices=sorted(VARIANTS))

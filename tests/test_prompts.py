@@ -75,3 +75,47 @@ def test_the_batch_section_says_when_not_to_chain():
     body = TERMINUS_BATCH_SECTION.lower()
     assert "depends on" in body
     assert "slow" in body
+
+
+# --------------------------------------------------------------------------
+# crux probe: does a change move the model, before it costs a run
+
+
+def test_the_probe_matches_the_tag_the_model_actually_writes():
+    """The model writes `<keystrokes duration="0.1">`, not `<keystrokes>`.
+
+    The first version of this probe matched the bare tag, found nothing, and
+    reported "no commands returned" -- which reads as a broken endpoint rather
+    than a broken pattern.
+    """
+    from crux.probe import _KEYS
+
+    reply = '<commands>\n<keystrokes duration="0.1">ls -la /app\n</keystrokes>\n</commands>'
+    m = _KEYS.search(reply)
+    assert m and m.group(1).strip() == "ls -la /app"
+    assert _KEYS.search("<keystrokes>ls</keystrokes>")
+
+
+def test_the_probe_counts_independent_probes_not_punctuation():
+    from crux.probe import _SEGMENTS
+
+    def n(c):
+        return len(_SEGMENTS.split(c.strip()))
+
+    assert n("ls -la /app") == 1
+    assert n("ls -la /app && head -5 data.csv && wc -l data.csv") == 3
+    assert n("cd /app; make test") == 2
+    # a trailing semicolon is punctuation, not another probe
+    assert n("ls -la /app;") == 1
+
+
+def test_a_probe_result_reports_nothing_rather_than_zero():
+    # An endpoint that returns nothing must not read as "median 0 segments",
+    # which would look like a result.
+    from crux.probe import ProbeResult
+
+    empty = ProbeResult(label="x", errors=["Timeout"])
+    assert empty.segments == []
+    assert empty.median_segments == 0.0
+    assert "no commands returned" in empty.summary()
+    assert "Timeout" in empty.summary()
