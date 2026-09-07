@@ -394,6 +394,36 @@ Every link is measured except the last. Whether fewer actions actually reduce
 the variance is the question a run answers, and it is now reachable:
 `--agent-kwarg file_tools=1`. Off by default until it is measured.
 
+**What the arm shows so far, and what it kills.** Naming the tools moved uptake
+from 0.3% of commands to 4.3% -- fourteen times more, and still small. Shell
+reads barely moved, 42.1% to 40.0%, and 14 of 29 trajectories never touched a
+structured tool at all. The usage that did happen is correct: `crux read
+/app/decomp.c --limit 200`, `crux edit` with a well-formed JSON body.
+
+The obvious next move was to rewrite the prompt's examples, on the theory that
+the model copies examples rather than following advice. The prompt says
+otherwise:
+
+| | mentions | first appears at |
+|---|---:|---:|
+| `cat` | 2 | 11% |
+| `head` / `tail` | 0 | — |
+| `grep` | 2 | 89% |
+| `sed` | 4 | 84% |
+| `crux read` | 1 | 89% |
+| `crux edit` | 2 | 93% |
+
+**The prompt is not pushing the shell.** It mentions `cat` and `sed` about as
+rarely as it mentions `crux read`, in the same last tenth of the text. The
+model reaches for `cat` 773 times because that is its prior, not because it was
+told to. A section saying "prefer these" moving uptake from 0.3% to 4.3% is
+what one section can do against a strong prior.
+
+So the v2 that rewrites examples has no evidence behind it. What would change
+the behaviour is making the shell path unavailable or the structured tool the
+only route -- a much larger change, and worth attempting only if this arm's
+score says the actions matter.
+
 ---
 
 ## Resolution
