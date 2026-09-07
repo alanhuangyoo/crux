@@ -277,6 +277,32 @@ executes the code you changed. Then continue.
 # hung request. 600s is generous for this deployment -- 5,358 requests, the
 # slowest completed turn well inside it -- and a turn that needs longer has
 # already lost the task.
+# A ceiling on one response, because without one a runaway generation runs to
+# the context limit and takes the trial with it.
+#
+# Found by reading claude-code's trajectory on `regex-chess`, a task that stalls
+# in every crux run and stalled for it too -- 7 steps, one tool call, 240
+# minutes. Its trajectory says why:
+#
+#     API Error: Claude's response exceeded the 64000 output token maximum.
+#
+# Same wall, different outcome: claude-code has CLAUDE_CODE_MAX_OUTPUT_TOKENS
+# and fails loudly, crux had no ceiling and generates until the context runs
+# out, which reads as two hours of silence.
+#
+# Measured across four runs, single-step completion tokens:
+#
+#                    stalled trials        scored trials
+#     all-on         28,234 / 41,157       12,408
+#     ft5            13,296 / 20,327        7,478
+#     both-on        18,712 / 29,737        6,994
+#
+# 32k leaves room above every scored trial's largest turn (7.5k-14k median,
+# 44k max) while cutting a runaway well before the 262k window. A turn that
+# needs more than this has stopped writing commands and started spiralling --
+# the truncation retry, which drops thinking, is the path that recovers it.
+_MAX_OUTPUT_TOKENS = 32768
+
 _LLM_CALL_TIMEOUT_SEC = 600.0
 
 _STUCK_STEP_THRESHOLD = 0
@@ -498,7 +524,7 @@ class CruxTerminusAgent(Terminus2):
         # published runs use, and the template Crux extends is the XML one.
         kwargs.setdefault("parser_name", "xml")
         self._crux_tools = bool(kwargs.pop("crux_tools", True))
-        max_tokens = kwargs.pop("max_tokens", None)
+        max_tokens = kwargs.pop("max_tokens", _MAX_OUTPUT_TOKENS)
         # Overridable so a slower endpoint can raise it; 0 restores litellm's
         # 6000s default for anyone who wants the old behaviour back.
         self._llm_timeout = float(kwargs.pop("llm_timeout", _LLM_CALL_TIMEOUT_SEC))
