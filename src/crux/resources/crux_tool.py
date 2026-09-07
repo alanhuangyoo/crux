@@ -435,7 +435,10 @@ _RUNNER = (
     r"go\s+test|cargo\s+test|npm\s+(?:run\s+)?test)"
 )
 # What may precede it and still leave it in command position.
-_LEAD = r"(?:[-*$>]\s*|\d+\.\s*|(?:run|script|commands?|cmd|entrypoint)\s*[:=]\s*)?"
+# A YAML step is `- run: pytest -q`: a bullet AND a key, not one or the other.
+# Allowing only one was why nothing matched a GitHub Actions workflow.
+_LEAD = (r"(?:[-*$>]\s*)?(?:\d+\.\s*)?"
+         r"(?:(?:-\s*)?(?:run|script|commands?|cmd|entrypoint)\s*[:=]\s*)?")
 _CD = r"(?:cd\s+\S+\s*&&\s*)?"
 _INVOCATION = re.compile(
     r"^[ \t]*" + _LEAD + _CD + _RUNNER + r"(?:[ \t][^\n]{0,180})?$",
@@ -447,6 +450,62 @@ _NOT_A_COMMAND = re.compile(
     r"|[\w.-]+\s*(?:==|>=|<=|~=)"     # a pinned dependency
     r"|^\s*\w[\w.-]*\s*=\s*[\[\{\"']"  # key = [ ... ] or key = "..."
 )
+
+
+def _repo_root(start):
+    """Walk up to the checkout root.
+
+    Run from `/testbed/tests`, the first version looked only there, found
+    nothing, and said so -- on a repository whose CI config was one directory
+    up. Where the agent happens to be standing is not where the project
+    describes itself.
+    """
+    cur = os.path.abspath(start)
+    for _ in range(12):
+        for marker in (".git", "tox.ini", "setup.py", "pyproject.toml", ".github"):
+            if os.path.exists(os.path.join(cur, marker)):
+                return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    return os.path.abspath(start)
+
+
+# CI templating that has not been expanded. `tox ${{ matrix.toxenv }}` is not a
+# command anyone can run, and printing it as one is worse than printing nothing.
+_UNEXPANDED = re.compile(r"\$\{\{|\$\(\(|\{posargs\}|<[A-Z_]+>|\{\{")
+
+# Which ecosystem a runner belongs to, so a python repo is not told `npm test`
+# because its tox.ini happens to have a javascript env.
+_ECOSYSTEM = (
+    (re.compile(r"\b(npm|yarn|pnpm|jest|vitest)\b"), "js"),
+    (re.compile(r"\b(go\s+test)\b"), "go"),
+    (re.compile(r"\b(cargo\s+test)\b"), "rust"),
+    (re.compile(r"(pytest|runtests\.py|\btox\b|\bnox\b|setup\.py\s+test)"), "py"),
+)
+_ECOSYSTEM_MARKERS = (
+    ("py", ("setup.py", "pyproject.toml", "setup.cfg", "tox.ini")),
+    ("js", ("package.json",)),
+    ("go", ("go.mod",)),
+    ("rust", ("Cargo.toml",)),
+)
+
+
+def _ecosystems(root):
+    """Which ecosystems the repository actually is."""
+    out = set()
+    for name, markers in _ECOSYSTEM_MARKERS:
+        if any(os.path.exists(os.path.join(root, m)) for m in markers):
+            out.add(name)
+    return out or {"py", "js", "go", "rust"}
+
+
+def _ecosystem_of(line):
+    for rx, name in _ECOSYSTEM:
+        if rx.search(line):
+            return name
+    return None
 
 
 def _scan_for_invocations(root):
@@ -474,8 +533,11 @@ def _scan_for_invocations(root):
                 line = re.sub(r"^[-*$>]\s*|^\d+\.\s*", "", line)
                 line = re.sub(r"^(run|script|commands?|cmd|entrypoint)\s*[:=]\s*", "", line)
                 line = line.strip("'\"` ")
-                if 4 < len(line) < 200:
-                    found.append((line, label, os.path.relpath(f, root)))
+                if not (4 < len(line) < 200):
+                    continue
+                if _UNEXPANDED.search(line):
+                    continue
+                found.append((line, label, os.path.relpath(f, root)))
     return found
 
 
@@ -502,8 +564,10 @@ def cmd_tests(args):
     been measured getting wrong; how this repository runs its tests is a fact
     written down in the repository.
     """
-    root = os.path.abspath(args.path or ".")
-    found = _scan_for_invocations(root)
+    root = _repo_root(args.path or ".")
+    mine = _ecosystems(root)
+    found = [f for f in _scan_for_invocations(root)
+             if (_ecosystem_of(f[0]) or "py") in mine]
     if not found:
         print(f"no test invocation stated under {root}")
         print("Looked in: " + ", ".join(rel for rel, _ in _TEST_SOURCES))
@@ -511,13 +575,16 @@ def cmd_tests(args):
     seen = {}
     for line, label, rel in found:
         seen.setdefault(line, (label, rel))
-    print(f"How {os.path.basename(root)} says it runs its tests:\n")
+    print(f"How {os.path.basename(root)} says it runs its tests ({root}):\n")
     for line, (label, rel) in list(seen.items())[:12]:
         print(f"  {line}")
         print(f"      {label} -- {rel}")
     print("\nRun the suite the way the repository does, not the way that is quickest.")
     print("A pass under a different settings module or a different isolation")
     print("policy is not the pass the grader will see.")
+    print("Nothing here is authoritative about flags the repository leaves to you")
+    print("-- a settings module, a parallelism setting. Those you still have to")
+    print("choose, and choosing the default is a choice.")
 
 
 def cmd_submit(args):
