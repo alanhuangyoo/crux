@@ -124,14 +124,14 @@ the same reasoning wrote both.
 | submit gate | `crux submit` refuses once and asks for one more check from the task's own words | off by default, an arm |
 | checklist-first gate | holds the first edit until one check is bound | off by default, an arm |
 | `crux tests` | reads the repository's own test invocation out of its CI config | on, in the prompt |
-| `crux falsify` | empties the file a check names and reports whether the check notices | on, unmeasured |
+| `crux falsify` | empties the file a check names and reports whether the check notices | implemented, replayed as ineffective here |
 
 The gate threshold of 12 is the argmax of a sweep over 89 trajectories: it
 catches 62% of failures at a 15% false-fire rate. 20 would have caught 37%.
 
 ---
 
-## Nine lines that were measured and dropped
+## Ten lines that were measured and dropped
 
 Kept because "looked and decided against" and "never looked" are different
 things, and only one of them is a result.
@@ -146,6 +146,7 @@ things, and only one of them is a result.
 | not counting `/tmp` writes as edits | 0.49 → 0.40; scratch writes correlate with the failure shape too |
 | requirement-coverage ratio | separation 0.29; the requirement count is 23 in both groups, so it adds nothing over the raw check count |
 | a gate on checks naming the task's own deliverable | per-check the split is real (failed runs spend 60-70% of their checks on their own scaffolding vs 20-35%), but per-run separation is 0.11 |
+| vacuous bound checks (`crux falsify`) | replayed offline against every bound check in both finished runs: the shapes it would call vacuous are 5% of checks in TB solves and **0% in either set of failures**, and failures read the deliverable's contents *more* often than solves (94% vs 86%). `mteb-retrieve`, whose whole verification was that a file existed, is the exception and not the shape. Three minutes of replay instead of a GPU run |
 | command repetition | consecutive > 2 gives 0.24, near-repeat > 1% gives 0.36, and neither is monotone — solves reach 26 consecutive repeats, failures 17 |
 
 And one mechanism removed:
