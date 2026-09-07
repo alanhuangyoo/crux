@@ -407,6 +407,119 @@ def cmd_todo(args):
 SUBMIT_SENTINEL = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 
 
+# Where a repository states how its own tests are run. Ordered by how
+# specific each source is, because the first hit wins and a CI workflow says
+# more than a Makefile target called "test".
+_TEST_SOURCES = (
+    (".github/workflows", "GitHub Actions"),
+    ("tox.ini", "tox.ini"),
+    ("noxfile.py", "noxfile.py"),
+    ("Makefile", "Makefile"),
+    ("setup.cfg", "setup.cfg"),
+    ("pyproject.toml", "pyproject.toml"),
+    ("CONTRIBUTING.rst", "CONTRIBUTING"),
+    ("CONTRIBUTING.md", "CONTRIBUTING"),
+    ("tests/README.rst", "tests/README"),
+    ("docs/internals/contributing/writing-code/unit-tests.txt", "django docs"),
+)
+
+# A test command, matched only where a command can stand: the start of a line,
+# or after a shell connective. Matching it anywhere finds `pytest>=8.0` in a
+# dependency list and `[tool.pytest.ini_options]` in a section header, which is
+# how the first version reported crux's own pyproject.toml as three ways to run
+# the tests.
+_RUNNER = (
+    r"(?:python\S*\s+-m\s+pytest|pytest|"
+    r"\.?/?(?:tests/)?runtests\.py|python\S*\s+\S*runtests\.py|"
+    r"tox|nox|python\S*\s+setup\.py\s+test|"
+    r"go\s+test|cargo\s+test|npm\s+(?:run\s+)?test)"
+)
+# What may precede it and still leave it in command position.
+_LEAD = r"(?:[-*$>]\s*|\d+\.\s*|(?:run|script|commands?|cmd|entrypoint)\s*[:=]\s*)?"
+_CD = r"(?:cd\s+\S+\s*&&\s*)?"
+_INVOCATION = re.compile(
+    r"^[ \t]*" + _LEAD + _CD + _RUNNER + r"(?:[ \t][^\n]{0,180})?$",
+    re.M,
+)
+# Lines that mention a runner but are declaring rather than invoking.
+_NOT_A_COMMAND = re.compile(
+    r"^\s*[\[#]"                      # section header or comment
+    r"|[\w.-]+\s*(?:==|>=|<=|~=)"     # a pinned dependency
+    r"|^\s*\w[\w.-]*\s*=\s*[\[\{\"']"  # key = [ ... ] or key = "..."
+)
+
+
+def _scan_for_invocations(root):
+    """Every test invocation the repository states about itself."""
+    found = []
+    for rel, label in _TEST_SOURCES:
+        path = os.path.join(root, rel)
+        files = []
+        if os.path.isdir(path):
+            for name in sorted(os.listdir(path))[:20]:
+                if name.endswith((".yml", ".yaml")):
+                    files.append(os.path.join(path, name))
+        elif os.path.isfile(path):
+            files = [path]
+        for f in files:
+            try:
+                text = open(f, errors="replace").read(200_000)
+            except OSError:
+                continue
+            for m in _INVOCATION.finditer(text):
+                raw = m.group(0)
+                if _NOT_A_COMMAND.search(raw):
+                    continue
+                line = raw.strip()
+                line = re.sub(r"^[-*$>]\s*|^\d+\.\s*", "", line)
+                line = re.sub(r"^(run|script|commands?|cmd|entrypoint)\s*[:=]\s*", "", line)
+                line = line.strip("'\"` ")
+                if 4 < len(line) < 200:
+                    found.append((line, label, os.path.relpath(f, root)))
+    return found
+
+
+def cmd_tests(args):
+    """Print how this repository runs its own tests.
+
+    The failures this exists for do not come from skipping verification. On a
+    finished SWE-bench Verified run, 88 of 89 trials ran the repo's suite --
+    a median of 7 times when they solved and 10 when they failed -- and for 11
+    of the 16 failures the module holding the broken test was one the agent had
+    run. `django__django-16263` ran a 1243-test sweep, saw `Ran 1243 tests OK`,
+    and was still failed by the grader on a module inside that sweep.
+
+    What differed was the invocation. The grader ran
+
+        ./tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1 <modules>
+
+    and of the eight django failures, none passed `--parallel` and two passed
+    `--settings`. A different settings module and a different isolation policy
+    make the same tests not the same tests.
+
+    That is worth a command because it is the one thing in this loop the agent
+    does not have to judge. Whether its work is right is a judgement it has
+    been measured getting wrong; how this repository runs its tests is a fact
+    written down in the repository.
+    """
+    root = os.path.abspath(args.path or ".")
+    found = _scan_for_invocations(root)
+    if not found:
+        print(f"no test invocation stated under {root}")
+        print("Looked in: " + ", ".join(rel for rel, _ in _TEST_SOURCES))
+        return
+    seen = {}
+    for line, label, rel in found:
+        seen.setdefault(line, (label, rel))
+    print(f"How {os.path.basename(root)} says it runs its tests:\n")
+    for line, (label, rel) in list(seen.items())[:12]:
+        print(f"  {line}")
+        print(f"      {label} -- {rel}")
+    print("\nRun the suite the way the repository does, not the way that is quickest.")
+    print("A pass under a different settings module or a different isolation")
+    print("policy is not the pass the grader will see.")
+
+
 def cmd_submit(args):
     """Print the submit sentinel, but only if every bound check passes.
 
@@ -617,6 +730,10 @@ def main():
         ),
     )
     p.set_defaults(func=cmd_todo)
+
+    p = sub.add_parser("tests", help="how this repository runs its own tests")
+    p.add_argument("path", nargs="?", default=".")
+    p.set_defaults(func=cmd_tests)
 
     args = parser.parse_args()
     args.func(args)

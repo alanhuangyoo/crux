@@ -504,3 +504,74 @@ def test_a_slow_check_is_not_waited_on(tmp_path):
     r = todo(["add", "slow", "--verify", "sleep 60"], tmp_path)
     assert "did not finish" in r.stdout
     assert "already passes" not in r.stdout
+
+
+# ---- how the repository runs its own tests ----------------------------------
+
+
+def _tool(args, cwd):
+    return subprocess.run([sys.executable, str(TOOL), *args],
+                          capture_output=True, text=True, cwd=cwd)
+
+
+def test_tests_finds_the_ci_invocation(tmp_path):
+    """The one fact in this loop the agent does not have to judge.
+
+    On a finished SWE-bench Verified run the grader used
+
+        ./tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1
+
+    and of the eight django failures none passed --parallel and two passed
+    --settings. django__django-16263 ran a 1243-test sweep, saw `Ran 1243 tests
+    OK`, and was failed on a module inside that sweep. Same module, same code,
+    different invocation.
+    """
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "tests.yml").write_text(
+        "jobs:\n  sqlite:\n    steps:\n      - name: Run tests\n"
+        "        run: python tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1\n"
+    )
+    r = _tool(["tests", str(tmp_path)], tmp_path)
+    assert "--settings=test_sqlite" in r.stdout
+    assert "--parallel 1" in r.stdout
+    assert "GitHub Actions" in r.stdout
+
+
+def test_tests_reads_tox_and_makefile(tmp_path):
+    (tmp_path / "tox.ini").write_text("[testenv]\ncommands = pytest -q {posargs}\n")
+    (tmp_path / "Makefile").write_text("test:\n\tpython -m pytest tests/\n")
+    out = _tool(["tests", str(tmp_path)], tmp_path).stdout
+    assert "pytest -q" in out
+    assert "python -m pytest tests/" in out
+
+
+def test_a_dependency_pin_is_not_an_invocation(tmp_path):
+    """The first version reported crux's own pyproject.toml as three ways to
+    run the tests: a dependency pin, a section header and a comment."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project.optional-dependencies]\n'
+        'dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]\n\n'
+        '[tool.pytest.ini_options]\n'
+        'asyncio_mode = "auto"\n'
+    )
+    out = _tool(["tests", str(tmp_path)], tmp_path).stdout
+    assert "no test invocation stated" in out
+
+
+def test_a_comment_is_not_an_invocation(tmp_path):
+    (tmp_path / "Makefile").write_text("# run pytest to check things\nbuild:\n\techo hi\n")
+    assert "no test invocation stated" in _tool(["tests", str(tmp_path)], tmp_path).stdout
+
+
+def test_a_repo_that_says_nothing_says_so(tmp_path):
+    out = _tool(["tests", str(tmp_path)], tmp_path).stdout
+    assert "no test invocation stated" in out
+    assert "Looked in:" in out
+
+
+def test_a_cd_prefix_is_still_a_command(tmp_path):
+    (tmp_path / "CONTRIBUTING.md").write_text(
+        "To run the suite:\n\n    cd tests && ./runtests.py --settings=test_sqlite\n")
+    out = _tool(["tests", str(tmp_path)], tmp_path).stdout
+    assert "runtests.py --settings=test_sqlite" in out
