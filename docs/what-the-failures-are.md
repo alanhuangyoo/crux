@@ -767,3 +767,36 @@ minute is not about scores at all:
     does the set of tasks that produced a score change when the flag flips?
 
 It changed by exactly two, every time, for six days.
+
+## The gate obeys, and it costs
+
+`confirm_gate` was filed with the other six as "inside the noise". On score
+that is right. On behaviour it is wrong, and the difference matters.
+
+Against `base-crux`, same 89 tasks, same 8x budget, paired:
+
+    score        59/86 -> 54/86      gains 11, loses 16    p = 0.44
+    median steps    36 -> 51         more on 53, fewer on 21   p = 2.6e-4
+    timeouts         9 -> 23
+    setup deaths     0 ->  2         (the tmux `-e` bug above)
+
+Steps are throughput-independent, so unlike wall-clock they are not an
+artifact of what else was on the box. The gate does what it was built to do:
+it refuses the first `crux submit` and the agent goes back to work. It goes
+back to work on 53 of 74 tasks where the count moved at all, and it converts
+nine timeouts into twenty-three — at 8x budget, two hours each.
+
+**Six mechanisms were ignored. This one was obeyed and bought nothing.** That
+is a different result and it deserves a different name. "No effect" invites
+"say it louder"; every prompt section here has been a louder version of the
+same request. What actually happened is that the agent did the extra pass, and
+the extra pass did not find anything, because the thing it is asked to check
+with is its own judgement — the same judgement that produced the answer.
+
+So the gate comes off, and it takes the arms built on it with it. Every
+mechanism measured since 09-06 used `all-on` as its baseline, which means each
+was measured on top of an agent already running 42% longer with 2.5x the
+timeout rate. The comparisons are internally valid — the gate is on both sides
+— but the operating point is a poor one, and `base-crux` is a better control
+that already exists at 89 tasks. `think-clean` and `ft-clean` re-ask the two
+open questions against it, with the two qemu tasks alive for the first time.
