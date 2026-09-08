@@ -406,3 +406,35 @@ def test_no_task_is_capped_without_a_run_under_the_fixed_ceiling(capsys, monkeyp
     # The mechanism survives the list: a task that really does burn its budget
     # for nothing is still a category worth having.
     assert 0 < STALL_CAP_MULTIPLIER < 8
+
+
+def test_a_diff_prints_what_its_task_count_can_resolve(capsys, tmp_path, monkeypatch):
+    """A lead smaller than the resolution is a direction, not a result.
+
+    Every lead measured in this project so far has been smaller, and the
+    number that says so should not be in a different command from the delta.
+    """
+    import json
+
+    import crux.cli as cli
+
+    def make(name, tasks):
+        d = tmp_path / name / "2026-09-08__00-00-00"
+        for task, reward in tasks.items():
+            t = d / f"{task}__h"
+            t.mkdir(parents=True)
+            (t / "result.json").write_text(json.dumps({
+                "task_name": f"terminal-bench/{task}",
+                "verifier_result": {"rewards": {"reward": reward}},
+                "agent_result": {"n_output_tokens": 10},
+            }))
+        (d / "result.json").write_text(json.dumps({"n_total_trials": len(tasks)}))
+        return str(tmp_path / name)
+
+    tasks_a = {f"t{i}": (1.0 if i % 2 else 0.0) for i in range(20)}
+    tasks_b = {f"t{i}": (1.0 if i % 3 else 0.0) for i in range(20)}
+    args = cli.build_parser().parse_args(["report", make("a", tasks_a), make("b", tasks_b)])
+    assert cli.cmd_report(args) == 0
+    out = capsys.readouterr().out
+    assert "sign test" in out
+    assert "resolve about" in out

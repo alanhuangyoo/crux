@@ -585,6 +585,16 @@ def cmd_report(args) -> int:
         verdict = "separates" if p < 0.05 else "inside the noise"
         print(f"  gained {len(result['gained'])}, lost {len(result['lost'])}"
               f"   sign test p={p:.3f}  ({verdict})")
+        # The delta has to be read against what this many tasks can resolve.
+        # Two runs of one configuration disagree on 15-16% of tasks here, so a
+        # lead smaller than the resolution is a direction, not a result -- and
+        # every lead measured in this project so far has been smaller.
+        from crux.watch import _resolution
+
+        r = _resolution(result["shared_tasks"])
+        if r:
+            print(f"  {result['shared_tasks']} tasks resolve about "
+                  f"±{r:.1f} points")
         if result["gained"]:
             print("\nnewly solved:", ", ".join(result["gained"]))
         # Regressions are why this is a task-by-task diff: two gained and two
