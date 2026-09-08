@@ -104,6 +104,14 @@ class Trial:
         # with the solved list printed beside them.
         if self.solved:
             return "solved"
+        # An exception with no agent activity at all: the trial never got to
+        # the agent, whatever the exception is called. This is a better rule
+        # than a list of exception names, and it is how pi's baseline gets a
+        # fair reading -- 16 of its 89 trials died in `curl ... nvm install`
+        # with no trajectory written, and were being counted as pi failing the
+        # task. Solves have steps, so the pair is unambiguous.
+        if self.exception and not self.n_steps:
+            return "environment"
         if self.exception in ENVIRONMENT_EXCEPTIONS:
             return "environment"
         if self.exception == "AgentTimeoutError":

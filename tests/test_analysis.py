@@ -417,7 +417,10 @@ def test_the_endpoint_failing_is_not_the_agent_running_out_of_turns():
 def test_a_real_agent_failure_is_still_the_agents():
     from crux.analysis import Trial
 
-    assert Trial(task="t", reward=0.0, exception="AgentTimeoutError").category == "agent_timeout"
+    # n_steps matters now: an exception with no agent activity is the box's,
+    # and a timeout after 40 steps is the agent's.
+    assert Trial(task="t", reward=0.0, exception="AgentTimeoutError",
+                 n_steps=40).category == "agent_timeout"
     assert Trial(task="t", reward=0.0, exit_reason="completed").category == "false_completion"
 
 
@@ -429,3 +432,25 @@ def test_an_environment_failure_is_excluded_from_a_paired_diff(tmp_path):
                    planned=1)
     r = compare(base, cand)
     assert r["broke_setup"] == ["x"] and r["lost"] == []
+
+
+def test_an_exception_with_no_agent_activity_is_environmental():
+    """A better rule than a list of exception names.
+
+    pi's baseline lost 16 of 89 trials to `curl ... nvm/install.sh` failing in
+    setup -- no trajectory, no steps, the agent never started -- and they were
+    counted as pi failing those tasks. The exception is called
+    NonZeroAgentExitCodeError, which sounds like the agent's fault and is not.
+    """
+    from crux.analysis import Trial
+
+    t = Trial(task="x", reward=None, exception="NonZeroAgentExitCodeError", n_steps=0)
+    assert t.category == "environment"
+
+
+def test_an_exception_after_the_agent_ran_is_not_environmental():
+    """The other half of the rule: a crash mid-run is still about the agent."""
+    from crux.analysis import Trial
+
+    t = Trial(task="x", reward=0.0, exception="AgentTimeoutError", n_steps=40)
+    assert t.category == "agent_timeout"
