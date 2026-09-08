@@ -122,6 +122,13 @@ export interface AgentOptions {
 	toolExecution?: ToolExecutionMode;
 	/** Absolute epoch ms after which the loop stops on its own. */
 	deadline?: number;
+	/**
+	 * Default ceiling on one response. A provider reserves inference capacity
+	 * by `max_tokens`, so a large one costs queueing whether or not the tokens
+	 * are used; a truncated response is retried at the model's ceiling. Omit to
+	 * send no ceiling, which is pi's existing behaviour.
+	 */
+	maxTokens?: number;
 }
 
 class PendingMessageQueue {
@@ -185,6 +192,9 @@ export class Agent {
 	 */
 	public deadline?: number;
 
+	/** Default ceiling on one response; see `AgentOptions.maxTokens`. */
+	public maxTokens?: number;
+
 	public convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	public transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
 	public streamFunction: StreamFn;
@@ -245,6 +255,7 @@ export class Agent {
 		this.maxRetryDelayMs = runtimeOptions.maxRetryDelayMs;
 		this.toolExecution = runtimeOptions.toolExecution ?? "parallel";
 		this.deadline = options.deadline;
+		this.maxTokens = options.maxTokens;
 	}
 
 	/**
@@ -481,6 +492,7 @@ export class Agent {
 					: undefined,
 			convertToLlm: this.convertToLlm,
 			deadline: this.deadline,
+			maxTokens: this.maxTokens,
 			transformContext: this.transformContext,
 			getApiKey: this.getApiKey,
 			getSteeringMessages: async () => {

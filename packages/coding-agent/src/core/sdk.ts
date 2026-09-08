@@ -182,6 +182,32 @@ function getDefaultAgentDir(): string {
  *
  * Ignored when unset, zero, or unparseable, which is every interactive session.
  */
+/**
+ * A default ceiling on one response, from `PI_MAX_OUTPUT_TOKENS`.
+ *
+ * A provider reserves inference capacity by `max_tokens`, so asking for a
+ * large one costs queueing whether or not the tokens are used. Claude Code
+ * caps its default at 8K against a p99 output of 4,911 tokens, accepts under
+ * 1% of responses being truncated, and gives those a clean retry at the
+ * model's ceiling -- the retry this loop now performs (see
+ * `escalatedMaxTokens` in the agent loop).
+ *
+ * The number is deployment-specific and belongs to whoever is running the
+ * model, which is why this is a setting and not a new default: measured over
+ * 10,225 assistant turns on one self-hosted 27B deployment, p50 output is 461
+ * tokens, p95 is 5,699, and p99 is 16,161 -- three times Claude Code's, so
+ * their 8K would truncate 3% here where 16K truncates 0.4%.
+ *
+ * Unset leaves pi's behaviour exactly as it is.
+ */
+export function maxOutputTokensFromEnv(): number | undefined {
+	const raw = process.env.PI_MAX_OUTPUT_TOKENS;
+	if (!raw) return undefined;
+	const tokens = Number(raw);
+	if (!Number.isFinite(tokens) || tokens <= 0) return undefined;
+	return Math.floor(tokens);
+}
+
 export function deadlineFromEnv(): number | undefined {
 	const raw = process.env.PI_TIME_BUDGET_SEC;
 	if (!raw) return undefined;
@@ -331,6 +357,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			tools: [],
 		},
 		deadline: deadlineFromEnv(),
+		maxTokens: maxOutputTokensFromEnv(),
 		convertToLlm: convertToLlmWithBlockImages,
 		streamFn: async (model, context, options) => {
 			const providerRetrySettings = settingsManager.getProviderRetrySettings();
