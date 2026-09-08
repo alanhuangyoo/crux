@@ -26,6 +26,55 @@ import type {
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 
 /**
+ * How many times in a row the loop will hand back an unactionable turn before
+ * letting the run end. A model that answers the nudge with another empty turn
+ * is not going to be argued out of it, and each attempt costs a full request.
+ */
+const MAX_UNACTIONABLE_TURN_RECOVERIES = 3;
+
+/**
+ * Why a turn that made no tool call cannot be treated as the agent finishing,
+ * or `undefined` when it can.
+ *
+ * The loop ends when an assistant message carries no tool calls, which is right
+ * for a message that answers. It is wrong for two kinds of turn that answer
+ * nothing:
+ *
+ * **Cut off at the token limit.** `stopReason === "length"` means the model was
+ * still talking. The loop already knows this is dangerous -- when such a message
+ * *does* carry tool calls it refuses to run them and tells the model to reissue
+ * with complete arguments. With no tool calls there is nothing to attach that to,
+ * so the guard never fires and the run ends on a sentence that stops mid-word.
+ *
+ * **Reasoning only.** A message whose content is thinking blocks and nothing
+ * else has produced no answer and no action. On a reasoning model this is a
+ * normal failure of a long thought, not a decision to stop.
+ *
+ * Both were measured on Terminal-Bench 2.1 with a 27B reasoning model: three of
+ * pi's twenty-five failed trials ended this way, having taken zero actions.
+ * `regex-chess` spent 65,536 output tokens -- 199,246 characters, entirely
+ * thinking, `stopReason: "length"` -- and the run was recorded as settled.
+ */
+function unactionableTurnReason(message: AssistantMessage): string | undefined {
+	const hasText = message.content.some((c) => c.type === "text" && c.text.trim().length > 0);
+	if (message.stopReason === "length") {
+		return (
+			"Your last response hit the output token limit before it produced a tool call" +
+			(hasText ? " or a complete answer" : "") +
+			". Nothing was executed. Answer again, and this time reach a tool call or a " +
+			"final answer early -- keep the reasoning short enough to fit."
+		);
+	}
+	if (!hasText) {
+		return (
+			"Your last response contained only reasoning: no tool call and no answer. " +
+			"Nothing was executed. Take the next concrete action, or state the final answer."
+		);
+	}
+	return undefined;
+}
+
+/**
  * Start an agent loop with a new prompt message.
  * The prompt is added to the context and events are emitted for it.
  */
@@ -164,6 +213,9 @@ async function runLoop(
 	let currentContext = initialContext;
 	let config = initialConfig;
 	let lastCompletedTurn: PrepareNextTurnContext | undefined;
+	// Consecutive turns handed back for producing neither a tool call nor an
+	// answer. Reset by any turn that does one of those.
+	let unactionableTurns = 0;
 	// Check for steering messages at start (user may have typed while waiting)
 	let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
 
@@ -223,6 +275,16 @@ async function runLoop(
 
 			const toolResults: ToolResultMessage[] = [];
 			hasMoreToolCalls = false;
+			// A turn that made no tool call usually means the agent is done. Two
+			// kinds of turn look like that and are not: see `unactionableTurnReason`.
+			let recovery: string | undefined;
+			if (toolCalls.length === 0) {
+				recovery =
+					unactionableTurns < MAX_UNACTIONABLE_TURN_RECOVERIES ? unactionableTurnReason(message) : undefined;
+				unactionableTurns = recovery ? unactionableTurns + 1 : 0;
+			} else {
+				unactionableTurns = 0;
+			}
 			if (toolCalls.length > 0) {
 				// A "length" stop means the output was cut off by the token limit, so
 				// every tool call in the message may carry truncated arguments. Fail
@@ -255,6 +317,16 @@ async function runLoop(
 			}
 
 			pendingMessages = (await config.getSteeringMessages?.()) || [];
+			// Appended after the steering poll, which reassigns the array. Delivered
+			// as a user message because the truncated-tool-call path this mirrors
+			// speaks through a tool result, and here there is no tool call to answer.
+			if (recovery) {
+				pendingMessages.push({
+					role: "user",
+					content: [{ type: "text", text: recovery }],
+					timestamp: Date.now(),
+				});
+			}
 		}
 
 		// Agent would stop here. Check for follow-up messages.

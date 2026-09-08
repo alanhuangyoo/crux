@@ -1608,3 +1608,80 @@ describe("agentLoopContinue with AgentMessage", () => {
 		expect(messages[0].role).toBe("assistant");
 	});
 });
+
+describe("turns that produce neither a tool call nor an answer", () => {
+	// The loop ends when an assistant message carries no tool calls, which is
+	// right for a message that answers and wrong for two kinds of turn that
+	// answer nothing. Measured on Terminal-Bench 2.1 against a 27B reasoning
+	// model: three of pi's twenty-five failed trials ended having taken zero
+	// actions. `regex-chess` spent 65,536 output tokens -- 199,246 characters,
+	// entirely thinking, stopReason "length" -- and was recorded as settled.
+
+	function runWith(messages: AssistantMessage[]) {
+		let call = 0;
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			const message = messages[Math.min(call, messages.length - 1)]!;
+			call++;
+			queueMicrotask(() => {
+				stream.push({ type: "done", reason: "stop", message });
+			});
+			return stream;
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [] };
+		const config: AgentLoopConfig = { model: createModel(), convertToLlm: identityConverter };
+		return { streamFn, context, config, calls: () => call };
+	}
+
+	async function drain(stream: ReturnType<typeof agentLoop>) {
+		const events: AgentEvent[] = [];
+		for await (const event of stream) events.push(event);
+		return events;
+	}
+
+	it("hands back a turn cut off at the output token limit", async () => {
+		// No tool call to attach the existing truncation notice to, so before this
+		// the guard never fired and the run ended on a sentence stopped mid-word.
+		const truncated = createAssistantMessage([{ type: "thinking", thinking: "still going" }], "length");
+		const answered = createAssistantMessage([{ type: "text", text: "done" }]);
+		const h = runWith([truncated, answered]);
+		const events = await drain(agentLoop([createUserMessage("go")], h.context, h.config, undefined, h.streamFn));
+
+		expect(h.calls()).toBe(2);
+		const injected = events.filter((e) => e.type === "message_start" && (e as any).message?.role === "user");
+		expect(JSON.stringify(injected)).toContain("output token limit");
+	});
+
+	it("hands back a turn that is only reasoning", async () => {
+		const thinkingOnly = createAssistantMessage([{ type: "thinking", thinking: "hmm" }]);
+		const answered = createAssistantMessage([{ type: "text", text: "done" }]);
+		const h = runWith([thinkingOnly, answered]);
+		const events = await drain(agentLoop([createUserMessage("go")], h.context, h.config, undefined, h.streamFn));
+
+		expect(h.calls()).toBe(2);
+		expect(JSON.stringify(events)).toContain("only reasoning");
+	});
+
+	it("lets a plain answer settle, which is the common case", async () => {
+		// The guard must not turn every normal reply into another request.
+		const h = runWith([createAssistantMessage([{ type: "text", text: "The answer is 4." }])]);
+		await drain(agentLoop([createUserMessage("2+2?")], h.context, h.config, undefined, h.streamFn));
+		expect(h.calls()).toBe(1);
+	});
+
+	it("gives up rather than looping on a model that keeps answering nothing", async () => {
+		// Each retry costs a full request; a model that answers the nudge with
+		// another empty turn is not going to be argued out of it.
+		const h = runWith([createAssistantMessage([{ type: "thinking", thinking: "hmm" }])]);
+		await drain(agentLoop([createUserMessage("go")], h.context, h.config, undefined, h.streamFn));
+		expect(h.calls()).toBe(4); // the first turn plus MAX_UNACTIONABLE_TURN_RECOVERIES
+	});
+
+	it("counts consecutively, so a good turn clears the budget", async () => {
+		const empty = createAssistantMessage([{ type: "thinking", thinking: "hmm" }]);
+		const answered = createAssistantMessage([{ type: "text", text: "ok" }]);
+		const h = runWith([empty, empty, answered]);
+		await drain(agentLoop([createUserMessage("go")], h.context, h.config, undefined, h.streamFn));
+		expect(h.calls()).toBe(3);
+	});
+});
