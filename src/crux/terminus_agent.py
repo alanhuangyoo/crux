@@ -304,7 +304,43 @@ executes the code you changed. Then continue.
 # the truncation retry, which drops thinking, is the path that recovers it.
 _MAX_OUTPUT_TOKENS = 32768
 
-_LLM_CALL_TIMEOUT_SEC = 600.0
+# A ceiling on one *call*, because litellm's own default is 6000s and harbor
+# never overrides it: a request that hangs would sit there for 100 minutes.
+#
+# 600 was set against a 900-second budget. At the 8x budget everything is run
+# at now it is 8% of the trial, and it stopped bounding hangs and started
+# cutting real work. `regex-chess` died on it, three attempts deep:
+#
+#     litellm.Timeout: timeout value=600.0, time taken=1801.36 seconds
+#
+# and `regex-chess` is one of the two tasks written down in this project as
+# never solving, priced at a reduced budget on the strength of never having
+# solved. It was being killed by this constant.
+#
+# The distribution says where the line belongs. Across 9,253 inter-step gaps in
+# two 89-task runs, 99.8% are under 600s and the tail is thin -- but the five
+# tasks that stall spend 20-30% of their steps above it. So the cut is not
+# broad, it is aimed squarely at the handful of tasks with the longest turns.
+#
+# Scaling to the budget keeps both properties: a hang is still bounded by a
+# quarter of the trial, and a ten-minute generation is no longer thrown away.
+_LLM_TIMEOUT_BUDGET_SHARE = 0.25
+_LLM_TIMEOUT_MIN_SEC = 600.0
+_LLM_TIMEOUT_MAX_SEC = 1800.0
+_LLM_CALL_TIMEOUT_SEC = _LLM_TIMEOUT_MIN_SEC
+
+
+def _llm_timeout_for(budget_sec: float) -> float:
+    """The per-call ceiling this trial's budget can afford.
+
+    Below the floor the share would be too tight to finish a normal turn; above
+    the cap a hang costs more than it is worth waiting for.
+    """
+    if budget_sec <= 0:
+        return _LLM_TIMEOUT_MIN_SEC
+    share = budget_sec * _LLM_TIMEOUT_BUDGET_SHARE
+    return min(_LLM_TIMEOUT_MAX_SEC, max(_LLM_TIMEOUT_MIN_SEC, share))
+
 
 _STUCK_STEP_THRESHOLD = 0
 
@@ -528,7 +564,8 @@ class CruxTerminusAgent(Terminus2):
         max_tokens = kwargs.pop("max_tokens", _MAX_OUTPUT_TOKENS)
         # Overridable so a slower endpoint can raise it; 0 restores litellm's
         # 6000s default for anyone who wants the old behaviour back.
-        self._llm_timeout = float(kwargs.pop("llm_timeout", _LLM_CALL_TIMEOUT_SEC))
+        # 0 means "derive it from the budget"; an explicit kwarg still wins.
+        self._llm_timeout = float(kwargs.pop("llm_timeout", 0) or 0)
         # Whether the model's own reasoning is handed back to it on the next
         # turn. Upstream defaults this to False, which on this model throws
         # away something it was built to keep:
@@ -1202,7 +1239,11 @@ class CruxTerminusAgent(Terminus2):
         # around the truncation retry, so a value written earlier would not
         # survive into the retry -- which is exactly the call most likely to
         # hang.
-        t = getattr(self, "_llm_timeout", _LLM_CALL_TIMEOUT_SEC)
+        t = getattr(self, "_llm_timeout", 0.0)
+        if not t:
+            # The budget is not known until setup() has seen the environment,
+            # so the ceiling is derived here rather than in __init__.
+            t = _llm_timeout_for(getattr(self, "_budget_sec", 0.0))
         if t > 0:
             self._llm_call_kwargs["timeout"] = t
 

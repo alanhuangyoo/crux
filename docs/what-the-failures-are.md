@@ -800,3 +800,60 @@ timeout rate. The comparisons are internally valid — the gate is on both sides
 — but the operating point is a poor one, and `base-crux` is a better control
 that already exists at 89 tasks. `think-clean` and `ft-clean` re-ask the two
 open questions against it, with the two qemu tasks alive for the first time.
+
+## The stall had a message all along
+
+Twenty-one chapters of this file eliminate explanations for the stalls: trials
+that stop early and hold a slot for an hour. Ten causes ruled out, cause
+unknown, priced instead of explained. Two tasks — `regex-chess` and
+`adaptive-rejection-sampler` — were written down as never solving and given a
+reduced budget on that basis.
+
+The two clean arms report it in one line:
+
+    litellm.Timeout: APITimeoutError - Request timed out.
+    timeout value=600.0, time taken=1801.36 seconds
+
+Three attempts of 600 seconds. **The stall is this project's own constant.**
+
+`_LLM_CALL_TIMEOUT_SEC = 600` was set against a 900-second budget, where it
+bounds a hung request to two thirds of a trial — litellm's own default is 6000s
+and harbor never overrides it, so some ceiling was needed. Every run since has
+used an 8x budget, where the same number is 8% of the trial. It stopped
+bounding hangs and started cutting work.
+
+The distribution says how narrow the cut is. Across 9,253 inter-step gaps in
+two 89-task runs, 99.8% are under 600 seconds. But the five tasks that stall —
+`write-compressor`, `circuit-fibsqrt`, `regex-chess`, `dna-assembly`,
+`adaptive-rejection-sampler` — spend 20-30% of their steps above it. These are
+the tasks whose turns run to 20,000 completion tokens; at the throughput 30
+concurrent containers leave, that is ten to thirty minutes of generation. The
+cut is not broad. It is aimed exactly at the tasks that were then recorded as
+unsolvable.
+
+What the trial sees afterwards is `service "main" is not running`: the timeout
+kills the call, the call kills the trial, and by the time the agent's next
+keystroke goes out the container is gone. That message is the one piece of
+positive evidence the stall investigation never had — every earlier finding was
+an elimination.
+
+The cost, measured on the two arms: eight stalled trials, 719 minutes of
+agent execution, **12 slot-hours**, on the same five tasks both times.
+
+The fix scales the ceiling to the budget — a quarter of the trial, floored at
+the old 600 and capped at 1800 — so a hang is still bounded and a ten-minute
+generation is no longer thrown away. At 8x that is 1800 seconds, which is one
+attempt longer than the 1801-second turn that killed `regex-chess`.
+
+### What this reverses
+
+"`regex-chess` 0/4 and `adaptive-rejection-sampler` 0/6 have never solved, so
+they get a x2 budget in a separate job rather than x8" — that was in this file
+as a decision made after ten causes were ruled out. It priced a constant of my
+own as a property of the tasks. Both tasks go back into the normal pool.
+
+It is the third defect this week with the same shape: a value that was correct
+where it was chosen, carried unchanged into a regime where it is wrong, and
+recorded as a fact about the world. tmux's `-e`, `compare()`'s denominator,
+this. In all three the record of the failure said nothing — `Error: None`, a
+mean over the wrong set, a task that simply never solves.
