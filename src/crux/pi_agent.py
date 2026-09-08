@@ -20,6 +20,8 @@ point, not by patching harbor.
 
 from __future__ import annotations
 
+import logging
+import os
 import shlex
 import tempfile
 from pathlib import Path
@@ -27,12 +29,21 @@ from pathlib import Path
 from harbor.agents.installed.base import CliFlag
 from harbor.agents.installed.pi import Pi
 from harbor.environments.base import BaseEnvironment
+from typing_extensions import override
 
 from crux.prompts import build_sections
+
+logger = logging.getLogger(__name__)
 
 # Where the sections land inside the environment. pi reads the file at startup,
 # so it has to exist before the agent command runs.
 _REMOTE_PROMPT_PATH = "/tmp/crux-sections.md"
+
+# A prebuilt $HOME/.nvm holding node and pi, so a trial does not have to reach
+# the network to get its agent. Built once with `crux bake-pi`; see
+# `_install_offline` for what it is worth.
+_PI_BUNDLE = os.environ.get("CRUX_PI_BUNDLE", "/scratch/crux/pi-nvm.tar.gz")
+_REMOTE_BUNDLE = "/tmp/pi-nvm.tar.gz"
 
 # The submit section directs the model through `crux submit`, a tool that only
 # exists inside crux's own image, so it is off by default here.
@@ -86,6 +97,56 @@ class CruxPiAgent(Pi):
             await environment.upload_file(local, _REMOTE_PROMPT_PATH)
         finally:
             local.unlink(missing_ok=True)
+
+    @override
+    async def install(self, environment: BaseEnvironment) -> None:
+        """Unpack a prebuilt node+pi instead of fetching one per trial.
+
+        Upstream installs the agent from scratch in every container:
+
+            curl raw.githubusercontent.com/nvm-sh/nvm/.../install.sh | bash
+            nvm install 22
+            npm install -g @earendil-works/pi-coding-agent@latest
+
+        Three network fetches per trial, under `set -euo pipefail`, at whatever
+        concurrency the run uses. Any one of them failing raises
+        `NonZeroAgentExitCodeError` before the agent has run, and the trial is
+        scored zero.
+
+        Measured on Terminal-Bench 2.1: **24 of pi's 89 trials died here**, all
+        of them in `curl ... nvm/install.sh`, none with a single tool call
+        recorded. That is 27% of the benchmark decided by a download, and it is
+        why pi's headline 53.9% was not a number about pi.
+
+        The bundle is the same install, done once. If it is missing the
+        network path still runs, because a missing file should cost a slower
+        setup and not the run.
+        """
+        bundle = Path(_PI_BUNDLE)
+        if not bundle.is_file():
+            logger.warning(
+                "pi bundle %s not found; falling back to the per-trial network "
+                "install that loses ~27%% of trials", bundle,
+            )
+            await super().install(environment)
+            return
+
+        await environment.upload_file(source_path=bundle, target_path=_REMOTE_BUNDLE)
+        result = await environment.exec(
+            "set -eu; "
+            f"tar xzf {_REMOTE_BUNDLE} -C \"$HOME\"; "
+            f"rm -f {_REMOTE_BUNDLE}; "
+            '. "$HOME/.nvm/nvm.sh"; '
+            "pi --version"
+        )
+        out = (getattr(result, "stdout", "") or "") + (getattr(result, "stderr", "") or "")
+        if getattr(result, "return_code", 1) != 0:
+            # Say what the bundle did before falling back, so a broken bundle is
+            # distinguishable from a missing one.
+            logger.warning("pi bundle failed to unpack (%s); falling back", out.strip()[:200])
+            await super().install(environment)
+            return
+        logger.info("pi installed from bundle: %s", out.strip().splitlines()[-1:] or "?")
 
     def build_cli_flags(self) -> str:
         flags = super().build_cli_flags()
