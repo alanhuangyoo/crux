@@ -645,3 +645,31 @@ def test_the_diff_names_which_side_broke(tmp_path):
     r = compare(base, cand)
     assert r["broke_setup"] == ["qemu"]
     assert r["broke_setup_side"]["qemu"] == "baseline"
+
+
+def test_a_cross_scaffold_diff_says_process_metrics_do_not_carry():
+    """The mistake this project made three times in one day.
+
+    A claude-code trajectory step is a tool call; a crux step is a model turn
+    carrying 1.85 shell commands. Reading "221 steps against 16" off those two
+    units produced a 14x claim where the honest figure was 3.1x -- and model
+    turns, the axis that costs wall-clock, run the other way entirely.
+    """
+    from pathlib import Path
+
+    from crux.analysis import Job, Trial, compare
+
+    a = Job(path=Path("/tmp/a"), trials=[Trial(task="x", reward=1.0, agent="claude-code")])
+    b = Job(path=Path("/tmp/b"), trials=[Trial(task="x", reward=1.0,
+                                               agent="crux.terminus_agent:CruxTerminusAgent")])
+    assert compare(a, b)["cross_agent"] is True
+
+
+def test_same_scaffold_carries_no_such_warning():
+    from pathlib import Path
+
+    from crux.analysis import Job, Trial, compare
+
+    a = Job(path=Path("/tmp/a"), trials=[Trial(task="x", reward=1.0, agent="crux")])
+    b = Job(path=Path("/tmp/b"), trials=[Trial(task="x", reward=0.0, agent="crux")])
+    assert compare(a, b)["cross_agent"] is False
