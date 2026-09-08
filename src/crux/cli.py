@@ -598,6 +598,18 @@ def cmd_report(args) -> int:
         # What it cost, beside what it bought. A change that does what it
         # promised at five times the compute reads identically to one that did
         # nothing, if only the score is printed -- and it is the worse result.
+        # Where each side's non-solves went. Every misreading in this project
+        # came from an infrastructure failure being read as an agent one --
+        # 114 trials in the corpus, then pi's 16 -- and a delta printed without
+        # this is a number whose provenance the reader cannot check.
+        ba, ca = job.by_category(), other.by_category()
+        keys = [k for k in ("solved", "environment", "agent_timeout", "killed",
+                            "context_exceeded", "format_error", "false_completion",
+                            "out_of_turns") if ba.get(k) or ca.get(k)]
+        if keys:
+            print("\n  category            baseline  candidate")
+            for k in keys:
+                print(f"  {k:<20}{ba.get(k, 0):>8}{ca.get(k, 0):>11}")
         bi, bo = job.median_tokens()
         ci, co = other.median_tokens()
         if bi and ci:

@@ -438,3 +438,40 @@ def test_a_diff_prints_what_its_task_count_can_resolve(capsys, tmp_path, monkeyp
     out = capsys.readouterr().out
     assert "sign test" in out
     assert "resolve about" in out
+
+
+def test_a_diff_shows_where_each_side_failed(capsys, tmp_path):
+    """Every misreading in this project came from a failure of the wrong kind.
+
+    114 trials carrying endpoint 500s and setup timeouts were read as the agent
+    running out of steps; pi's 16 installer deaths were read as pi failing the
+    task. A delta printed without this breakdown is a number whose provenance
+    the reader cannot check.
+    """
+    import json
+
+    import crux.cli as cli
+
+    def make(name, rows):
+        d = tmp_path / name / "2026-09-08__00-00-00"
+        for task, (reward, exc) in rows.items():
+            t = d / f"{task}__h"
+            t.mkdir(parents=True)
+            payload = {
+                "task_name": f"terminal-bench/{task}",
+                "verifier_result": {"rewards": {"reward": reward}},
+                "agent_result": {"n_output_tokens": 10, "n_input_tokens": 100},
+            }
+            if exc:
+                payload["exception_info"] = {"exception_type": exc}
+            (t / "result.json").write_text(json.dumps(payload))
+        (d / "result.json").write_text(json.dumps({"n_total_trials": len(rows)}))
+        return str(tmp_path / name)
+
+    a = make("base", {"x": (1.0, None), "y": (0.0, None), "z": (1.0, None)})
+    b = make("cand", {"x": (1.0, None), "y": (0.0, None),
+                      "z": (None, "InternalServerError")})
+    assert cli.cmd_report(cli.build_parser().parse_args(["report", a, b])) == 0
+    out = capsys.readouterr().out
+    assert "category" in out
+    assert "environment" in out
