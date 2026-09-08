@@ -568,6 +568,71 @@ describe("AgentHarness tools", () => {
 	});
 
 	describe("bash", () => {
+		it("bounds a command the model did not bound", async () => {
+			// The parameter is optional and models mostly leave it out: across
+			// 6,100 bash calls on one benchmark corpus, 85.7% carried no timeout.
+			// A command that then fails to return had no bound at all, and 13 of
+			// 401 trials ended on a tool call that started and never finished,
+			// spread across ten different tasks.
+			const seen: (number | undefined)[] = [];
+			const env = {
+				cwd: "/tmp",
+				exec: async (_cmd: string, options: ShellExecOptions): Promise<Result<ShellExecResult, ExecutionError>> => {
+					seen.push(options.timeout);
+					return ok({ exitCode: 0, truncation: { truncated: false } } as unknown as ShellExecResult);
+				},
+			};
+			await createBashTool().execute(
+				"bash-timeout-default",
+				{ command: "sleep 1" },
+				noUpdate,
+				{ env } as never,
+				invocation,
+				BACKGROUND_CONTEXT,
+			);
+			expect(seen[0]).toBe(120);
+		});
+
+		it("keeps a timeout the model asked for", async () => {
+			const seen: (number | undefined)[] = [];
+			const env = {
+				cwd: "/tmp",
+				exec: async (_cmd: string, options: ShellExecOptions): Promise<Result<ShellExecResult, ExecutionError>> => {
+					seen.push(options.timeout);
+					return ok({ exitCode: 0, truncation: { truncated: false } } as unknown as ShellExecResult);
+				},
+			};
+			await createBashTool().execute(
+				"bash-timeout-explicit",
+				{ command: "make -j8", timeout: 900 },
+				noUpdate,
+				{ env } as never,
+				invocation,
+				BACKGROUND_CONTEXT,
+			);
+			expect(seen[0]).toBe(900);
+		});
+
+		it("names the timeout it actually used when one fires", async () => {
+			// Reporting the model's undefined here would say "timed out after
+			// undefined seconds", which tells it nothing to react to.
+			const env = {
+				cwd: "/tmp",
+				exec: async (): Promise<Result<ShellExecResult, ExecutionError>> =>
+					err({ code: "timeout", message: "timed out" } as unknown as ExecutionError),
+			};
+			await expect(
+				createBashTool().execute(
+					"bash-timeout-message",
+					{ command: "sleep 999" },
+					noUpdate,
+					{ env } as never,
+					invocation,
+					BACKGROUND_CONTEXT,
+				),
+			).rejects.toThrow(/timed out after 120 seconds/);
+		});
+
 		it("executes commands and combines stdout and stderr", async () => {
 			const context = createContext();
 			const result = await createBashTool().execute(

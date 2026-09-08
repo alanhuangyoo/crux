@@ -8,9 +8,30 @@ import type { ExecutionToolContext } from "./tool-context.ts";
 const MAX_TIMEOUT_SECONDS = 2_147_483_647 / 1000;
 const BASH_CHECKPOINT_INTERVAL_MS = 2_000;
 
+/**
+ * How long a command runs when the model does not say.
+ *
+ * The parameter is optional and documented as having no default, and models
+ * mostly leave it out: across 6,100 bash calls on one benchmark corpus, 85.7%
+ * carried no timeout. A command that then fails to return has no bound at all
+ * except whatever kills the process from outside, and 13 of 401 trials ended
+ * that way -- on a tool call that started and never finished, spread across ten
+ * different tasks, so not a property of any one of them.
+ *
+ * Claude Code's shell tool uses a tiered policy for the same problem: the
+ * model's timeout when given, otherwise a 120s default, with 600s as the
+ * ceiling a caller may raise it to. This adopts the default; `MAX_TIMEOUT_SECONDS`
+ * already serves as the ceiling here, and pi's `env.exec` reports a timeout as
+ * a normal tool error the model can read and react to, which is the behaviour
+ * that makes a default safe to have.
+ */
+const DEFAULT_TIMEOUT_SECONDS = 120;
+
 const bashSchema = Type.Object({
 	command: Type.String({ description: "Bash command to execute" }),
-	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
+	timeout: Type.Optional(
+		Type.Number({ description: `Timeout in seconds (optional, default ${DEFAULT_TIMEOUT_SECONDS})` }),
+	),
 });
 
 export type BashToolInput = Static<typeof bashSchema>;
@@ -54,10 +75,13 @@ export function createBashTool<TContext extends ExecutionToolContext = Execution
 	return {
 		name: "bash",
 		label: "bash",
-		description: `Execute a bash command in the current working directory. Returns combined stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
+		description: `Execute a bash command in the current working directory. Returns combined stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Commands are stopped after ${DEFAULT_TIMEOUT_SECONDS}s unless you pass a longer timeout in seconds.`,
 		parameters: bashSchema,
 		async execute(_toolCallId, { command, timeout }, onUpdate, toolContext, _invocation, context) {
 			validateTimeout(timeout);
+			// A command the model did not bound is still bounded; see
+			// DEFAULT_TIMEOUT_SECONDS.
+			const effectiveTimeout = timeout ?? DEFAULT_TIMEOUT_SECONDS;
 			const { env } = toolContext;
 			const execution: BashExecution = {
 				command: options?.commandPrefix ? `${options.commandPrefix}\n${command}` : command,
@@ -78,7 +102,7 @@ export function createBashTool<TContext extends ExecutionToolContext = Execution
 					cwd: execution.cwd,
 					env: execution.env,
 					inheritEnv: execution.inheritEnv,
-					timeout,
+					timeout: effectiveTimeout,
 					capture: {
 						limits: { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES, retain: "tail" },
 						spill: true,
@@ -128,7 +152,7 @@ export function createBashTool<TContext extends ExecutionToolContext = Execution
 			if (!result.ok) {
 				const status =
 					result.error.code === "timeout"
-						? `Command timed out after ${timeout} seconds`
+						? `Command timed out after ${effectiveTimeout} seconds`
 						: result.error.code === "aborted"
 							? "Command aborted"
 							: result.error.message;
