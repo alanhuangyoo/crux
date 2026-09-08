@@ -1609,28 +1609,39 @@ describe("agentLoopContinue with AgentMessage", () => {
 	});
 });
 
-describe("turns that produce neither a tool call nor an answer", () => {
-	// The loop ends when an assistant message carries no tool calls, which is
-	// right for a message that answers and wrong for two kinds of turn that
-	// answer nothing. Measured on Terminal-Bench 2.1 against a 27B reasoning
-	// model: three of pi's twenty-five failed trials ended having taken zero
-	// actions. `regex-chess` spent 65,536 output tokens -- 199,246 characters,
-	// entirely thinking, stopReason "length" -- and was recorded as settled.
+describe("a turn cut off at the output token limit", () => {
+	// Two phases, in the order Claude Code's loop uses them
+	// (`max_output_tokens_escalate`, then `max_output_tokens_recovery`): raise
+	// the ceiling and retry silently first, because a truncated turn usually
+	// means the model needed more room rather than that it did anything wrong;
+	// only tell it once the raised ceiling is used up too, and bound the
+	// telling.
+	//
+	// pi needs this because the loop ends when a message carries no tool calls,
+	// which is right for a message that answers and wrong for one cut off
+	// mid-sentence. Measured on Terminal-Bench 2.1 with a 27B reasoning model:
+	// regex-chess spent 65,536 output tokens -- 199,246 characters, entirely
+	// thinking, stopReason "length" -- and the run was recorded as settled
+	// having taken no action at all.
 
-	function runWith(messages: AssistantMessage[]) {
+	function runWith(replies: AssistantMessage[], configPatch: Partial<AgentLoopConfig> = {}) {
 		let call = 0;
-		const streamFn = () => {
+		const seenMaxTokens: (number | undefined)[] = [];
+		const streamFn = (_model: unknown, _ctx: unknown, options: any) => {
+			seenMaxTokens.push(options?.maxTokens);
 			const stream = new MockAssistantStream();
-			const message = messages[Math.min(call, messages.length - 1)]!;
+			const message = replies[Math.min(call, replies.length - 1)]!;
 			call++;
-			queueMicrotask(() => {
-				stream.push({ type: "done", reason: "stop", message });
-			});
+			queueMicrotask(() => stream.push({ type: "done", reason: "stop", message }));
 			return stream;
 		};
 		const context: AgentContext = { systemPrompt: "", messages: [], tools: [] };
-		const config: AgentLoopConfig = { model: createModel(), convertToLlm: identityConverter };
-		return { streamFn, context, config, calls: () => call };
+		const config: AgentLoopConfig = { model: createModel(), convertToLlm: identityConverter, ...configPatch };
+		return {
+			calls: () => call,
+			seenMaxTokens,
+			stream: agentLoop([createUserMessage("go")], context, config, undefined, streamFn as any),
+		};
 	}
 
 	async function drain(stream: ReturnType<typeof agentLoop>) {
@@ -1639,50 +1650,59 @@ describe("turns that produce neither a tool call nor an answer", () => {
 		return events;
 	}
 
-	it("hands back a turn cut off at the output token limit", async () => {
-		// No tool call to attach the existing truncation notice to, so before this
-		// the guard never fired and the run ended on a sentence stopped mid-word.
-		const truncated = createAssistantMessage([{ type: "thinking", thinking: "still going" }], "length");
-		const answered = createAssistantMessage([{ type: "text", text: "done" }]);
-		const h = runWith([truncated, answered]);
-		const events = await drain(agentLoop([createUserMessage("go")], h.context, h.config, undefined, h.streamFn));
+	const truncated = () => createAssistantMessage([{ type: "thinking", thinking: "still going" }], "length");
+	const answered = () => createAssistantMessage([{ type: "text", text: "done" }]);
 
+	it("raises the ceiling and retries without saying anything", async () => {
+		const h = runWith([truncated(), answered()]);
+		const events = await drain(h.stream);
 		expect(h.calls()).toBe(2);
+		// The retry asks for the model's own ceiling...
+		expect(h.seenMaxTokens[1]).toBe(createModel().maxTokens);
+		// ...and the conversation gains nothing: no scolding for needing room.
 		const injected = events.filter((e) => e.type === "message_start" && (e as any).message?.role === "user");
-		expect(JSON.stringify(injected)).toContain("output token limit");
+		expect(JSON.stringify(injected)).not.toContain("Output token limit");
 	});
 
-	it("hands back a turn that is only reasoning", async () => {
-		const thinkingOnly = createAssistantMessage([{ type: "thinking", thinking: "hmm" }]);
-		const answered = createAssistantMessage([{ type: "text", text: "done" }]);
-		const h = runWith([thinkingOnly, answered]);
-		const events = await drain(agentLoop([createUserMessage("go")], h.context, h.config, undefined, h.streamFn));
+	it("tells the model only after the raised ceiling is used up too", async () => {
+		const h = runWith([truncated(), truncated(), answered()]);
+		const events = await drain(h.stream);
+		expect(h.calls()).toBe(3);
+		expect(JSON.stringify(events)).toContain("Output token limit hit");
+		expect(JSON.stringify(events)).toContain("Resume directly");
+	});
 
+	it("stops telling it after a bounded number of tries", async () => {
+		// Escalation once, then MAX_OUTPUT_TOKENS_RECOVERY_LIMIT notices.
+		const h = runWith([truncated()]);
+		await drain(h.stream);
+		expect(h.calls()).toBe(5);
+	});
+
+	it("goes straight to the notice when the ceiling is already asked for", async () => {
+		const h = runWith([truncated(), answered()], { maxTokens: createModel().maxTokens });
+		const events = await drain(h.stream);
 		expect(h.calls()).toBe(2);
-		expect(JSON.stringify(events)).toContain("only reasoning");
+		expect(JSON.stringify(events)).toContain("Output token limit hit");
 	});
 
-	it("lets a plain answer settle, which is the common case", async () => {
-		// The guard must not turn every normal reply into another request.
-		const h = runWith([createAssistantMessage([{ type: "text", text: "The answer is 4." }])]);
-		await drain(agentLoop([createUserMessage("2+2?")], h.context, h.config, undefined, h.streamFn));
+	it("leaves a normal answer alone, which is the common case", async () => {
+		const h = runWith([answered()]);
+		await drain(h.stream);
 		expect(h.calls()).toBe(1);
 	});
 
-	it("gives up rather than looping on a model that keeps answering nothing", async () => {
-		// Each retry costs a full request; a model that answers the nudge with
-		// another empty turn is not going to be argued out of it.
-		const h = runWith([createAssistantMessage([{ type: "thinking", thinking: "hmm" }])]);
-		await drain(agentLoop([createUserMessage("go")], h.context, h.config, undefined, h.streamFn));
-		expect(h.calls()).toBe(4); // the first turn plus MAX_UNACTIONABLE_TURN_RECOVERIES
-	});
-
-	it("counts consecutively, so a good turn clears the budget", async () => {
-		const empty = createAssistantMessage([{ type: "thinking", thinking: "hmm" }]);
-		const answered = createAssistantMessage([{ type: "text", text: "ok" }]);
-		const h = runWith([empty, empty, answered]);
-		await drain(agentLoop([createUserMessage("go")], h.context, h.config, undefined, h.streamFn));
-		expect(h.calls()).toBe(3);
+	it("does not touch a truncated turn that did call tools", async () => {
+		// That path already exists: the calls are failed with a notice telling
+		// the model to reissue them with complete arguments.
+		const withCall = createAssistantMessage(
+			[{ type: "toolCall", id: "c1", name: "nope", arguments: {} } as any],
+			"length",
+		);
+		const h = runWith([withCall, answered()]);
+		const events = await drain(h.stream);
+		expect(JSON.stringify(events)).toContain("output token limit");
+		expect(h.seenMaxTokens[1]).toBeUndefined();
 	});
 });
 

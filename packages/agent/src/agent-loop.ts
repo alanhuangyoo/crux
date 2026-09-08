@@ -26,13 +26,6 @@ import type {
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 
 /**
- * How many times in a row the loop will hand back an unactionable turn before
- * letting the run end. A model that answers the nudge with another empty turn
- * is not going to be argued out of it, and each attempt costs a full request.
- */
-const MAX_UNACTIONABLE_TURN_RECOVERIES = 3;
-
-/**
  * How long before the deadline the agent is told that time is running out.
  * One turn's worth: long enough to write down what it has, short enough that
  * it does not spend the rest of the run planning for the end.
@@ -63,45 +56,47 @@ function deadlineNotice(remainingMs: number): string {
 }
 
 /**
- * Why a turn that made no tool call cannot be treated as the agent finishing,
- * or `undefined` when it can.
+ * Recovery for a turn cut off at the output token limit, in the two phases
+ * Claude Code's loop uses (`max_output_tokens_escalate`, then
+ * `max_output_tokens_recovery`).
  *
- * The loop ends when an assistant message carries no tool calls, which is right
- * for a message that answers. It is wrong for two kinds of turn that answer
- * nothing:
+ * The order matters and is not obvious. A truncated turn usually means the
+ * model needed more room, not that it did anything wrong, so the first
+ * response is to **raise the ceiling and retry silently** -- no message, no
+ * scolding. Only if it truncates again with the ceiling raised is the model
+ * told, and that telling is bounded.
  *
- * **Cut off at the token limit.** `stopReason === "length"` means the model was
- * still talking. The loop already knows this is dangerous -- when such a message
- * *does* carry tool calls it refuses to run them and tells the model to reissue
- * with complete arguments. With no tool calls there is nothing to attach that to,
- * so the guard never fires and the run ends on a sentence that stops mid-word.
- *
- * **Reasoning only.** A message whose content is thinking blocks and nothing
- * else has produced no answer and no action. On a reasoning model this is a
- * normal failure of a long thought, not a decision to stop.
- *
- * Both were measured on Terminal-Bench 2.1 with a 27B reasoning model: three of
- * pi's twenty-five failed trials ended this way, having taken zero actions.
- * `regex-chess` spent 65,536 output tokens -- 199,246 characters, entirely
- * thinking, `stopReason: "length"` -- and the run was recorded as settled.
+ * Why pi needs it at all: the loop ends when an assistant message carries no
+ * tool calls, which is right for a message that answers and wrong for one that
+ * was cut off mid-sentence. The loop already knows `stopReason === "length"`
+ * is dangerous -- when such a message *does* carry tool calls it refuses to run
+ * them and asks for a reissue -- but with no tool calls there is nothing to
+ * attach that notice to, so the guard never fires and the run ends on a
+ * sentence that stops mid-word. Measured on Terminal-Bench 2.1 with a 27B
+ * reasoning model: `regex-chess` spent 65,536 output tokens, 199,246
+ * characters, entirely thinking, `stopReason: "length"`, and was recorded as
+ * settled having taken no action at all.
  */
-function unactionableTurnReason(message: AssistantMessage): string | undefined {
-	const hasText = message.content.some((c) => c.type === "text" && c.text.trim().length > 0);
-	if (message.stopReason === "length") {
-		return (
-			"Your last response hit the output token limit before it produced a tool call" +
-			(hasText ? " or a complete answer" : "") +
-			". Nothing was executed. Answer again, and this time reach a tool call or a " +
-			"final answer early -- keep the reasoning short enough to fit."
-		);
-	}
-	if (!hasText) {
-		return (
-			"Your last response contained only reasoning: no tool call and no answer. " +
-			"Nothing was executed. Take the next concrete action, or state the final answer."
-		);
-	}
-	return undefined;
+const MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3;
+
+/** What the model is told once the raised ceiling has also been used up. */
+const OUTPUT_LIMIT_RECOVERY_NOTICE =
+	"Output token limit hit. Resume directly from where you stopped -- do not " +
+	"start over, and reach a tool call or a final answer before the limit.";
+
+/**
+ * The escalated ceiling for a retry, or undefined when there is no more room.
+ *
+ * The model's own `maxTokens` is the ceiling; escalating past it would only
+ * produce a provider error. Escalation therefore happens at most once, and a
+ * config already at the ceiling goes straight to the recovery phase.
+ */
+function escalatedMaxTokens(config: AgentLoopConfig): number | undefined {
+	const ceiling = config.model.maxTokens;
+	if (!ceiling || ceiling <= 0) return undefined;
+	const current = config.maxTokens;
+	if (current !== undefined && current >= ceiling) return undefined;
+	return ceiling;
 }
 
 /**
@@ -245,7 +240,12 @@ async function runLoop(
 	let lastCompletedTurn: PrepareNextTurnContext | undefined;
 	// Consecutive turns handed back for producing neither a tool call nor an
 	// answer. Reset by any turn that does one of those.
-	let unactionableTurns = 0;
+	// Two-phase recovery for a turn cut off at the output limit; see
+	// `escalatedMaxTokens`. `escalated` records that the ceiling has been
+	// raised, so a second truncation moves on to telling the model instead of
+	// raising it again.
+	let escalated = false;
+	let outputLimitRecoveries = 0;
 	// Whether the agent has been told the deadline is close. Once only: a
 	// warning repeated every turn becomes the thing it is reasoning about.
 	let deadlineWarned = false;
@@ -329,15 +329,22 @@ async function runLoop(
 
 			const toolResults: ToolResultMessage[] = [];
 			hasMoreToolCalls = false;
-			// A turn that made no tool call usually means the agent is done. Two
-			// kinds of turn look like that and are not: see `unactionableTurnReason`.
+			// A turn with no tool call usually means the agent is done. One kind
+			// looks like that and is not: a turn cut off at the output limit,
+			// which stopped mid-sentence. Raise the ceiling and retry silently
+			// first; only tell the model once the raised ceiling is used up too.
 			let recovery: string | undefined;
-			if (toolCalls.length === 0) {
-				recovery =
-					unactionableTurns < MAX_UNACTIONABLE_TURN_RECOVERIES ? unactionableTurnReason(message) : undefined;
-				unactionableTurns = recovery ? unactionableTurns + 1 : 0;
-			} else {
-				unactionableTurns = 0;
+			let retrySilently = false;
+			if (toolCalls.length === 0 && message.stopReason === "length") {
+				const ceiling = escalated ? undefined : escalatedMaxTokens(config);
+				if (ceiling !== undefined) {
+					escalated = true;
+					retrySilently = true;
+					config = { ...config, maxTokens: ceiling };
+				} else if (outputLimitRecoveries < MAX_OUTPUT_TOKENS_RECOVERY_LIMIT) {
+					outputLimitRecoveries += 1;
+					recovery = OUTPUT_LIMIT_RECOVERY_NOTICE;
+				}
 			}
 			if (toolCalls.length > 0) {
 				// A "length" stop means the output was cut off by the token limit, so
@@ -371,6 +378,11 @@ async function runLoop(
 			}
 
 			pendingMessages = (await config.getSteeringMessages?.()) || [];
+			// The escalation phase adds nothing to the conversation -- the point is
+			// that the model gets more room, not that it is told off for needing it.
+			if (retrySilently) {
+				hasMoreToolCalls = true;
+			}
 			// Appended after the steering poll, which reassigns the array. Delivered
 			// as a user message because the truncated-tool-call path this mirrors
 			// speaks through a tool result, and here there is no tool call to answer.
