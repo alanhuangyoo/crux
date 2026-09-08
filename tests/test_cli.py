@@ -384,23 +384,25 @@ def test_repl_is_a_subcommand_with_the_same_approval_default():
     assert parse(["solve", "x"]).approval == "dangerous"
 
 
-def test_it_names_the_tasks_that_burn_their_budget(capsys, monkeypatch):
-    """Two tasks have never solved in 10 scored attempts and stall on most.
+def test_no_task_is_capped_without_a_run_under_the_fixed_ceiling(capsys, monkeypatch):
+    """The list is empty, and emptiness is the assertion.
 
-    regex-chess 0 of 4, adaptive-rejection-sampler 0 of 6, both stalling at 3-6
-    steps and then holding a concurrency slot until the agent budget runs out.
-    Ten explanations for the stall have been checked and eliminated, so this is
-    loss control rather than a fix -- and it is a note rather than a silent
-    exclusion, because which tasks are worth their wall-clock is a judgement
-    about one corpus.
+    It held regex-chess (0 of 4) and adaptive-rejection-sampler (0 of 6), both
+    stalling at 3-6 steps and holding a slot for two hours. Ten explanations
+    had been eliminated and the cause called unknown, so the cap was loss
+    control. The cause was this repository's own 600-second per-call ceiling,
+    set against a 900s budget and carried into an 8x one:
+
+        litellm.Timeout: timeout value=600.0, time taken=1801.36 seconds
+
+    "Never solves" was a measurement of that constant. Re-admitting a task
+    needs a run under the fixed ceiling, which is the standard the old entries
+    were admitted under and did not meet.
     """
     from crux.cli import STALL_CAP_MULTIPLIER, stall_capped_for
 
-    capped = stall_capped_for("terminal-bench/terminal-bench-2-1")
-    assert "regex-chess" in capped
-    assert "adaptive-rejection-sampler" in capped
-    # tasks that stall but do solve must not be here
-    for t in ("write-compressor", "circuit-fibsqrt", "dna-assembly"):
-        assert t not in capped
+    assert stall_capped_for("terminal-bench/terminal-bench-2-1") == ()
     assert stall_capped_for("swe-bench/swe-bench-verified") == ()
+    # The mechanism survives the list: a task that really does burn its budget
+    # for nothing is still a category worth having.
     assert 0 < STALL_CAP_MULTIPLIER < 8
