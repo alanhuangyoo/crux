@@ -1031,3 +1031,48 @@ deficit against claude-code, and it was almost all mine.
 
 `ft-fixed` is the first run to carry all three fixes, and `swe-stall` re-runs
 the ten django trials that the ceiling took.
+
+## Three readings of the same gap, and the third reverses the first two
+
+The one structural difference that survived every other explanation was that
+crux "grinds": more actions, more tokens, worse results on the hard tasks. It
+went through three measurements.
+
+**First**, trajectory steps: `extract-elf` 221 against 16, `mailman` 512
+against 61 — up to 14x. That comparison was meaningless. A claude-code
+trajectory step *is* a tool call (174 steps, 174 tool calls; medians 31 and 33),
+while a crux step is a model turn carrying 1.85 shell commands. Two different
+units.
+
+**Second**, in comparable units — crux's real shell commands against
+claude-code's tool calls, over the nine tasks crux times out on:
+
+    gpt2-codegolf        103 :  10    10.3x
+    make-mips-interp     430 :  65     6.6x
+    extract-elf          122 :  19     6.4x
+    feal-linear          267 :  84     3.2x
+    extract-moves        325 : 174     1.9x
+                                median 3.1x
+
+Real, and much smaller than 14x.
+
+**Third**, model turns — the axis that costs wall-clock and money:
+
+                   median   total over 89
+    crux              46         5,906
+    claude-code       80        10,190
+
+    crux uses more turns on 17 of 89 tasks
+
+**claude-code takes 1.7x the model turns.** Input tokens per trial go the same
+way: 1.09M for crux against 1.69M. So crux is not the inefficient one. It runs
+fewer, denser turns; claude-code runs many more turns, most of them text, with
+a heavily packed Bash call every third one.
+
+The gap between the two — −1.18%, p=1.000 — is not explained by grinding,
+because there is no grinding to explain it with. Three measurements of one
+claim, and the third contradicts the first two.
+
+The lesson is one this file already records and I repeated anyway: **a process
+metric compared across two agents means nothing until you have checked what one
+unit is on each side.** "Steps" was a word that meant different things.
