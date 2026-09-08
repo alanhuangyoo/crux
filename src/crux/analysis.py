@@ -59,6 +59,22 @@ ENVIRONMENT_EXCEPTIONS = {
     "VerifierTimeoutError",
     "CancelledError",
     "DockerException",
+    # The trial never got a fair run: the box, the harness or the endpoint
+    # failed around it. Counted as zero for a leaderboard, the same as anything
+    # else that does not pass -- but never attributed to the agent when two
+    # arms are compared, because which arm they land on is chance.
+    #
+    # Corpus counts for the ones added here: 89 InternalServerError from the
+    # model endpoint, 9 AgentSetupTimeoutError, 7 EnvironmentStartTimeoutError,
+    # 4 RewardFileNotFoundError, 3 AddTestsDirError, 2 RateLimitError. All 114
+    # were falling through to `out_of_turns` -- read as the agent running out
+    # of steps, which is a statement about the agent and the opposite of true.
+    "InternalServerError",
+    "RateLimitError",
+    "AgentSetupTimeoutError",
+    "EnvironmentStartTimeoutError",
+    "AddTestsDirError",
+    "RewardFileNotFoundError",
 }
 
 

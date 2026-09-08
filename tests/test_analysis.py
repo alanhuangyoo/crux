@@ -396,3 +396,36 @@ def test_a_run_whose_config_cannot_be_read_is_treated_as_complete(tmp_path):
     base = _job_at(tmp_path, "p", [_trial("a", 1.0)])
     cand = _job_at(tmp_path, "q", [_trial("a", 1.0)])
     assert compare(base, cand)["partial"] == []
+
+
+def test_the_endpoint_failing_is_not_the_agent_running_out_of_turns():
+    """114 trials in the corpus were read as the agent giving up.
+
+    An endpoint 500, a setup timeout, a missing reward file -- none of them are
+    statements about the agent, and which arm they land on is chance. They
+    still score zero, as a leaderboard scores them; they must not be
+    attributable in a paired comparison.
+    """
+    from crux.analysis import Trial
+
+    for exc in ("InternalServerError", "RateLimitError", "AgentSetupTimeoutError",
+                "EnvironmentStartTimeoutError", "AddTestsDirError",
+                "RewardFileNotFoundError"):
+        assert Trial(task="t", reward=None, exception=exc).category == "environment"
+
+
+def test_a_real_agent_failure_is_still_the_agents():
+    from crux.analysis import Trial
+
+    assert Trial(task="t", reward=0.0, exception="AgentTimeoutError").category == "agent_timeout"
+    assert Trial(task="t", reward=0.0, exit_reason="completed").category == "false_completion"
+
+
+def test_an_environment_failure_is_excluded_from_a_paired_diff(tmp_path):
+    from crux.analysis import compare
+
+    base = _job_at(tmp_path, "a", [_trial("x", 1.0)], planned=1)
+    cand = _job_at(tmp_path, "b", [_trial("x", None, exception="InternalServerError")],
+                   planned=1)
+    r = compare(base, cand)
+    assert r["broke_setup"] == ["x"] and r["lost"] == []
