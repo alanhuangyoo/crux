@@ -42,6 +42,12 @@ from harbor.llms.base import LLMResponse
 from harbor.agents.terminus_2.tmux_session import TmuxSession
 from typing_extensions import override
 
+from crux.calibration import (
+    CALIBRATION_MAX_OUTPUT_TOKENS,
+    _LLM_TIMEOUT_MAX_SEC,
+    _LLM_TIMEOUT_MIN_SEC,
+    llm_timeout_for as _llm_timeout_for,
+)
 from crux.prompts import build_terminus_template
 
 # Above this, a wait is worth completing early; below it, upstream's fixed sleep
@@ -302,7 +308,7 @@ executes the code you changed. Then continue.
 # 44k max) while cutting a runaway well before the 262k window. A turn that
 # needs more than this has stopped writing commands and started spiralling --
 # the truncation retry, which drops thinking, is the path that recovers it.
-_MAX_OUTPUT_TOKENS = 32768
+_MAX_OUTPUT_TOKENS = CALIBRATION_MAX_OUTPUT_TOKENS
 
 # A ceiling on one *call*, because litellm's own default is 6000s and harbor
 # never overrides it: a request that hangs would sit there for 100 minutes.
@@ -324,23 +330,10 @@ _MAX_OUTPUT_TOKENS = 32768
 #
 # Scaling to the budget keeps both properties: a hang is still bounded by a
 # quarter of the trial, and a ten-minute generation is no longer thrown away.
-_LLM_TIMEOUT_BUDGET_SHARE = 0.25
-_LLM_TIMEOUT_MIN_SEC = 600.0
-_LLM_TIMEOUT_MAX_SEC = 1800.0
+# The numbers and the derivation live in calibration.py, which imports
+# nothing: the launch-time audit has to be able to check this constant on a
+# bare interpreter, and importing this module pulls in harbor and pydantic.
 _LLM_CALL_TIMEOUT_SEC = _LLM_TIMEOUT_MIN_SEC
-
-
-def _llm_timeout_for(budget_sec: float) -> float:
-    """The per-call ceiling this trial's budget can afford.
-
-    Below the floor the share would be too tight to finish a normal turn; above
-    the cap a hang costs more than it is worth waiting for.
-    """
-    if budget_sec <= 0:
-        return _LLM_TIMEOUT_MIN_SEC
-    share = budget_sec * _LLM_TIMEOUT_BUDGET_SHARE
-    return min(_LLM_TIMEOUT_MAX_SEC, max(_LLM_TIMEOUT_MIN_SEC, share))
-
 
 _STUCK_STEP_THRESHOLD = 0
 

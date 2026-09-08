@@ -267,9 +267,30 @@ def running_harbor_jobs(exclude_pid: int | None = None) -> list[str]:
             continue
         m = re.search(r"--jobs-dir\s+(\S+)", args)
         a = re.search(r"--agent\s+(\S+)", args)
+        # Concurrency is the number that decides whether a neighbour matters:
+        # two jobs is not a problem, ~48 streams on this engine is.
+        n = re.search(r"--n-concurrent\s+(\d+)", args)
         jobs.append(f"pid {pid_s}  agent={a.group(1) if a else '?'}  "
+                    f"n-concurrent={n.group(1) if n else '?'}  "
                     f"jobs-dir={m.group(1) if m else '?'}")
     return jobs
+
+
+def running_concurrency(jobs: list[str] | None = None) -> int:
+    """Containers other harbor jobs are already holding, as best as ps can say.
+
+    An unparseable entry counts as zero rather than guessing: the audit this
+    feeds warns about crossing a measured inflection, and a made-up number
+    would make that warning fire on nothing.
+    """
+    import re
+
+    total = 0
+    for job in jobs if jobs is not None else running_harbor_jobs():
+        m = re.search(r"n-concurrent=(\d+)", job)
+        if m:
+            total += int(m.group(1))
+    return total
 
 def _write_provenance(jobs_dir: str, command: list[str]) -> Path | None:
     """Record what code produced a run, beside the run.
@@ -417,6 +438,22 @@ def cmd_bench(args) -> int:
             f"--agent-timeout-multiplier {STALL_CAP_MULTIPLIER:g}.",
             file=sys.stderr,
         )
+
+    # Every tuned constant in this project was measured in some regime, and
+    # three of them have now been carried into a regime where they were wrong
+    # -- costing two tasks a run, a reversed verdict, and 12 slot-hours. The
+    # audit is here rather than in `doctor` because this is the moment the
+    # regime is chosen, and a warning after the run has started is a finding.
+    from crux.calibration import Run as _CalRun, audit as _audit
+
+    for line in _audit(_CalRun(
+        budget_sec=900.0 * args.agent_timeout_multiplier,
+        model=(args.model or "").split("/")[-1],
+        dataset=args.dataset,
+        concurrent=args.concurrent,
+        other_containers=running_concurrency(others),
+    )):
+        print(f"check  {line}", file=sys.stderr)
 
     src = str(Path(__file__).resolve().parent.parent)
     env = dict(os.environ)
