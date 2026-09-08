@@ -276,15 +276,41 @@ def running_harbor_jobs(exclude_pid: int | None = None) -> list[str]:
     return jobs
 
 
-def running_concurrency(jobs: list[str] | None = None) -> int:
-    """Containers other harbor jobs are already holding, as best as ps can say.
+def live_containers() -> int | None:
+    """Containers actually running, or None if docker cannot be asked.
 
-    An unparseable entry counts as zero rather than guessing: the audit this
-    feeds warns about crossing a measured inflection, and a made-up number
-    would make that warning fire on nothing.
+    Declared concurrency is what a job *may* hold; this is what it holds now,
+    and the two diverge exactly when it matters. Three jobs winding down their
+    last few tasks declare 33 slots while running 16 containers, and an audit
+    reading the declaration refuses a fourth job on capacity that is already
+    free. A warning that is wrong in the direction of "do nothing" still gets
+    ignored, which is the failure mode worth avoiding here.
+    """
+    try:
+        out = subprocess.run(
+            ["docker", "ps", "-q"], capture_output=True, text=True, timeout=15
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return len([ln for ln in out.stdout.splitlines() if ln.strip()])
+
+
+def running_concurrency(jobs: list[str] | None = None) -> int:
+    """Containers other harbor jobs are already holding.
+
+    Prefers the live container count; falls back to the concurrency the other
+    jobs declared, which is an upper bound. An unparseable entry counts as zero
+    rather than guessing: this feeds an audit that warns about crossing a
+    measured inflection, and a made-up number would make it fire on nothing.
     """
     import re
 
+    if jobs is None:
+        live = live_containers()
+        if live is not None:
+            return live
     total = 0
     for job in jobs if jobs is not None else running_harbor_jobs():
         m = re.search(r"n-concurrent=(\d+)", job)
