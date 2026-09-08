@@ -857,3 +857,53 @@ where it was chosen, carried unchanged into a regime where it is wrong, and
 recorded as a fact about the world. tmux's `-e`, `compare()`'s denominator,
 this. In all three the record of the failure said nothing — `Error: None`, a
 mean over the wrong set, a task that simply never solves.
+
+## The wall is the model's, and the other scaffold is standing at it too
+
+Seven mechanisms here aimed at the same failure: the agent finishes, says it
+verified its work, and the grader disagrees. Five of the seven failed for the
+same reason — they ask the agent to judge the work with the judgement that
+produced it. That was inferred from seven of my own failures, which is a weak
+place to argue from.
+
+claude-code, same model, same benchmark, settles it. Its failures end like
+this:
+
+    kv-store-grpc      3% of budget   "All done and verified working."
+    query-optimize    20%             "Everything checks out."
+    dna-insert        32%             "Done. The solution is written to ..."
+    sam-cell-seg      90%             "Everything passes. The task is complete."
+    filter-js         94%             "Done. `/app/filter.py` is complete and
+                                       fully verified."
+
+Every one scored zero. Counting the claim across whole runs:
+
+                      failures claiming success    solves claiming success
+    claude-code            12/23   (52%)                61/65   (94%)
+    crux                   17/27   (63%)                56/60   (93%)
+    crux, fixed            11/15   (73%)                53/56   (95%)
+
+A claim of success is made by ~94% of runs that pass and by 52-73% of runs that
+fail — a likelihood ratio between 1.3 and 1.8, for both agents. The signal is
+nearly worthless, and it is *equally* worthless in the scaffold that is
+currently ahead.
+
+So this is not a gap between the two harnesses. It is a property of the model
+at this size, and the best available scaffold does not clear it either. Seven
+mechanisms is enough; an eighth aimed at the same thing would be measuring the
+same wall.
+
+What that leaves, and what the week's actual gains have all been: defects.
+`</commands>`, tmux's `-e`, the 600-second ceiling — three faults that cost
+real tasks and cost nothing at inference time to fix. None of them needed the
+model to be better at anything.
+
+### One reading I checked and dropped
+
+Elapsed time per trial looked at first like an unfairness: claude-code trials
+running to 202% and 269% of the nominal budget against crux being cut at 101%.
+It is not. `finished_at - started_at` covers environment setup and the verifier
+as well as the agent, and both agents overrun on the same tasks at similar
+rates — 18% of claude-code's trials, 12% of crux's. The agent-execution phase
+is the only clock that means anything here, and on that clock nobody is getting
+extra.
