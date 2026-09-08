@@ -138,12 +138,21 @@ class CruxPiAgent(Pi):
             return
 
         await environment.upload_file(source_path=bundle, target_path=_REMOTE_BUNDLE)
-        result = await environment.exec(
-            "set -eu; "
-            f"tar xzf {_REMOTE_BUNDLE} -C \"$HOME\"; "
-            f"rm -f {_REMOTE_BUNDLE}; "
-            '. "$HOME/.nvm/nvm.sh"; '
-            "pi --version"
+        # `exec_as_agent`, not `environment.exec`: the latter runs as root, so
+        # on an image whose agent user is not root the bundle lands in root's
+        # home and the agent -- which harbor starts with `. ~/.nvm/nvm.sh` --
+        # never sees it. That is what "pi: command not found" meant on the
+        # SWE-Atlas images while the same bundle worked on Terminal-Bench.
+        # Upstream's install uses the same helper; matching it is the point.
+        result = await self.exec_as_agent(
+            environment,
+            command=(
+                "set -eu; "
+                f"tar xzf {_REMOTE_BUNDLE} -C \"$HOME\"; "
+                f"rm -f {_REMOTE_BUNDLE}; "
+                '. "$HOME/.nvm/nvm.sh"; '
+                "pi --version"
+            ),
         )
         out = (getattr(result, "stdout", "") or "") + (getattr(result, "stderr", "") or "")
         if getattr(result, "return_code", 1) != 0:
