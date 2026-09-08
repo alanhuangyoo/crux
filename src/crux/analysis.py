@@ -299,10 +299,38 @@ def load_trial(trial_dir: Path) -> Trial | None:
     return trial
 
 
+def _run_dir(job_dir: Path) -> Path:
+    """The directory the trials are actually in.
+
+    harbor writes `<jobs-dir>/<timestamp>/<trial>/`, and `<jobs-dir>` is what
+    every command in this project is given -- it is the argument to
+    `--jobs-dir`. Reading the jobs dir as if it held trials finds none and
+    reports a comparison of zero against zero, with a delta of +0.00% and a
+    p-value of 1.000: three numbers that look like an answer.
+
+    A directory that already holds trials is used as-is, so a run dir still
+    works when passed directly.
+    """
+    if any((c / "result.json").exists() for c in job_dir.iterdir() if c.is_dir()):
+        # Could be either level; prefer the one whose children hold trials.
+        deeper = [
+            c for c in job_dir.iterdir()
+            if c.is_dir() and any((g / "result.json").exists()
+                                  for g in c.iterdir() if g.is_dir())
+        ]
+        if deeper:
+            return max(deeper, key=lambda d: d.name)
+        return job_dir
+    runs = [c for c in job_dir.iterdir() if c.is_dir()]
+    return max(runs, key=lambda d: d.name) if runs else job_dir
+
+
 def load_job(job_dir: str | Path) -> Job:
     job_dir = Path(job_dir)
     job = Job(path=job_dir)
-    for child in sorted(job_dir.iterdir()):
+    if not job_dir.is_dir():
+        return job
+    for child in sorted(_run_dir(job_dir).iterdir()):
         if not child.is_dir():
             continue
         trial = load_trial(child)
