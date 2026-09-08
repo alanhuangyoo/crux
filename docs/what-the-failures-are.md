@@ -1076,3 +1076,28 @@ claim, and the third contradicts the first two.
 The lesson is one this file already records and I repeated anyway: **a process
 metric compared across two agents means nothing until you have checked what one
 unit is on each side.** "Steps" was a word that meant different things.
+
+### And it does not stop early either
+
+The last reading left of the gap was that crux quits with budget in hand. It
+does not. Split by outcome, over the complete `ft-clean` run:
+
+    solved           n=62   40 model turns   22% of budget
+    gave up wrong    n=18   45 model turns   59% of budget
+    timed out        n= 9  154 model turns  100% of budget
+
+A wrong answer costs nearly three times the budget of a right one and slightly
+more turns. Failures are not premature; they are the shape of a task the model
+cannot do, arrived at after more work than a success takes.
+
+So every structural explanation for the remaining gap is now closed:
+
+    grinding          reversed -- crux takes 0.6x the model turns
+    stopping early    reversed -- failures cost 3x a solve
+    output cap        never fires (0 in 42 trials)
+    self-assessment   the model's, not the harness's (claude-code same rate)
+    web search        8 of 89 tasks, crux solves half of them anyway
+
+What is left is capability, and what the harness work bought is the 39 trials
+the stall took plus the two tasks tmux took -- which is the whole of the
+crux-specific deficit, and all of it was mine.
