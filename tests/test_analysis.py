@@ -444,8 +444,30 @@ def test_an_exception_with_no_agent_activity_is_environmental():
     """
     from crux.analysis import Trial
 
-    t = Trial(task="x", reward=None, exception="NonZeroAgentExitCodeError", n_steps=0)
+    t = Trial(task="x", reward=None, exception="NonZeroAgentExitCodeError",
+              n_steps=0, n_output_tokens=0)
     assert t.category == "environment"
+
+
+def test_the_did_it_run_test_is_output_tokens_not_steps():
+    """Steps is a Terminus-shaped question and pi does not answer it.
+
+    pi writes `agent/pi` and `agent/pi.txt` and records no step count for any
+    of its 89 trials, so a steps-based rule reads zero for all of them and
+    excuses its 7 genuine agent timeouts along with the 16 real setup deaths --
+    inflating the score of the baseline the rule exists to be fair to. On this
+    corpus the token split is exact: the 16 setup deaths have zero output
+    tokens and nothing else does.
+    """
+    from crux.analysis import Trial
+
+    ran = Trial(task="x", reward=0.0, exception="AgentTimeoutError",
+                n_steps=0, n_output_tokens=65_929)
+    assert ran.category == "agent_timeout"
+
+    never = Trial(task="x", reward=None, exception="AgentTimeoutError",
+                  n_steps=0, n_output_tokens=0)
+    assert never.category == "environment"
 
 
 def test_an_exception_after_the_agent_ran_is_not_environmental():
