@@ -43,6 +43,10 @@ def _agent(tmp_path, bundle: Path | None, monkeypatch):
     monkeypatch.setattr(pi_agent, "_PI_BUNDLE", str(bundle) if bundle else "/nope.tar.gz")
     agent = pi_agent.CruxPiAgent.__new__(pi_agent.CruxPiAgent)
     calls = []
+    # The unpack must run as the agent user, not root: on an image whose agent
+    # is not root, `environment.exec` puts the bundle in root's home and the
+    # agent never sees it.
+    agent.exec_as_agent = lambda environment, command=None, **kw: environment.exec(command)
 
     async def fake_super_install(env):
         calls.append("network")
@@ -121,7 +125,39 @@ def test_the_bundle_is_selectable_per_arm(tmp_path, monkeypatch):
 
     for chosen in (stock, patched):
         agent = pi_agent.CruxPiAgent.__new__(pi_agent.CruxPiAgent)
+        agent.exec_as_agent = lambda environment, command=None, **kw: environment.exec(command)
         agent._bundle_path = str(chosen)
         env = FakeEnv()
         asyncio.run(agent.install(env))
         assert env.uploaded[0][0] == str(chosen)
+
+
+def test_the_unpack_runs_as_the_agent_not_as_root(tmp_path, monkeypatch):
+    """`environment.exec` is root; the agent may not be.
+
+    The same bundle installed cleanly on Terminal-Bench and failed on every
+    SWE-Atlas image with `pi: command not found` -- the tar had gone into
+    root's home while harbor starts the agent with `. ~/.nvm/nvm.sh` as a
+    different user. Upstream's own install uses exec_as_agent; matching it is
+    the fix.
+    """
+    import crux.pi_agent as pi_agent
+
+    bundle = tmp_path / "b.tar.gz"
+    bundle.write_bytes(b"x")
+    agent = pi_agent.CruxPiAgent.__new__(pi_agent.CruxPiAgent)
+    agent._bundle_path = str(bundle)
+    seen = []
+
+    async def as_agent(environment, command=None, **kw):
+        seen.append(command)
+        return _Exec("0.85.1\n")
+
+    agent.exec_as_agent = as_agent
+
+    class NoRootExec(FakeEnv):
+        async def exec(self, command, *a, **k):  # must not be used
+            raise AssertionError("install ran as root")
+
+    asyncio.run(agent.install(NoRootExec()))
+    assert seen and "tar xzf" in seen[0]
