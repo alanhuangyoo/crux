@@ -570,3 +570,36 @@ def test_a_missing_jobs_dir_is_empty_not_an_error(tmp_path):
     from crux.analysis import load_job
 
     assert load_job(tmp_path / "nope").trials == []
+
+
+def test_a_setup_broken_task_leaves_the_score_as_well_as_the_attribution(tmp_path):
+    """Dropping it from `lost` but keeping it in the mean is incoherent.
+
+    On a real pair it turned +4.0% into -1.19%: four tasks excluded from the
+    attribution were four zeros still sitting in one side's denominator.
+    """
+    from crux.analysis import compare
+
+    base = _job_at(tmp_path, "bb", [_trial("a", 1.0), _trial("b", 1.0)], planned=2)
+    cand = _job_at(tmp_path, "cc", [
+        _trial("a", 1.0),
+        _trial("b", None, exception="RuntimeError"),
+    ], planned=2)
+    r = compare(base, cand)
+    assert r["broke_setup"] == ["b"]
+    assert r["shared_tasks"] == 1 and r["excluded_tasks"] == 1
+    # One task, solved by both: no delta, not -50%.
+    assert r["delta"] == 0.0
+    assert r["baseline_score"] == 1.0 and r["candidate_score"] == 1.0
+    # The leaderboard view still counts it as a zero.
+    assert r["full_candidate_score"] == 0.5
+
+
+def test_a_gain_on_a_setup_broken_task_is_not_credited_either(tmp_path):
+    """Symmetry: exclusion must not be a way to bank a win."""
+    from crux.analysis import compare
+
+    base = _job_at(tmp_path, "b3", [_trial("a", None, exception="RuntimeError")], planned=1)
+    cand = _job_at(tmp_path, "c3", [_trial("a", 1.0)], planned=1)
+    r = compare(base, cand)
+    assert r["gained"] == [] and r["broke_setup"] == ["a"]

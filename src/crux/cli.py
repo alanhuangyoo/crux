@@ -573,7 +573,9 @@ def cmd_report(args) -> int:
     if args.other:
         other = load_job(args.other)
         result = compare(job, other)
-        print(f"shared tasks     {result['shared_tasks']}")
+        excluded = result.get("excluded_tasks", 0)
+        note = f"   ({excluded} excluded: setup broke on one side)" if excluded else ""
+        print(f"scored tasks     {result['shared_tasks']}{note}")
         print(f"  baseline       {result['baseline_score'] * 100:6.2f}%")
         print(f"  candidate      {result['candidate_score'] * 100:6.2f}%")
         print(f"  delta          {result['delta'] * 100:+6.2f}%")
