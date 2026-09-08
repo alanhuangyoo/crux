@@ -951,3 +951,44 @@ def test_one_response_has_a_ceiling():
 
     b = CruxTerminusAgent(logs_dir=d, model_name="openai/x", max_tokens=8192)
     assert b._llm_call_kwargs.get("max_tokens") == 8192
+
+
+# --------------------------------------------------------------------------
+# a constant that decides what the model sees should leave a trace
+
+
+class _TruncStub(CruxTerminusAgent):
+    def __init__(self):
+        pass
+
+
+def test_truncation_is_counted_when_it_fires(caplog):
+    """The cap was untestable from a finished run, which is why it is counted.
+
+    Terminal output never reaches trajectory.json, so a search for the
+    truncation marker across 10,730 steps in two runs finds zero -- not because
+    it never fired but because the text was never stored.
+    """
+    agent = _TruncStub()
+    with caplog.at_level("INFO"):
+        out = agent._limit_output_length("x" * 50_000, max_bytes=1000)
+    assert "interior bytes omitted" in out
+    assert agent._crux_truncations == 1
+    assert "truncated" in caplog.text
+
+
+def test_output_under_the_cap_is_untouched_and_uncounted(caplog):
+    agent = _TruncStub()
+    with caplog.at_level("INFO"):
+        assert agent._limit_output_length("short", max_bytes=1000) == "short"
+    assert getattr(agent, "_crux_truncations", 0) == 0
+    assert "truncated" not in caplog.text
+
+
+def test_counting_does_not_change_what_the_model_sees():
+    """Behaviour must be identical to upstream; only the log is new."""
+    from harbor.agents.terminus_2.terminus_2 import Terminus2
+
+    text = "y" * 40_000
+    assert _TruncStub()._limit_output_length(text, 2000) == \
+        Terminus2._limit_output_length(_TruncStub(), text, 2000)

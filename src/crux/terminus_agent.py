@@ -1118,6 +1118,40 @@ class CruxTerminusAgent(Terminus2):
             elapsed=_human_secs(elapsed), steps=steps, share=share
         )
 
+    @override
+    def _limit_output_length(self, output: str, max_bytes: int = 10000) -> str:
+        """Same truncation, but it leaves a trace when it fires.
+
+        The cap decides how much of a command's output the model ever sees, and
+        it is a constant like every other one in this file -- 10,000 bytes,
+        chosen upstream, never measured here. It is a candidate explanation for
+        the one persistent structural difference against claude-code: on tasks
+        crux loses it takes two to eight times the steps (`extract-elf` 221
+        against 16, `mailman` 512 against 61), and needing a second command to
+        see the rest of the first one's output would produce exactly that.
+
+        The hypothesis was untestable. Terminal output is not kept in
+        trajectory.json -- only the agent's own messages are -- so nothing in a
+        finished run says whether this ever fired, and a search for the
+        truncation marker across 10,730 steps in two runs finds zero because
+        the text it looks for was never stored.
+
+        So this counts. It changes no behaviour: the same bytes go to the model
+        either way. What it adds is one line per truncation in the trial log,
+        which makes the next run able to answer a question the last twenty
+        could not.
+        """
+        out = super()._limit_output_length(output, max_bytes)
+        if out is not output and len(out) != len(output):
+            self._crux_truncations = getattr(self, "_crux_truncations", 0) + 1
+            logger.info(
+                "crux: terminal output truncated (%d bytes -> %d, cap %d); "
+                "%d so far this trial",
+                len(output.encode("utf-8")), len(out.encode("utf-8")), max_bytes,
+                self._crux_truncations,
+            )
+        return out
+
     async def _execute_commands(
         self,
         commands: list[Command],
