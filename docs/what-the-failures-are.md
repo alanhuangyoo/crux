@@ -907,3 +907,51 @@ as well as the agent, and both agents overrun on the same tasks at similar
 rates — 18% of claude-code's trials, 12% of crux's. The agent-execution phase
 is the only clock that means anything here, and on that clock nobody is getting
 extra.
+
+## Being fair to the other scaffold, and getting it wrong in its favour
+
+pi's headline 53.9% was not pi's fault. Sixteen of its 89 trials never ran:
+each one downloads nvm from GitHub at startup, the download failed, and the
+trial died under an exception named `NonZeroAgentExitCodeError` — which sounds
+like the agent's and is not.
+
+`Trial.category` decided "this is the box's fault" from a whitelist of
+exception names, and a whitelist is never finished: 114 trials in this corpus
+carrying endpoint 500s, setup timeouts and missing reward files were falling
+through to `out_of_turns`, read as the agent running out of steps.
+
+So it became a rule that does not depend on the name: **an exception plus no
+agent activity at all is the environment's**.
+
+The first version asked whether the trial had steps. That is a Terminus-shaped
+question. pi writes `agent/pi` and `agent/pi.txt` and records no step count for
+any of its 89 trials, so the rule read zero for all of them — and excused pi's
+seven *genuine* agent timeouts along with its sixteen real setup deaths. I was
+one command from reporting pi at 72.3% when the honest number is 65.8%.
+
+The rule written to be fair to pi inflated it, by exactly the move this file
+keeps recording: asking someone else's data a question shaped like my own.
+
+Output tokens are the agent-independent version, and harbor records them for
+every agent. On this corpus the split is exact:
+
+    pi           16 NonZeroAgentExitCodeError   output tokens = 0   excluded
+                  7 AgentTimeoutError           output tokens > 0   pi's loss
+                 66 no exception                output tokens > 0
+    claude-code   no trial with zero output tokens at all
+
+### Three scaffolds, same model, same budget, paired
+
+    claude-code vs pi                 73 tasks   71.2%  65.8%    8/12   p=0.50
+    pi vs crux (ft-clean)             60         70.0%  75.0%   10/7    p=0.63
+    pi vs crux (think-clean)          57         73.7%  77.2%    8/6    p=0.79
+    claude-code vs crux (ft-clean)    75         73.3%  77.3%    9/6    p=0.61
+
+crux > claude-code > pi, and not one pair separates. Against the earlier
+record — "crux and pi tied, claude-code ahead of crux 10-5 on 71 tasks" — the
+claude-code column has flipped after the parser, tmux and timeout fixes, to
+9-6 the other way.
+
+The pi rows rest on 57 and 60 usable tasks, because pi lost 16 to its own
+installer and the crux arms lost several to stalls. At that size the
+resolution is about ±12 points. The lead is a direction, not a result.
