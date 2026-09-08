@@ -350,3 +350,49 @@ def test_a_real_regression_still_reads_as_one():
     assert r["lost"] == ["x"]
     assert r["broke_setup"] == []
     assert r["delta"] == -1.0
+
+
+def _job_at(tmp_path, name, trials, planned=None):
+    import json
+    from pathlib import Path
+
+    from crux.analysis import Job
+
+    d = Path(tmp_path) / name
+    d.mkdir(parents=True, exist_ok=True)
+    if planned is not None:
+        (d / "result.json").write_text(json.dumps({"n_total_trials": planned}))
+    return Job(path=d, trials=trials)
+
+
+def test_a_comparison_against_a_run_still_going_says_so(tmp_path):
+    """A run in progress is not a random sample of itself.
+
+    Failing trials take about twice as long, so the finished ones
+    over-represent successes -- and against a run that *is* finished the bias
+    lands entirely on one side. `crux watch` already warns about this for a
+    single run; the diff was quoting it without a word.
+    """
+    from crux.analysis import compare
+
+    base = _job_at(tmp_path, "done", [_trial("a", 1.0), _trial("b", 0.0)], planned=2)
+    cand = _job_at(tmp_path, "running", [_trial("a", 1.0), _trial("b", 1.0)], planned=89)
+    r = compare(base, cand)
+    assert r["partial"] == ["running"]
+
+
+def test_two_finished_runs_carry_no_warning(tmp_path):
+    from crux.analysis import compare
+
+    base = _job_at(tmp_path, "x", [_trial("a", 1.0)], planned=1)
+    cand = _job_at(tmp_path, "y", [_trial("a", 0.0)], planned=1)
+    assert compare(base, cand)["partial"] == []
+
+
+def test_a_run_whose_config_cannot_be_read_is_treated_as_complete(tmp_path):
+    """Unreadable is not the same as suspect; it must not warn on every run."""
+    from crux.analysis import compare
+
+    base = _job_at(tmp_path, "p", [_trial("a", 1.0)])
+    cand = _job_at(tmp_path, "q", [_trial("a", 1.0)])
+    assert compare(base, cand)["partial"] == []

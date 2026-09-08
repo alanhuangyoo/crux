@@ -124,6 +124,30 @@ class Job:
     def cost_usd(self) -> float:
         return sum(t.cost_usd for t in self.trials)
 
+    @property
+    def planned_trials(self) -> int:
+        """How many trials the run was asked for, from its own config.
+
+        Falls back to what it produced, so a run whose config cannot be read is
+        treated as complete rather than as permanently suspect.
+        """
+        import json as _json
+
+        for name in ("result.json", "config.json"):
+            for candidate in (self.path / name, *sorted(self.path.glob(f"*/{name}"))):
+                try:
+                    d = _json.load(open(candidate))
+                except Exception:  # noqa: BLE001 - absent or unreadable is not an error
+                    continue
+                n = d.get("n_total_trials")
+                if isinstance(n, int) and n > 0:
+                    return n
+        return len(self.trials)
+
+    @property
+    def is_partial(self) -> bool:
+        return len(self.trials) < self.planned_trials
+
     def by_category(self) -> Counter:
         return Counter(t.category for t in self.trials)
 
@@ -307,8 +331,15 @@ def compare(baseline: Job, candidate: Job) -> dict:
         return sum(1.0 for t in shared if job_by_task[t].solved) / len(shared)
 
     b, c = _mean(base), _mean(cand)
+    # A run in progress is not a random sample of itself. Failing trials run
+    # about twice as long, so at any moment the finished ones over-represent
+    # successes -- `crux watch` says so about a single run, and the same bias
+    # lands on a comparison against a run that *is* finished, in favour of
+    # whichever side is still going.
+    partial = [j.path.name for j in (baseline, candidate) if j.is_partial]
     return {
         "shared_tasks": len(shared),
+        "partial": partial,
         "baseline_score": b,
         "candidate_score": c,
         "delta": c - b,
