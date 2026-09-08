@@ -71,7 +71,13 @@ class CruxPiAgent(Pi):
     def name() -> str:
         return "crux-pi"
 
-    def __init__(self, *args, sections: str | None = None, **kwargs):
+    def __init__(self, *args, sections: str | None = None,
+                 bundle: str | None = None, **kwargs):
+        # Which prebuilt install to unpack. Passing it as a kwarg rather than
+        # reading the env means a control arm and a treatment arm reach the
+        # same code by the same path, and differ only in the bundle -- which is
+        # the whole point of running them against each other.
+        self._bundle_path = bundle or _PI_BUNDLE
         raw = _DEFAULT_SECTIONS if sections is None else tuple(
             s.strip() for s in str(sections).split(",") if s.strip()
         )
@@ -122,7 +128,7 @@ class CruxPiAgent(Pi):
         network path still runs, because a missing file should cost a slower
         setup and not the run.
         """
-        bundle = Path(_PI_BUNDLE)
+        bundle = Path(getattr(self, "_bundle_path", _PI_BUNDLE))
         if not bundle.is_file():
             logger.warning(
                 "pi bundle %s not found; falling back to the per-trial network "
