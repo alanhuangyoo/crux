@@ -155,9 +155,70 @@ def test_the_unpack_runs_as_the_agent_not_as_root(tmp_path, monkeypatch):
 
     agent.exec_as_agent = as_agent
 
-    class NoRootExec(FakeEnv):
-        async def exec(self, command, *a, **k):  # must not be used
-            raise AssertionError("install ran as root")
-
-    asyncio.run(agent.install(NoRootExec()))
+    env = FakeEnv()
+    asyncio.run(agent.install(env))
+    # The unpack goes through the agent user...
     assert seen and "tar xzf" in seen[0]
+    # ...and root is used for one thing only: the symlink onto the default
+    # PATH, which needs /usr/local/bin and nothing else.
+    assert all("tar xzf" not in c for c in env.commands)
+    assert any("ln -sf" in c for c in env.commands)
+
+
+def test_a_successful_unpack_also_puts_pi_on_the_default_path(tmp_path):
+    """nvm resolution is one assumption too many.
+
+    harbor starts the agent with `. ~/.nvm/nvm.sh; ... pi ...`. On the
+    SWE-Atlas images that line found no `pi` even after the bundle unpacked and
+    reported 0.85.1 -- a different user, a different $HOME, or a shell where
+    nvm's default alias does not resolve. A symlink on the default PATH is the
+    one thing every one of those agrees on.
+    """
+    import crux.pi_agent as pi_agent
+
+    bundle = tmp_path / "b.tar.gz"
+    bundle.write_bytes(b"x")
+    agent = pi_agent.CruxPiAgent.__new__(pi_agent.CruxPiAgent)
+    agent._bundle_path = str(bundle)
+
+    async def as_agent(environment, command=None, **kw):
+        return _Exec("0.85.1\n")
+
+    agent.exec_as_agent = as_agent
+    env = FakeEnv()
+    asyncio.run(agent.install(env))
+    joined = " ".join(env.commands)
+    assert "/usr/local/bin" in joined and "ln -sf" in joined
+
+
+def test_a_failed_unpack_does_not_try_to_link(tmp_path, caplog):
+    """Nothing to link, and the fallback needs the path left alone."""
+    import crux.pi_agent as pi_agent
+
+    bundle = tmp_path / "b.tar.gz"
+    bundle.write_bytes(b"x")
+    agent = pi_agent.CruxPiAgent.__new__(pi_agent.CruxPiAgent)
+    agent._bundle_path = str(bundle)
+
+    async def as_agent(environment, command=None, **kw):
+        return _Exec("tar: broken\n", return_code=2)
+
+    agent.exec_as_agent = as_agent
+    calls = []
+
+    async def fake_install(environment):
+        calls.append("network")
+
+    agent.__class__.__mro__[1].install  # keep the base reachable
+    import crux.pi_agent as m
+
+    orig = m.Pi.install
+    m.Pi.install = lambda self, environment: fake_install(environment)
+    try:
+        env = FakeEnv()
+        with caplog.at_level("WARNING"):
+            asyncio.run(agent.install(env))
+    finally:
+        m.Pi.install = orig
+    assert "ln -sf" not in " ".join(env.commands)
+    assert calls == ["network"]

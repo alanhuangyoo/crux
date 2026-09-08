@@ -155,6 +155,23 @@ class CruxPiAgent(Pi):
             ),
         )
         out = (getattr(result, "stdout", "") or "") + (getattr(result, "stderr", "") or "")
+        if getattr(result, "return_code", 1) == 0:
+            # Put the binaries somewhere that does not depend on nvm resolving a
+            # default version, on `$HOME` being what install saw, or on the run
+            # shell being bash. harbor starts the agent with
+            # `. ~/.nvm/nvm.sh; ... pi ...` -- a semicolon, so a missing nvm.sh
+            # is only a message -- and on the SWE-Atlas images that line found
+            # no `pi` even after the bundle had unpacked and reported 0.85.1.
+            # A symlink on the default PATH is the one thing all of those agree
+            # on. Root, because /usr/local/bin is root-owned; best effort,
+            # because a working nvm path must not be lost to a failed link.
+            await environment.exec(
+                "set -eu; "
+                'for b in pi node npm npx; do '
+                '  t=$(ls -d "$HOME"/.nvm/versions/node/*/bin/"$b" 2>/dev/null | head -1) || true; '
+                '  [ -n "${t:-}" ] && ln -sf "$t" /usr/local/bin/"$b" || true; '
+                "done; true"
+            )
         if getattr(result, "return_code", 1) != 0:
             # Say what the bundle did before falling back, so a broken bundle is
             # distinguishable from a missing one.
