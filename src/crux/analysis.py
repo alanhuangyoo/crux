@@ -85,6 +85,8 @@ class Trial:
     exception: str | None = None
     exit_reason: str | None = None
     n_steps: int = 0
+    n_output_tokens: int = 0
+    """Completion tokens the agent produced. Zero means it never ran."""
     cost_usd: float = 0.0
     completion: float | None = None
     """Fraction of the verifier's checks passed, when it exposes them."""
@@ -105,12 +107,22 @@ class Trial:
         if self.solved:
             return "solved"
         # An exception with no agent activity at all: the trial never got to
-        # the agent, whatever the exception is called. This is a better rule
-        # than a list of exception names, and it is how pi's baseline gets a
-        # fair reading -- 16 of its 89 trials died in `curl ... nvm install`
-        # with no trajectory written, and were being counted as pi failing the
-        # task. Solves have steps, so the pair is unambiguous.
-        if self.exception and not self.n_steps:
+        # the agent, whatever the exception is called. This is how pi's
+        # baseline gets a fair reading -- 16 of its 89 trials died in
+        # `curl ... nvm/install.sh` and were counted as pi failing the task,
+        # under an exception named NonZeroAgentExitCodeError, which sounds
+        # like the agent's fault and is not.
+        #
+        # **Output tokens, not steps.** The first version of this rule asked
+        # whether the trial had steps, which is a Terminus-shaped question: pi
+        # writes `agent/pi` and `agent/pi.txt` and records no step count at
+        # all, so the rule read zero for all 89 of its trials and would have
+        # excused its 7 genuine agent timeouts along with the 16 real setup
+        # deaths -- inflating the score of the very baseline it was written to
+        # be fair to. Every agent's token counts are recorded by harbor, and on
+        # this corpus the split is exact: the 16 setup deaths have zero output
+        # tokens and nothing else does.
+        if self.exception and not self.n_output_tokens and not self.n_steps:
             return "environment"
         if self.exception in ENVIRONMENT_EXCEPTIONS:
             return "environment"
@@ -261,6 +273,7 @@ def load_trial(trial_dir: Path) -> Trial | None:
     trial.n_steps = metadata.get("n_steps", 0)
     trial.variant = (metadata.get("config") or {}).get("variant")
     trial.cost_usd = agent_result.get("cost_usd") or 0.0
+    trial.n_output_tokens = agent_result.get("n_output_tokens") or 0
 
     # mini-swe-agent records its own outcome in info.exit_status, and Harbor's
     # ATIF conversion does not carry it across. Reading only the ATIF notes
