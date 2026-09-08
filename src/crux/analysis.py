@@ -396,22 +396,33 @@ def compare(baseline: Job, candidate: Job) -> dict:
 
     gained = [t for t in shared if cand[t].solved and not base[t].solved]
     lost = [t for t in shared if base[t].solved and not cand[t].solved]
+    gained_all = gained
     # Trials the change stopped from running at all, either way round.
     broke_setup = [
         t for t in shared
         if (cand[t].category == "environment") != (base[t].category == "environment")
     ]
     lost = [t for t in lost if t not in set(broke_setup)]
+    gained = [t for t in gained_all if t not in set(broke_setup)]
     moved = [
         (t, (base[t].completion or 0), (cand[t].completion or 0))
         for t in shared
         if abs((cand[t].completion or 0) - (base[t].completion or 0)) > 0.05
     ]
 
+    # The same task set the wins and losses are counted over. Leaving a
+    # setup-broken task out of `lost` but inside the mean is incoherent, and
+    # not by a little: on one real pair it turned +4.0% into -1.19%, because
+    # the four tasks excluded from the attribution were four zeros still
+    # sitting in one side's denominator. If they are not evidence about the
+    # agent, they are not evidence in the score either. `full_*_score` keeps
+    # the leaderboard view, where an errored trial is a zero like any other.
+    scored = [t for t in shared if t not in set(broke_setup)]
+
     def _mean(job_by_task):
-        if not shared:
+        if not scored:
             return 0.0
-        return sum(1.0 for t in shared if job_by_task[t].solved) / len(shared)
+        return sum(1.0 for t in scored if job_by_task[t].solved) / len(scored)
 
     b, c = _mean(base), _mean(cand)
     # A run in progress is not a random sample of itself. Failing trials run
@@ -421,7 +432,8 @@ def compare(baseline: Job, candidate: Job) -> dict:
     # whichever side is still going.
     partial = [j.path.name for j in (baseline, candidate) if j.is_partial]
     return {
-        "shared_tasks": len(shared),
+        "shared_tasks": len(scored),
+        "excluded_tasks": len(shared) - len(scored),
         "partial": partial,
         "baseline_score": b,
         "candidate_score": c,
