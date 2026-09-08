@@ -33,6 +33,36 @@ export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 const MAX_UNACTIONABLE_TURN_RECOVERIES = 3;
 
 /**
+ * How long before the deadline the agent is told that time is running out.
+ * One turn's worth: long enough to write down what it has, short enough that
+ * it does not spend the rest of the run planning for the end.
+ */
+const DEADLINE_WARNING_MS = 5 * 60 * 1000;
+
+/**
+ * What the agent is told when the deadline is close, and when it has passed.
+ *
+ * The loop has had no notion of time. A benchmark harness enforces one from
+ * outside -- harbor kills the trial at its budget -- so the run ends mid-tool-
+ * call with whatever was on disk at that instant, and the agent never knew it
+ * was against a wall. Measured on Terminal-Bench 2.1: six of pi's twenty-four
+ * failed trials ended that way, cut off with work in flight, while the median
+ * successful trial used a fraction of the budget it was given. Neither pacing
+ * error is available to fix from inside a loop that cannot see a clock.
+ */
+function deadlineNotice(remainingMs: number): string {
+	if (remainingMs > 0) {
+		const minutes = Math.max(1, Math.round(remainingMs / 60000));
+		return (
+			`You have about ${minutes} minute${minutes === 1 ? "" : "s"} left before this run is stopped. ` +
+			"Finish what you can now: save work in progress, and if you have an answer, write it where the " +
+			"task asked for it. Do not start anything you cannot complete in that time."
+		);
+	}
+	return "Time is up. Stop and leave the work in its current state.";
+}
+
+/**
  * Why a turn that made no tool call cannot be treated as the agent finishing,
  * or `undefined` when it can.
  *
@@ -216,6 +246,9 @@ async function runLoop(
 	// Consecutive turns handed back for producing neither a tool call nor an
 	// answer. Reset by any turn that does one of those.
 	let unactionableTurns = 0;
+	// Whether the agent has been told the deadline is close. Once only: a
+	// warning repeated every turn becomes the thing it is reasoning about.
+	let deadlineWarned = false;
 	// Check for steering messages at start (user may have typed while waiting)
 	let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
 
@@ -258,6 +291,27 @@ async function runLoop(
 					newMessages.push(message);
 				}
 				pendingMessages = [];
+			}
+
+			// Stop on our own terms rather than being killed mid-turn.
+			if (config.deadline !== undefined) {
+				const remaining = config.deadline - Date.now();
+				if (remaining <= 0) {
+					await emit({ type: "agent_end", messages: newMessages });
+					return;
+				}
+				if (!deadlineWarned && remaining <= DEADLINE_WARNING_MS) {
+					deadlineWarned = true;
+					const notice: AgentMessage = {
+						role: "user",
+						content: [{ type: "text", text: deadlineNotice(remaining) }],
+						timestamp: Date.now(),
+					};
+					await emit({ type: "message_start", message: notice });
+					await emit({ type: "message_end", message: notice });
+					currentContext.messages.push(notice);
+					newMessages.push(notice);
+				}
 			}
 
 			// Stream assistant response

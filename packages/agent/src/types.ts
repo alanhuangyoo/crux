@@ -150,6 +150,19 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	model: Model<any>;
 
 	/**
+	 * Absolute epoch milliseconds after which the loop stops on its own.
+	 *
+	 * Without it the loop runs until something outside kills it, which is how a
+	 * benchmark trial ends mid-tool-call with whatever happened to be on disk.
+	 * With it the agent is told once, shortly before the end, that time is
+	 * running out, and the loop returns normally when it arrives -- so the last
+	 * turn is one the agent chose rather than one it was interrupted during.
+	 *
+	 * Omit for an interactive session, where the person is the deadline.
+	 */
+	deadline?: number;
+
+	/**
 	 * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.
 	 *
 	 * Each AgentMessage must be converted to a UserMessage, AssistantMessage, or ToolResultMessage

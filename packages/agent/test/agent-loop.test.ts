@@ -1685,3 +1685,77 @@ describe("turns that produce neither a tool call nor an answer", () => {
 		expect(h.calls()).toBe(3);
 	});
 });
+
+describe("a deadline the loop can see", () => {
+	// The loop has had no notion of time. A benchmark harness enforces one from
+	// outside -- harbor kills the trial at its budget -- so the run ends
+	// mid-tool-call with whatever was on disk at that instant, and the agent
+	// never knew it was against a wall. Six of pi's twenty-four failed
+	// Terminal-Bench 2.1 trials ended that way, cut off with work in flight,
+	// while the median successful trial used a fraction of its budget. Neither
+	// pacing error can be fixed from inside a loop without a clock.
+
+	function harness(replies: AssistantMessage[]) {
+		let call = 0;
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			const message = replies[Math.min(call, replies.length - 1)]!;
+			call++;
+			queueMicrotask(() => stream.push({ type: "done", reason: "stop", message }));
+			return stream;
+		};
+		return { streamFn, calls: () => call };
+	}
+
+	async function drain(stream: ReturnType<typeof agentLoop>) {
+		const events: AgentEvent[] = [];
+		for await (const event of stream) events.push(event);
+		return events;
+	}
+
+	function run(config: Partial<AgentLoopConfig>, replies: AssistantMessage[]) {
+		const h = harness(replies);
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [] };
+		const full: AgentLoopConfig = { model: createModel(), convertToLlm: identityConverter, ...config };
+		return { h, stream: agentLoop([createUserMessage("go")], context, full, undefined, h.streamFn) };
+	}
+
+	it("does not call the model once the deadline has passed", async () => {
+		const { h, stream } = run({ deadline: Date.now() - 1 }, [createAssistantMessage([{ type: "text", text: "hi" }])]);
+		await drain(stream);
+		expect(h.calls()).toBe(0);
+	});
+
+	it("warns once, in time to save work, and keeps going", async () => {
+		const { h, stream } = run({ deadline: Date.now() + 60_000 }, [
+			createAssistantMessage([{ type: "text", text: "done" }]),
+		]);
+		const events = await drain(stream);
+		expect(h.calls()).toBe(1);
+		const injected = JSON.stringify(events.filter((e) => e.type === "message_start"));
+		expect(injected).toContain("minute");
+		expect(injected).toContain("before this run is stopped");
+	});
+
+	it("says nothing while there is plenty of time", async () => {
+		// A warning on every turn becomes the thing the agent reasons about.
+		const { stream } = run({ deadline: Date.now() + 60 * 60_000 }, [
+			createAssistantMessage([{ type: "text", text: "done" }]),
+		]);
+		const events = await drain(stream);
+		expect(JSON.stringify(events)).not.toContain("before this run is stopped");
+	});
+
+	it("is inert when no deadline is set, which is the interactive case", async () => {
+		const { h, stream } = run({}, [createAssistantMessage([{ type: "text", text: "done" }])]);
+		const events = await drain(stream);
+		expect(h.calls()).toBe(1);
+		expect(JSON.stringify(events)).not.toContain("before this run is stopped");
+	});
+
+	it("ends normally rather than leaving the run unterminated", async () => {
+		const { stream } = run({ deadline: Date.now() - 1 }, [createAssistantMessage([{ type: "text", text: "hi" }])]);
+		const events = await drain(stream);
+		expect(events.at(-1)?.type).toBe("agent_end");
+	});
+});
