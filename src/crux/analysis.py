@@ -323,6 +323,24 @@ def completion_histogram(job: Job, bins: int = 5) -> list[tuple[str, int]]:
     ]
 
 
+def _sign_test(a: int, b: int) -> float:
+    """Two-sided sign test over discordant pairs.
+
+    The paired form is the only one that means anything here: two runs share a
+    task list, most tasks agree, and what carries information is which way the
+    disagreements fall. Comparing two whole-run means over different task sets
+    is the mistake this module used to make in `compare` itself.
+    """
+    import math
+
+    n = a + b
+    if n == 0:
+        return 1.0
+    k = max(a, b)
+    tail = sum(math.comb(n, i) for i in range(k, n + 1))
+    return min(1.0, 2 * tail / (2 ** n))
+
+
 def compare(baseline: Job, candidate: Job) -> dict:
     """Compare two runs task by task.
 
@@ -386,4 +404,9 @@ def compare(baseline: Job, candidate: Job) -> dict:
         "lost": lost,
         "broke_setup": broke_setup,
         "completion_moved": sorted(moved, key=lambda m: m[2] - m[1], reverse=True),
+        # The delta alone says nothing about whether it survives the noise.
+        # Two runs of one configuration disagree on 15-16% of tasks here, so an
+        # 89-task run resolves about +-8 points; the sign test over the tasks
+        # that actually moved is the instrument that respects that.
+        "p_value": _sign_test(len(gained), len(lost)),
     }
