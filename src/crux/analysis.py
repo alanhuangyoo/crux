@@ -95,6 +95,8 @@ class Trial:
     """Fraction of the verifier's checks passed, when it exposes them."""
     completion_source: str | None = None
     variant: str | None = None
+    agent: str | None = None
+    """Which scaffold produced the trial. Process metrics do not cross it."""
 
     @property
     def solved(self) -> bool:
@@ -179,6 +181,12 @@ class Job:
             int(median(t.n_input_tokens for t in ran)),
             int(median(t.n_output_tokens for t in ran)),
         )
+
+    @property
+    def agent_name(self) -> str | None:
+        """The scaffold this run used, when every trial agrees on one."""
+        names = {t.agent for t in self.trials if t.agent}
+        return names.pop() if len(names) == 1 else None
 
     @property
     def planned_trials(self) -> int:
@@ -295,6 +303,7 @@ def load_trial(trial_dir: Path) -> Trial | None:
     trial.cost_usd = agent_result.get("cost_usd") or 0.0
     trial.n_output_tokens = agent_result.get("n_output_tokens") or 0
     trial.n_input_tokens = agent_result.get("n_input_tokens") or 0
+    trial.agent = ((result.get("config") or {}).get("agent") or {}).get("name")
 
     # mini-swe-agent records its own outcome in info.exit_status, and Harbor's
     # ATIF conversion does not carry it across. Reading only the ATIF notes
@@ -478,4 +487,15 @@ def compare(baseline: Job, candidate: Job) -> dict:
         # 89-task run resolves about +-8 points; the sign test over the tasks
         # that actually moved is the instrument that respects that.
         "p_value": _sign_test(len(gained), len(lost)),
+        # Scores cross scaffolds; process metrics do not, and this project got
+        # that wrong three times in one day. A claude-code trajectory step is a
+        # tool call; a crux step is a model turn carrying 1.85 shell commands.
+        # Reading "221 steps against 16" off those two units produced a 14x
+        # claim where the honest figure was 3.1x on comparable units -- and
+        # model turns, the axis that costs wall-clock, run the other way
+        # entirely.
+        "cross_agent": bool(
+            baseline.agent_name and candidate.agent_name
+            and baseline.agent_name != candidate.agent_name
+        ),
     }

@@ -610,6 +610,10 @@ def cmd_report(args) -> int:
             print("\n  category            baseline  candidate")
             for k in keys:
                 print(f"  {k:<20}{ba.get(k, 0):>8}{ca.get(k, 0):>11}")
+        if result.get("cross_agent"):
+            print("\n  ! different scaffolds: the score comparison holds, but do not\n"
+                  "    compare steps, turns or commands across them without first\n"
+                  "    checking what one unit means on each side.")
         bi, bo = job.median_tokens()
         ci, co = other.median_tokens()
         if bi and ci:
