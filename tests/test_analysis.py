@@ -516,3 +516,57 @@ def test_two_identical_runs_report_no_evidence(tmp_path):
     r = compare(_job_at(tmp_path, "x1", trials, planned=2),
                 _job_at(tmp_path, "x2", list(trials), planned=2))
     assert r["p_value"] == 1.0
+
+
+def _harbor_layout(tmp_path, name, run, tasks):
+    """`<jobs-dir>/<timestamp>/<trial>/result.json`, as harbor writes it."""
+    import json
+
+    d = tmp_path / name / run
+    for task, reward in tasks.items():
+        t = d / f"{task}__hash"
+        t.mkdir(parents=True)
+        (t / "result.json").write_text(json.dumps({
+            "task_name": f"terminal-bench/{task}",
+            "verifier_result": {"rewards": {"reward": reward}},
+            "agent_result": {"n_output_tokens": 100},
+        }))
+    (d / "result.json").write_text(json.dumps({"n_total_trials": len(tasks)}))
+    return str(tmp_path / name)
+
+
+def test_load_job_descends_into_the_run_directory(tmp_path):
+    """`--jobs-dir` is what every command here is given.
+
+    Reading it as if it held trials finds none and reports zero against zero:
+    a delta of +0.00% and p=1.000, three numbers that look like an answer.
+    """
+    from crux.analysis import load_job
+
+    jobs = _harbor_layout(tmp_path, "run1", "2026-09-08__00-00-00",
+                          {"alpha": 1.0, "beta": 0.0})
+    job = load_job(jobs)
+    assert sorted(t.task for t in job.trials) == ["alpha", "beta"]
+    assert job.score == 0.5
+
+
+def test_a_run_directory_passed_directly_still_works(tmp_path):
+    from crux.analysis import load_job
+
+    _harbor_layout(tmp_path, "run2", "2026-09-08__00-00-00", {"alpha": 1.0})
+    job = load_job(tmp_path / "run2" / "2026-09-08__00-00-00")
+    assert [t.task for t in job.trials] == ["alpha"]
+
+
+def test_the_latest_run_wins_when_a_jobs_dir_holds_several(tmp_path):
+    from crux.analysis import load_job
+
+    _harbor_layout(tmp_path, "run3", "2026-09-01__00-00-00", {"old": 0.0})
+    jobs = _harbor_layout(tmp_path, "run3", "2026-09-08__00-00-00", {"new": 1.0})
+    assert [t.task for t in load_job(jobs).trials] == ["new"]
+
+
+def test_a_missing_jobs_dir_is_empty_not_an_error(tmp_path):
+    from crux.analysis import load_job
+
+    assert load_job(tmp_path / "nope").trials == []
