@@ -151,7 +151,7 @@ def test_the_unpack_runs_as_the_agent_not_as_root(tmp_path, monkeypatch):
 
     async def as_agent(environment, command=None, **kw):
         seen.append(command)
-        return _Exec("0.85.1\n")
+        return _Exec("0.85.1\nCRUX_PI_BIN=/home/agent/.nvm/versions/node/v22.23.2/bin\n")
 
     agent.exec_as_agent = as_agent
 
@@ -182,13 +182,17 @@ def test_a_successful_unpack_also_puts_pi_on_the_default_path(tmp_path):
     agent._bundle_path = str(bundle)
 
     async def as_agent(environment, command=None, **kw):
-        return _Exec("0.85.1\n")
+        return _Exec("0.85.1\nCRUX_PI_BIN=/home/agent/.nvm/versions/node/v22.23.2/bin\n")
 
     agent.exec_as_agent = as_agent
     env = FakeEnv()
     asyncio.run(agent.install(env))
     joined = " ".join(env.commands)
     assert "/usr/local/bin" in joined and "ln -sf" in joined
+    # The absolute path the agent reported, not `$HOME` re-expanded as root --
+    # which is the same mistake one layer down.
+    assert "/home/agent/.nvm/versions/node/v22.23.2/bin" in joined
+    assert "$HOME" not in joined
 
 
 def test_a_failed_unpack_does_not_try_to_link(tmp_path, caplog):
@@ -222,3 +226,23 @@ def test_a_failed_unpack_does_not_try_to_link(tmp_path, caplog):
         m.Pi.install = orig
     assert "ln -sf" not in " ".join(env.commands)
     assert calls == ["network"]
+
+
+def test_a_bundle_that_reports_no_bin_dir_says_so(tmp_path, caplog):
+    """Silence here would leave `pi` unreachable with nothing to read."""
+    import crux.pi_agent as pi_agent
+
+    bundle = tmp_path / "b.tar.gz"
+    bundle.write_bytes(b"x")
+    agent = pi_agent.CruxPiAgent.__new__(pi_agent.CruxPiAgent)
+    agent._bundle_path = str(bundle)
+
+    async def as_agent(environment, command=None, **kw):
+        return _Exec("0.85.1\n")          # no CRUX_PI_BIN line
+
+    agent.exec_as_agent = as_agent
+    env = FakeEnv()
+    with caplog.at_level("WARNING"):
+        asyncio.run(agent.install(env))
+    assert "bin dir" in caplog.text
+    assert all("ln -sf" not in c for c in env.commands)

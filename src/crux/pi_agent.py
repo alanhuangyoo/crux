@@ -151,7 +151,11 @@ class CruxPiAgent(Pi):
                 f"tar xzf {_REMOTE_BUNDLE} -C \"$HOME\"; "
                 f"rm -f {_REMOTE_BUNDLE}; "
                 '. "$HOME/.nvm/nvm.sh"; '
-                "pi --version"
+                "pi --version; "
+                # Printed so the root step below can link an absolute path.
+                # Resolving `$HOME/.nvm` again as root would look in root's
+                # home, which is the same mistake one layer down.
+                'echo "CRUX_PI_BIN=$(dirname "$(command -v pi)")"'
             ),
         )
         out = (getattr(result, "stdout", "") or "") + (getattr(result, "stderr", "") or "")
@@ -165,13 +169,20 @@ class CruxPiAgent(Pi):
             # A symlink on the default PATH is the one thing all of those agree
             # on. Root, because /usr/local/bin is root-owned; best effort,
             # because a working nvm path must not be lost to a failed link.
-            await environment.exec(
-                "set -eu; "
-                'for b in pi node npm npx; do '
-                '  t=$(ls -d "$HOME"/.nvm/versions/node/*/bin/"$b" 2>/dev/null | head -1) || true; '
-                '  [ -n "${t:-}" ] && ln -sf "$t" /usr/local/bin/"$b" || true; '
-                "done; true"
-            )
+            bin_dir = ""
+            for line in out.splitlines():
+                if line.startswith("CRUX_PI_BIN="):
+                    bin_dir = line.split("=", 1)[1].strip()
+            if bin_dir:
+                await environment.exec(
+                    "set -eu; "
+                    f"for b in pi node npm npx; do "
+                    f'  [ -x {shlex.quote(bin_dir)}/"$b" ] && '
+                    f'    ln -sf {shlex.quote(bin_dir)}/"$b" /usr/local/bin/"$b" || true; '
+                    "done; true"
+                )
+            else:
+                logger.warning("pi bundle unpacked but its bin dir was not reported")
         if getattr(result, "return_code", 1) != 0:
             # Say what the bundle did before falling back, so a broken bundle is
             # distinguishable from a missing one.
