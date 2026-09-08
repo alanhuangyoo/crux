@@ -86,31 +86,33 @@ GPU_TASKS_BY_ORG = {
 }
 
 
-# Tasks that have never once solved and reliably burn their whole budget.
+# Tasks whose budget is shortened because they never solve and burn it anyway.
 #
-# Measured over 432 scored trials in 21 runs:
+# **Empty, and why it is empty matters more than the list did.**
 #
-#     regex-chess                  0 of 4    stalls 6 of 11 trials
-#     adaptive-rejection-sampler   0 of 6    stalls 4 of 10
+# It held `regex-chess` (0 of 4, stalled 6 of 11) and
+# `adaptive-rejection-sampler` (0 of 6, stalled 4 of 10), measured over 432
+# scored trials in 21 runs, with this justification: ten explanations for the
+# stall had been checked and eliminated, the cause was unknown, so capping was
+# loss control rather than a fix.
 #
-# Both stall early -- 3 and 6 steps -- and then hold a concurrency slot until
-# the agent budget runs out, two hours later. Ten explanations for the stall
-# have been checked and eliminated; the cause is unknown, so this is loss
-# control, not a fix.
+# The cause was `_LLM_CALL_TIMEOUT_SEC = 600`, set in this repository against a
+# 900-second budget and carried unchanged into the 8x budget every run since
+# has used. The trials died three attempts deep:
 #
-# Deliberately not the whole stall list. `write-compressor` stalls too and
-# solves 5 of 6; `circuit-fibsqrt` 3 of 4. Capping those would trade real
-# scores for wall-clock. These two have no score to trade.
+#     litellm.Timeout: timeout value=600.0, time taken=1801.36 seconds
 #
-# It shortens their budget rather than skipping them: a task that starts
-# solving under a different configuration should show up, and a skipped task
-# never can.
-STALL_CAPPED_TASKS: dict[str, tuple[str, ...]] = {
-    "terminal-bench": ("regex-chess", "adaptive-rejection-sampler"),
-}
+# So "these tasks never solve" was a measurement of a constant of mine, and the
+# cap was a policy built on it. The ceiling now scales with the budget; see
+# `_llm_timeout_for` in terminus_agent.py.
+#
+# The mechanism stays, because a task that genuinely burns its budget for
+# nothing is a real category. Nothing goes back into this list without a run
+# under the fixed ceiling that shows it -- which is the standard the old
+# entries were admitted under and did not meet.
+STALL_CAPPED_TASKS: dict[str, tuple[str, ...]] = {}
 
-# 30 minutes covers p90 of every solved trial in the corpus except the tail
-# these two have never reached.
+# 30 minutes covers p90 of every solved trial in the corpus.
 STALL_CAP_MULTIPLIER = 2.0
 
 
