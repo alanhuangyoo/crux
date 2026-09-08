@@ -955,3 +955,39 @@ claude-code column has flipped after the parser, tmux and timeout fixes, to
 The pi rows rest on 57 and 60 usable tasks, because pi lost 16 to its own
 installer and the crux arms lost several to stalls. At that size the
 resolution is about ±12 points. The lead is a direction, not a result.
+
+## Interleaved thinking, priced
+
+The eighth mechanism is the only one that was ever measured on what it costs.
+Input tokens per trial, median, over completed trials:
+
+    base-crux       plain                782,391    output  55,205
+    ft-clean        file tools         1,035,144    output  92,053
+    base-cc         claude-code        1,686,917    output  51,373
+    think-clean     interleaved        3,853,027    output 107,298
+
+**4.9x the input of plain crux, and 2.3x claude-code's**, for a score of +2.50
+against claude-code where file tools get +1.25 — the same patch of noise. Cache
+rates are comparable on both sides (95% and 98%), so the uncached prefill is
+about 5x as well; this is not an artifact of cache accounting.
+
+Added to what was already measured — reasoning 48% longer, more steps not
+fewer, context per step doubled — the mechanism does exactly what the model
+card says it does, at five times the compute, for nothing.
+
+It also explains a slowdown that looked like an endpoint fault. Single-stream
+throughput fell from 127 tok/s to 9.2 while three arms ran. The GPUs were at
+100% and the scheduler said why:
+
+    Prefill batch, #new-seq: 1, #new-token: 8192, #pending-token: 154976,
+    #running-req: 16, full token usage: 0.15
+
+One 155,000-token context being chunk-prefilled nineteen chunks at a time, with
+KV cache only 15% used: all prefill, no decode. The suspect was claude-code,
+whose contexts are twice crux's. It was the interleaved arm, whose contexts are
+five times.
+
+**The lesson is about what gets measured.** Seven mechanisms were judged on
+score alone, and score alone cannot distinguish "did nothing" from "did what it
+promised, at five times the price". The second is a worse result and it reads
+identically in a p-value.
