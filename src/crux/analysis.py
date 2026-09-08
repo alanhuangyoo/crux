@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from statistics import median
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -87,6 +88,8 @@ class Trial:
     n_steps: int = 0
     n_output_tokens: int = 0
     """Completion tokens the agent produced. Zero means it never ran."""
+    n_input_tokens: int = 0
+    """Prompt tokens sent. What a mechanism costs is mostly this."""
     cost_usd: float = 0.0
     completion: float | None = None
     """Fraction of the verifier's checks passed, when it exposes them."""
@@ -159,6 +162,23 @@ class Job:
     @property
     def cost_usd(self) -> float:
         return sum(t.cost_usd for t in self.trials)
+
+    def median_tokens(self) -> tuple[int, int]:
+        """Median input and output tokens over trials that actually ran.
+
+        Score alone cannot tell "did nothing" from "did what it promised at
+        five times the price", and the second is the worse result. Interleaved
+        thinking reads as +2.50 against claude-code, inside the noise like
+        everything else -- and costs 3.85M input tokens a trial against plain
+        crux's 782k.
+        """
+        ran = [t for t in self.trials if t.n_output_tokens]
+        if not ran:
+            return 0, 0
+        return (
+            int(median(t.n_input_tokens for t in ran)),
+            int(median(t.n_output_tokens for t in ran)),
+        )
 
     @property
     def planned_trials(self) -> int:
@@ -274,6 +294,7 @@ def load_trial(trial_dir: Path) -> Trial | None:
     trial.variant = (metadata.get("config") or {}).get("variant")
     trial.cost_usd = agent_result.get("cost_usd") or 0.0
     trial.n_output_tokens = agent_result.get("n_output_tokens") or 0
+    trial.n_input_tokens = agent_result.get("n_input_tokens") or 0
 
     # mini-swe-agent records its own outcome in info.exit_status, and Harbor's
     # ATIF conversion does not carry it across. Reading only the ATIF notes
