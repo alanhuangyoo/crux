@@ -20,8 +20,10 @@ point, not by patching harbor.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
 import shlex
 import tempfile
 from pathlib import Path
@@ -34,6 +36,53 @@ from typing_extensions import override
 from crux.prompts import build_sections
 
 logger = logging.getLogger(__name__)
+
+# `<<FINAL_ANSWER>>`-style instructions name the file they want. Read from the
+# instruction rather than hardcoded, so this stays inert on a benchmark that
+# asks for nothing.
+_ANSWER_PATH = re.compile(r"(/[\w./-]*answer[\w.-]*\.(?:txt|md|json))")
+
+
+def _answer_path(instruction: str) -> str | None:
+    m = _ANSWER_PATH.search(instruction or "")
+    return m.group(1) if m else None
+
+
+def _final_answer(pi_log: Path) -> str:
+    """The last thing the agent said, from pi's own session log.
+
+    Prefers the text inside `<<FINAL_ANSWER>>` markers when the agent used
+    them, because that is what the task asked for and what a grader expects to
+    read; otherwise the last assistant text, which is the answer given to the
+    wrong channel.
+    """
+    if not pi_log.is_file():
+        return ""
+    last = ""
+    try:
+        with pi_log.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if '"role"' not in line or "assistant" not in line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                message = event.get("message") or {}
+                if message.get("role") != "assistant":
+                    continue
+                text = " ".join(
+                    str(b.get("text", ""))
+                    for b in (message.get("content") or [])
+                    if isinstance(b, dict) and b.get("type") == "text"
+                ).strip()
+                if text:
+                    last = text
+    except OSError:
+        return ""
+    marked = re.search(r"<<FINAL_ANSWER>>(.*?)(?:<</?FINAL_ANSWER>>|$)", last, re.S)
+    return (marked.group(1) if marked else last).strip()
+
 
 # Where the sections land inside the environment. pi reads the file at startup,
 # so it has to exist before the agent command runs.
@@ -190,6 +239,48 @@ class CruxPiAgent(Pi):
             await super().install(environment)
             return
         logger.info("pi installed from bundle: %s", out.strip().splitlines()[-1:] or "?")
+
+    @override
+    async def run(self, instruction: str, environment: BaseEnvironment,
+                  context) -> None:
+        """Deliver the agent's final answer to the file the task named.
+
+        SWE-Atlas scores by reading `/logs/agent/answer.txt`; its instruction
+        ends with "write your complete final answer to /logs/agent/answer.txt
+        wrapped in <<FINAL_ANSWER>> tags". Terminus complies -- its whole loop
+        is typing into a terminal, so writing a file is the natural move, and
+        its trajectories mention the path eighteen times. pi in `--print` mode
+        answers the person who asked: across 31 SWE-Atlas trials it read the
+        instruction, mentioned the path three times, and **never issued a
+        single tool call touching it**. Every one scored zero on
+        `No answer file at /logs/agent/answer.txt, scoring 0`.
+
+        This copies what the agent already said into the path the task named.
+        It writes nothing the agent did not produce, and it does not run when
+        the agent wrote the file itself or when the instruction never asked for
+        one. That keeps it plumbing: the difference between an answer that was
+        never given and one that was given to the wrong channel.
+        """
+        await super().run(instruction, environment, context)
+        path = _answer_path(instruction)
+        if not path:
+            return
+        exists = await environment.exec(f"test -s {shlex.quote(path)} && echo yes")
+        if "yes" in ((getattr(exists, "stdout", "") or "") + (getattr(exists, "stderr", "") or "")):
+            return
+        answer = _final_answer(self.logs_dir / "pi.txt")
+        if not answer:
+            logger.warning("no answer file and no final message to deliver to %s", path)
+            return
+        await self.exec_as_agent(
+            environment,
+            command=(
+                f"mkdir -p {shlex.quote(str(Path(path).parent))}; "
+                f"cat > {shlex.quote(path)} <<'CRUX_ANSWER_EOF'\n"
+                f"{answer}\nCRUX_ANSWER_EOF"
+            ),
+        )
+        logger.info("delivered the agent's final message to %s (%d chars)", path, len(answer))
 
     def build_cli_flags(self) -> str:
         flags = super().build_cli_flags()
