@@ -577,6 +577,12 @@ def cmd_report(args) -> int:
         print(f"  baseline       {result['baseline_score'] * 100:6.2f}%")
         print(f"  candidate      {result['candidate_score'] * 100:6.2f}%")
         print(f"  delta          {result['delta'] * 100:+6.2f}%")
+        # Wins and losses, then the sign test over them: the delta on its own
+        # has repeatedly looked like a result at this benchmark's noise level.
+        p = result["p_value"]
+        verdict = "separates" if p < 0.05 else "inside the noise"
+        print(f"  gained {len(result['gained'])}, lost {len(result['lost'])}"
+              f"   sign test p={p:.3f}  ({verdict})")
         if result["gained"]:
             print("\nnewly solved:", ", ".join(result["gained"]))
         # Regressions are why this is a task-by-task diff: two gained and two

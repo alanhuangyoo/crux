@@ -476,3 +476,43 @@ def test_an_exception_after_the_agent_ran_is_not_environmental():
 
     t = Trial(task="x", reward=0.0, exception="AgentTimeoutError", n_steps=40)
     assert t.category == "agent_timeout"
+
+
+def test_compare_reports_the_sign_test_over_discordant_pairs(tmp_path):
+    """The delta alone has repeatedly looked like a result at this noise level.
+
+    Two runs of one configuration disagree on 15-16% of tasks, so an 89-task
+    run resolves about +-8 points. What carries information is which way the
+    disagreements fall, not the difference of two means.
+    """
+    from crux.analysis import compare
+
+    base = _job_at(tmp_path, "b", [_trial(f"t{i}", 1.0) for i in range(6)], planned=6)
+    # Candidate loses all six: as one-sided as six pairs can be.
+    cand = _job_at(tmp_path, "c", [_trial(f"t{i}", 0.0) for i in range(6)], planned=6)
+    r = compare(base, cand)
+    assert len(r["lost"]) == 6 and not r["gained"]
+    assert r["p_value"] < 0.05
+
+
+def test_a_split_decision_does_not_separate(tmp_path):
+    from crux.analysis import compare
+
+    base = _job_at(tmp_path, "b2",
+                   [_trial("a", 1.0), _trial("b", 0.0), _trial("c", 1.0), _trial("d", 0.0)],
+                   planned=4)
+    cand = _job_at(tmp_path, "c2",
+                   [_trial("a", 0.0), _trial("b", 1.0), _trial("c", 0.0), _trial("d", 1.0)],
+                   planned=4)
+    r = compare(base, cand)
+    assert len(r["gained"]) == 2 and len(r["lost"]) == 2
+    assert r["p_value"] == 1.0
+
+
+def test_two_identical_runs_report_no_evidence(tmp_path):
+    from crux.analysis import compare
+
+    trials = [_trial("a", 1.0), _trial("b", 0.0)]
+    r = compare(_job_at(tmp_path, "x1", trials, planned=2),
+                _job_at(tmp_path, "x2", list(trials), planned=2))
+    assert r["p_value"] == 1.0
