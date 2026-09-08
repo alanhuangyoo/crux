@@ -627,9 +627,12 @@ def cmd_report(args) -> int:
         # from the score because it is a fault in the harness, and because it
         # silently subtracts from whichever side it lands on.
         if result["broke_setup"]:
+            side = result.get("broke_setup_side", {})
+            listed = ", ".join(
+                f"{t} ({side.get(t, '?')})" for t in result["broke_setup"]
+            )
             print(
-                "\n  ! never reached the agent on one side: "
-                + ", ".join(result["broke_setup"])
+                "\n  ! never reached the agent on one side: " + listed
                 + "\n    These are not evidence about the agent. Fix the setup"
                   " failure and re-run before reading the delta."
             )

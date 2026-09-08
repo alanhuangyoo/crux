@@ -419,10 +419,17 @@ def compare(baseline: Job, candidate: Job) -> dict:
     lost = [t for t in shared if base[t].solved and not cand[t].solved]
     gained_all = gained
     # Trials the change stopped from running at all, either way round.
+    # Which side broke matters as much as the fact that one did: an exclusion
+    # rule nobody can audit becomes a self-serving one. Reported as
+    # `broke_setup_side` so the reader can see the direction.
     broke_setup = [
         t for t in shared
         if (cand[t].category == "environment") != (base[t].category == "environment")
     ]
+    broke_setup_side = {
+        t: ("baseline" if base[t].category == "environment" else "candidate")
+        for t in broke_setup
+    }
     lost = [t for t in lost if t not in set(broke_setup)]
     gained = [t for t in gained_all if t not in set(broke_setup)]
     moved = [
@@ -464,6 +471,7 @@ def compare(baseline: Job, candidate: Job) -> dict:
         "gained": gained,
         "lost": lost,
         "broke_setup": broke_setup,
+        "broke_setup_side": broke_setup_side,
         "completion_moved": sorted(moved, key=lambda m: m[2] - m[1], reverse=True),
         # The delta alone says nothing about whether it survives the noise.
         # Two runs of one configuration disagree on 15-16% of tasks here, so an
