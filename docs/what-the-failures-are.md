@@ -991,3 +991,43 @@ five times.
 score alone, and score alone cannot distinguish "did nothing" from "did what it
 promised, at five times the price". The second is a worse result and it reads
 identically in a p-value.
+
+## What the stall actually cost, counted
+
+The 600-second ceiling was found in two Terminal-Bench arms and priced there:
+eight trials, twelve slot-hours. Counting it across the whole corpus, by the
+two strings it leaves behind — `failed to send non-blocking keys` and
+`timeout value=600.0`:
+
+    39 trials
+
+    regex-chess           8      swe100b (SWE-bench)   10
+    write-compressor      6      ft-clean               5
+    dna-assembly          5      think-clean            4
+    install-windows       4      ft6                    3
+    circuit-fibsqrt       3      full-fixed             2
+    adaptive-rejection    2      ...
+
+**Ten of them are the SWE-bench run, and all ten are django.** Large repos and
+long test runs make long model turns, which is exactly what a 600-second
+per-call ceiling cuts. So `SWE-bench Verified 82.0%` — 73 of 89 — was computed
+on a denominator that excluded ten trials killed by a constant of mine. The
+rate may hold; the record should say what it rests on.
+
+### It also finishes the Terminal-Bench story
+
+Fourteen tasks have never been solved by crux in three or more attempts. Ten of
+them are solved by nobody — claude-code and pi fail them too. Four are solved by
+someone else:
+
+    dna-assembly            pi          crux: stall
+    install-windows-3.11    claude-code crux: stall, twice of three runs
+    qemu-startup            both        crux: tmux -e, then timeout
+    protein-assembly        both        crux: two honest zeros
+
+So three of the four tasks where crux is specifically behind were harness
+defects, and one is a real capability gap. That is the whole crux-specific
+deficit against claude-code, and it was almost all mine.
+
+`ft-fixed` is the first run to carry all three fixes, and `swe-stall` re-runs
+the ten django trials that the ceiling took.
