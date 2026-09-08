@@ -603,3 +603,25 @@ def test_a_gain_on_a_setup_broken_task_is_not_credited_either(tmp_path):
     cand = _job_at(tmp_path, "c3", [_trial("a", 1.0)], planned=1)
     r = compare(base, cand)
     assert r["gained"] == [] and r["broke_setup"] == ["a"]
+
+
+def test_median_tokens_ignores_trials_that_never_ran():
+    """A trial that produced nothing is not a cheap trial."""
+    from pathlib import Path
+
+    from crux.analysis import Job, Trial
+
+    job = Job(path=Path("/tmp/x"), trials=[
+        Trial(task="a", reward=1.0, n_input_tokens=1000, n_output_tokens=100),
+        Trial(task="b", reward=1.0, n_input_tokens=3000, n_output_tokens=300),
+        Trial(task="c", reward=None, n_input_tokens=0, n_output_tokens=0),
+    ])
+    assert job.median_tokens() == (2000, 200)
+
+
+def test_median_tokens_of_a_run_that_never_started_is_zero():
+    from pathlib import Path
+
+    from crux.analysis import Job
+
+    assert Job(path=Path("/tmp/x")).median_tokens() == (0, 0)

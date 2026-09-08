@@ -595,6 +595,16 @@ def cmd_report(args) -> int:
         if r:
             print(f"  {result['shared_tasks']} tasks resolve about "
                   f"±{r:.1f} points")
+        # What it cost, beside what it bought. A change that does what it
+        # promised at five times the compute reads identically to one that did
+        # nothing, if only the score is printed -- and it is the worse result.
+        bi, bo = job.median_tokens()
+        ci, co = other.median_tokens()
+        if bi and ci:
+            ratio = ci / bi
+            flag = "  <- " + f"{ratio:.1f}x the input" if ratio >= 1.5 else ""
+            print(f"\n  median tokens per trial   in {bi:>10,} / out {bo:>7,}"
+                  f"   ->   in {ci:>10,} / out {co:>7,}{flag}")
         if result["gained"]:
             print("\nnewly solved:", ", ".join(result["gained"]))
         # Regressions are why this is a task-by-task diff: two gained and two
