@@ -378,3 +378,31 @@ def test_a_scored_trial_is_in_neither_list(tmp_path):
 
     dead, live = unscored_split(str(tmp_path))
     assert dead == [] and live == []
+
+
+def test_a_finished_trial_is_not_still_stalling(tmp_path):
+    """Stall reporting is about live trials, and a dead one is not one.
+
+    A trial that errors before the verifier runs keeps a stale trajectory and
+    no verifier directory, so it was reported as quiet for as long as the run
+    lasted -- five of them sat there for four hours, announcing a stall that
+    was already counted as an error on the line above.
+    """
+    import os
+    import time
+
+    from crux import watch
+
+    run = tmp_path / "2026-09-08__00-00-00"
+    for name, ended in (("dead__aaa", True), ("live__bbb", False)):
+        d = run / name / "agent"
+        d.mkdir(parents=True)
+        tj = d / "trajectory.json"
+        tj.write_text('{"steps": [1, 2, 3]}')
+        old = time.time() - 7200
+        os.utime(tj, (old, old))
+        if ended:
+            (run / name / "result.json").write_text("{}")
+
+    names = [row[0] for row in watch._stalled(str(tmp_path))]
+    assert names == ["live__bbb"]

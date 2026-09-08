@@ -101,7 +101,16 @@ def _rate(jobs_dir: str, window_sec: float = 3600) -> float:
 
 
 def _stalled(jobs_dir: str, quiet_sec: float = 1800) -> list[tuple[str, float, int]]:
-    """Live trials whose trajectory has not been touched in a while."""
+    """Live trials whose trajectory has not been touched in a while.
+
+    Live is the whole point: a trial that has already ended is not stalling,
+    and reporting it as quiet is a false alarm that grows louder for as long as
+    the run continues. A verifier directory was the only end-marker checked,
+    which misses every trial that died before the verifier ran -- the exact
+    population this display exists to surface, so five dead trials sat in it
+    for four hours announcing a stall that had already been recorded as an
+    error above them.
+    """
     run = _latest(jobs_dir)
     if run is None:
         return []
@@ -111,7 +120,12 @@ def _stalled(jobs_dir: str, quiet_sec: float = 1800) -> list[tuple[str, float, i
         age = now - os.path.getmtime(p)
         if age < quiet_sec:
             continue
-        if glob.glob(os.path.join(os.path.dirname(os.path.dirname(p)), "verifier", "*")):
+        trial_dir = os.path.dirname(os.path.dirname(p))
+        # `result.json` is written when a trial ends, whatever the outcome;
+        # verifier output only when it got that far.
+        if os.path.exists(os.path.join(trial_dir, "result.json")):
+            continue
+        if glob.glob(os.path.join(trial_dir, "verifier", "*")):
             continue
         try:
             steps = len(json.load(open(p)).get("steps", []))
