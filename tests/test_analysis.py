@@ -625,3 +625,23 @@ def test_median_tokens_of_a_run_that_never_started_is_zero():
     from crux.analysis import Job
 
     assert Job(path=Path("/tmp/x")).median_tokens() == (0, 0)
+
+
+def test_the_diff_names_which_side_broke(tmp_path):
+    """An exclusion rule nobody can audit becomes a self-serving one.
+
+    On the live head-to-head the rule costs crux two tasks: claude-code's
+    installer fails in both qemu images with zero output tokens, so those tasks
+    are excluded -- and crux solves one of them. Reporting the direction is what
+    lets a reader see that the rule is not being applied in its author's favour.
+    """
+    from crux.analysis import compare
+
+    base = _job_at(tmp_path, "bs", [
+        _trial("qemu", None, exception="NonZeroAgentExitCodeError"),
+        _trial("ok", 1.0),
+    ], planned=2)
+    cand = _job_at(tmp_path, "cs", [_trial("qemu", 1.0), _trial("ok", 1.0)], planned=2)
+    r = compare(base, cand)
+    assert r["broke_setup"] == ["qemu"]
+    assert r["broke_setup_side"]["qemu"] == "baseline"
