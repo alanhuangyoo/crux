@@ -1101,3 +1101,29 @@ So every structural explanation for the remaining gap is now closed:
 What is left is capability, and what the harness work bought is the 39 trials
 the stall took plus the two tasks tmux took -- which is the whole of the
 crux-specific deficit, and all of it was mine.
+
+### Checking a number I had been quoting
+
+`SWE-Atlas-QnA 39.8%` has been in every summary here. It is stitched from four
+runs, because the first three died on infrastructure and were resumed — so the
+figure is a union, not a run, and unions are where this project's mistakes
+live.
+
+Checked rather than assumed:
+
+    distinct tasks attempted   124
+    with a score               123
+    solved                      49    39.8% of scored
+    never scored                 1
+
+    latest result from:  atlas5 74, atlas 20, atlas2 17, atlas3 12
+
+and all four runs carry the same configuration — same agent, same kwargs,
+agent multiplier 4.0, verifier multiplier 3.0. So the union is one
+configuration run in four batches, and stitching per distinct task is what it
+means. The number stands.
+
+Worth doing because the same shape has been wrong twice today: `crux report`
+reading the jobs dir instead of the run inside it, and a mean taken over a task
+set that excluded four zeros on one side only. A figure quoted often enough
+starts to feel checked.
