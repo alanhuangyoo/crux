@@ -567,6 +567,13 @@ def cmd_report(args) -> int:
                 + "\n    These are not evidence about the agent. Fix the setup"
                   " failure and re-run before reading the delta."
             )
+        if result["partial"]:
+            print(
+                "\n  ! still running: " + ", ".join(result["partial"])
+                + "\n    Failing trials take about twice as long, so a run in"
+                  " progress reads high.\n    This delta favours the unfinished"
+                  " side; wait for it before quoting."
+            )
         if abs(result["full_candidate_score"] - result["full_baseline_score"]) > 1e-9:
             print(
                 f"\n  whole-job means (different task sets, not comparable): "
