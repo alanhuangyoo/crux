@@ -170,6 +170,26 @@ function getDefaultAgentDir(): string {
  * });
  * ```
  */
+
+/**
+ * A wall-clock budget for this process, from `PI_TIME_BUDGET_SEC`.
+ *
+ * Nothing inside pi knows how long it is allowed to run. A batch harness does
+ * -- a benchmark trial is given a budget and killed at it -- and without a way
+ * to say so, the run ends mid-tool-call with whatever was on disk at that
+ * instant. An environment variable is how a harness that launches `pi --print`
+ * can hand that number over without pi having to know what a harness is.
+ *
+ * Ignored when unset, zero, or unparseable, which is every interactive session.
+ */
+export function deadlineFromEnv(): number | undefined {
+	const raw = process.env.PI_TIME_BUDGET_SEC;
+	if (!raw) return undefined;
+	const seconds = Number(raw);
+	if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
+	return Date.now() + seconds * 1000;
+}
+
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
@@ -310,6 +330,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			thinkingLevel,
 			tools: [],
 		},
+		deadline: deadlineFromEnv(),
 		convertToLlm: convertToLlmWithBlockImages,
 		streamFn: async (model, context, options) => {
 			const providerRetrySettings = settingsManager.getProviderRetrySettings();

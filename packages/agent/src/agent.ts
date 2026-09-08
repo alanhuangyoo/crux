@@ -120,6 +120,8 @@ export interface AgentOptions {
 	transport?: Transport;
 	maxRetryDelayMs?: number;
 	toolExecution?: ToolExecutionMode;
+	/** Absolute epoch ms after which the loop stops on its own. */
+	deadline?: number;
 }
 
 class PendingMessageQueue {
@@ -175,6 +177,13 @@ export class Agent {
 	private readonly listeners = new Set<(event: AgentEvent, signal: AbortSignal) => Promise<void> | void>();
 	private readonly steeringQueue: PendingMessageQueue;
 	private readonly followUpQueue: PendingMessageQueue;
+
+	/**
+	 * Absolute epoch milliseconds after which the loop stops on its own.
+	 * See `AgentLoopConfig.deadline`; undefined leaves the loop unbounded,
+	 * which is right for an interactive session.
+	 */
+	public deadline?: number;
 
 	public convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	public transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
@@ -235,6 +244,7 @@ export class Agent {
 		this.transport = runtimeOptions.transport ?? "auto";
 		this.maxRetryDelayMs = runtimeOptions.maxRetryDelayMs;
 		this.toolExecution = runtimeOptions.toolExecution ?? "parallel";
+		this.deadline = options.deadline;
 	}
 
 	/**
@@ -470,6 +480,7 @@ export class Agent {
 						}
 					: undefined,
 			convertToLlm: this.convertToLlm,
+			deadline: this.deadline,
 			transformContext: this.transformContext,
 			getApiKey: this.getApiKey,
 			getSteeringMessages: async () => {
