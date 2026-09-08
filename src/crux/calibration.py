@@ -44,9 +44,28 @@ CALIBRATION_MODEL = "qwen3.8-27b"
 # a runaway well before the 262k window.
 CALIBRATION_MAX_OUTPUT_TOKENS = 32768
 
-# Containers in flight when the throughput inflection was measured: 35 gave
-# 587 tok/s across 8-way concurrency, 54 gave 320.
-CALIBRATION_CONTAINERS = 35
+# Containers in flight at the measured throughput inflection.
+#
+# 35 was measured on the previous node (h20-w06, cards 4-7): 587 tok/s across
+# 8-way concurrency there, 320 at 54 containers.
+#
+# Re-measured on the current node (h20-43, cards 0-3) under 29 live containers:
+#
+#     idle, single stream                340 tok/s
+#     29 containers, single stream        84 tok/s
+#     29 containers, 4-way probe          92 tok/s per stream (369 aggregate)
+#     29 containers, 8-way probe          20 tok/s per stream (156 aggregate)
+#
+# Aggregate *falls* from 4-way to 8-way, which is what saturation looks like:
+# the extra streams are queueing, not working. So the inflection on this node
+# is at or below 29, not 35. The number is kept as a ceiling that the audit can
+# still act on, and lowered to what was actually observed.
+#
+# The measurement is not clean -- the probe competes with the real load rather
+# than running against an idle engine -- so it bounds the inflection from above
+# and cannot locate it exactly. That is enough for a warning and not enough for
+# a claim.
+CALIBRATION_CONTAINERS = 29
 
 # A per-call ceiling, as a share of the trial it is bounding.
 #
@@ -145,7 +164,7 @@ def _throughput(run: Run) -> str | None:
     """Past the inflection every container gets slower, so the run does too."""
     if run.containers > CALIBRATION_CONTAINERS:
         return (f"{run.containers} containers is past the measured inflection at "
-                f"{CALIBRATION_CONTAINERS} (587 tok/s -> 320 at 54): more "
+                f"{CALIBRATION_CONTAINERS} (340 tok/s idle -> 84 under load): more "
                 f"concurrency here buys less, not more")
     return None
 
@@ -154,7 +173,7 @@ CONSTANTS: tuple[Constant, ...] = (
     Constant("llm_timeout", f"a {CALIBRATION_BUDGET_SEC:.0f}s agent budget", _timeout),
     Constant("max_tokens", f"the {CALIBRATION_MODEL} deployment", _output_cap),
     Constant("stall caps", "terminal-bench at 8x", _stall_caps),
-    Constant("concurrency", f"{CALIBRATION_CONTAINERS} containers", _throughput),
+    Constant("concurrency", f"{CALIBRATION_CONTAINERS} containers on h20-43", _throughput),
 )
 
 

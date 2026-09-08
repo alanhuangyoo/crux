@@ -58,8 +58,8 @@ def test_crossing_the_throughput_inflection_is_flagged():
 
 def test_a_neighbouring_job_counts_toward_the_inflection():
     """A second arm is invisible from inside the first one."""
-    assert audit(Run(concurrent=30)) == []
-    assert any("inflection" in ln for ln in audit(Run(concurrent=30, other_containers=15)))
+    assert audit(Run(concurrent=20)) == []
+    assert any("inflection" in ln for ln in audit(Run(concurrent=20, other_containers=15)))
 
 
 def test_every_line_names_the_regime_it_was_measured_in():
