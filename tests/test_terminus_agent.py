@@ -856,18 +856,22 @@ def test_a_model_call_has_a_timeout():
     import tempfile
     from pathlib import Path
 
-    from crux.terminus_agent import _LLM_CALL_TIMEOUT_SEC, CruxTerminusAgent
+    from crux.terminus_agent import CruxTerminusAgent, _llm_timeout_for
 
     d = Path(tempfile.mkdtemp())
     a = CruxTerminusAgent(logs_dir=d, model_name="openai/x")
-    assert a._llm_timeout == _LLM_CALL_TIMEOUT_SEC
-    assert 0 < _LLM_CALL_TIMEOUT_SEC < 6000  # anything is better than the default
+    # 0 is the sentinel for "derive from the budget", which is not known until
+    # setup() has seen the environment. Whatever it derives is a real ceiling
+    # and well under litellm's 6000.
+    assert a._llm_timeout == 0
+    for budget in (0.0, 900.0, 7200.0):
+        assert 0 < _llm_timeout_for(budget) < 6000
 
     b = CruxTerminusAgent(logs_dir=d, model_name="openai/x", llm_timeout=120)
     assert b._llm_timeout == 120
-    # 0 is the escape hatch back to litellm's own default
-    c = CruxTerminusAgent(logs_dir=d, model_name="openai/x", llm_timeout=0)
-    assert c._llm_timeout == 0
+    # A negative value is the escape hatch back to litellm's own default.
+    c = CruxTerminusAgent(logs_dir=d, model_name="openai/x", llm_timeout=-1)
+    assert c._llm_timeout == -1
 
 
 def test_the_timeout_survives_the_truncation_retry():

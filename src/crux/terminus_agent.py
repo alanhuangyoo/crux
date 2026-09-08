@@ -564,7 +564,9 @@ class CruxTerminusAgent(Terminus2):
         max_tokens = kwargs.pop("max_tokens", _MAX_OUTPUT_TOKENS)
         # Overridable so a slower endpoint can raise it; 0 restores litellm's
         # 6000s default for anyone who wants the old behaviour back.
-        # 0 means "derive it from the budget"; an explicit kwarg still wins.
+        # 0 means "derive it from the budget" and is the default; a positive
+        # value pins the ceiling; a negative one removes it, which hands the
+        # call back to litellm's own 6000-second default.
         self._llm_timeout = float(kwargs.pop("llm_timeout", 0) or 0)
         # Whether the model's own reasoning is handed back to it on the next
         # turn. Upstream defaults this to False, which on this model throws
@@ -1240,7 +1242,7 @@ class CruxTerminusAgent(Terminus2):
         # survive into the retry -- which is exactly the call most likely to
         # hang.
         t = getattr(self, "_llm_timeout", 0.0)
-        if not t:
+        if t == 0:
             # The budget is not known until setup() has seen the environment,
             # so the ceiling is derived here rather than in __init__.
             t = _llm_timeout_for(getattr(self, "_budget_sec", 0.0))
