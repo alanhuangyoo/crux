@@ -103,3 +103,25 @@ def test_the_bundle_path_is_overridable_by_env():
     finally:
         del os.environ["CRUX_PI_BUNDLE"]
         importlib.reload(pi_agent)
+
+
+def test_the_bundle_is_selectable_per_arm(tmp_path, monkeypatch):
+    """A control arm and a treatment arm must differ only in the bundle.
+
+    Reading the path from the environment would make the two arms differ in how
+    they were launched as well as in what they run, which is the confound this
+    project spends most of its time avoiding.
+    """
+    import crux.pi_agent as pi_agent
+
+    stock = tmp_path / "stock.tar.gz"
+    patched = tmp_path / "patched.tar.gz"
+    for f in (stock, patched):
+        f.write_bytes(b"x")
+
+    for chosen in (stock, patched):
+        agent = pi_agent.CruxPiAgent.__new__(pi_agent.CruxPiAgent)
+        agent._bundle_path = str(chosen)
+        env = FakeEnv()
+        asyncio.run(agent.install(env))
+        assert env.uploaded[0][0] == str(chosen)
