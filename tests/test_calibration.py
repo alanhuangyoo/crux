@@ -130,3 +130,36 @@ def test_the_audit_runs_on_a_bare_interpreter():
         env={"PYTHONPATH": src, "PATH": "/usr/bin:/bin"},
     )
     assert "ok" in out.stdout, out.stderr
+
+
+def test_live_containers_are_preferred_over_declared_concurrency(monkeypatch):
+    """Declared is what a job may hold; live is what it holds now.
+
+    Three jobs winding down their last tasks declared 33 slots while running 16
+    containers, and the audit refused a fourth job on capacity that was already
+    free. A warning wrong in the "do nothing" direction still gets ignored,
+    which is the failure worth avoiding.
+    """
+    import crux.cli as cli
+
+    monkeypatch.setattr(cli, "live_containers", lambda: 16)
+    monkeypatch.setattr(cli, "running_harbor_jobs",
+                        lambda *a, **k: ["pid 1 agent=a n-concurrent=33 jobs-dir=/x"])
+    assert cli.running_concurrency() == 16
+
+
+def test_it_falls_back_to_declared_when_docker_cannot_be_asked(monkeypatch):
+    import crux.cli as cli
+
+    monkeypatch.setattr(cli, "live_containers", lambda: None)
+    monkeypatch.setattr(cli, "running_harbor_jobs",
+                        lambda *a, **k: ["pid 1 agent=a n-concurrent=33 jobs-dir=/x"])
+    assert cli.running_concurrency() == 33
+
+
+def test_an_explicit_job_list_is_still_read_from_the_list(monkeypatch):
+    """Passing jobs in means "score these", not "ask docker"."""
+    import crux.cli as cli
+
+    monkeypatch.setattr(cli, "live_containers", lambda: 999)
+    assert cli.running_concurrency(["pid 1 agent=a n-concurrent=7 jobs-dir=/x"]) == 7
