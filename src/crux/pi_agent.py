@@ -121,7 +121,16 @@ class CruxPiAgent(Pi):
         return "crux-pi"
 
     def __init__(self, *args, sections: str | None = None,
-                 bundle: str | None = None, **kwargs):
+                 bundle: str | None = None, pi_env: str | None = None, **kwargs):
+        # Settings for the pi process itself, as `KEY=value,KEY=value`. They
+        # cannot be passed through the environment of the run: harbor builds
+        # that env from the model connection alone, so a variable exported on
+        # the runner reaches nothing inside the container -- the same shape as
+        # a tmux `-e` that the container's tmux rejects, and it looks armed
+        # either way. See `_deliver_pi_env`.
+        self._pi_env = dict(
+            kv.split("=", 1) for kv in (pi_env or "").split(",") if "=" in kv
+        )
         # Which prebuilt install to unpack. Passing it as a kwarg rather than
         # reading the env means a control arm and a treatment arm reach the
         # same code by the same path, and differ only in the bundle -- which is
@@ -240,6 +249,37 @@ class CruxPiAgent(Pi):
             return
         logger.info("pi installed from bundle: %s", out.strip().splitlines()[-1:] or "?")
 
+    async def _deliver_pi_env(self, environment: BaseEnvironment) -> None:
+        """Put pi's own settings where its run command will read them.
+
+        harbor starts the agent with
+
+            . ~/.nvm/nvm.sh; PI_CODING_AGENT_DIR=... pi --print ...
+
+        and builds the exec environment from the model connection, so there is
+        no route for an arbitrary variable. That file is sourced on every run by
+        construction, which makes appending the exports to it the one place a
+        setting is certain to arrive. Written once at install, marked so a
+        second install replaces rather than stacks.
+        """
+        if not self._pi_env:
+            return
+        exports = "; ".join(
+            f"export {k}={shlex.quote(str(v))}" for k, v in sorted(self._pi_env.items())
+        )
+        marker = "# crux-pi-env"
+        result = await self.exec_as_agent(
+            environment,
+            command=(
+                'f="$HOME/.nvm/nvm.sh"; '
+                f"grep -q {shlex.quote(marker)} \"$f\" || "
+                f"printf '%s\\n' {shlex.quote(marker + ' ' + exports)} >> \"$f\"; "
+                'bash -lc \'. "$HOME/.nvm/nvm.sh"; echo READY=$PI_MAX_OUTPUT_TOKENS\' 2>/dev/null || true'
+            ),
+        )
+        out = (getattr(result, "stdout", "") or "") + (getattr(result, "stderr", "") or "")
+        logger.info("pi settings delivered (%s): %s", exports, out.strip()[-60:])
+
     @override
     async def run(self, instruction: str, environment: BaseEnvironment,
                   context) -> None:
@@ -261,6 +301,7 @@ class CruxPiAgent(Pi):
         one. That keeps it plumbing: the difference between an answer that was
         never given and one that was given to the wrong channel.
         """
+        await self._deliver_pi_env(environment)
         await super().run(instruction, environment, context)
         path = _answer_path(instruction)
         if not path:
