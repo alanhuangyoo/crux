@@ -200,3 +200,33 @@ def test_an_unknown_section_still_raises():
 
     with pytest.raises(ValueError):
         build_sections(("finish", "finnish"))
+
+
+def test_the_doing_section_names_both_measured_failures():
+    """Carried from Claude Code's own `# Doing tasks` section.
+
+    Eighteen of pi's twenty-four failed Terminal-Bench 2.1 trials ended with
+    the agent declaring itself done and the verifier disagreeing; four more
+    stopped after two to four actions. Nothing in pi's own prompt addresses
+    either, and this is the text a scaffold that leads by 17 points on the same
+    model actually ships.
+    """
+    from crux.prompts import PROMPT_SECTIONS, build_sections
+
+    body = PROMPT_SECTIONS["doing"]
+    assert "verify it actually works" in body      # against declaring done
+    assert "single failure" in body                # against giving up at two actions
+    assert "say so explicitly" in body             # and an honest out when it cannot verify
+
+    # Reachable through the same builder as every other section, so an arm
+    # asking for it cannot silently run the control.
+    assert body.strip() in build_sections(["doing"])
+
+
+def test_an_unknown_section_still_raises():
+    import pytest
+
+    from crux.prompts import build_sections
+
+    with pytest.raises(ValueError):
+        build_sections(["doing", "typo"])
