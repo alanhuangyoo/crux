@@ -718,6 +718,35 @@ CC_DOING_FULL_SECTION = """\
 """
 
 
+# The one directive in Claude Code's `getUsingYourToolsSection` that bears on a
+# trial: prefer the dedicated file tools over their shell equivalents, and keep
+# the shell for shell work.
+#
+#     Prefer dedicated tools over Bash equivalents (e.g., Read over cat, Edit
+#     over sed, Glob over find, Grep over grep). Reserve Bash for shell
+#     operations: package installs, test runners, build commands, git
+#     operations.
+#
+# Measured on this benchmark: pi routes 86.1% of its tool calls through bash
+# against Claude Code's 73.2%, and the rest of that section is about tool
+# discovery, deferred tools and MCP, none of which exists in a trial.
+#
+# The Glob and Grep half is dropped because pi has neither tool, and Claude Code
+# called them zero times in 89 trials -- an instruction to prefer a tool that is
+# not there would only cost tokens.
+CC_TOOLS_SECTION = """\
+# Using your tools
+
+Prefer the dedicated file tools over their shell equivalents: read a file with
+the read tool rather than `cat`, change one with the edit tool rather than `sed`
+or a rewritten heredoc. They report what changed, and an edit that does not
+match tells you so instead of silently succeeding.
+
+Reserve the shell for shell work: package installs, test runners, build
+commands, git.
+"""
+
+
 PROMPT_SECTIONS = {
     "scoring": TERMINUS_SCORING_SECTION,
     "harness": TERMINUS_HARNESS_SECTION,
@@ -726,8 +755,9 @@ PROMPT_SECTIONS = {
     "finish": CC_FINISH_SECTION,
     "doing": CC_DOING_TASKS_SECTION,
     "doing_full": CC_DOING_FULL_SECTION,
+    "cc_tools": CC_TOOLS_SECTION,
 }
-_SECTION_ORDER = ("scoring", "harness", "submit", "finish", "doing", "doing_full")
+_SECTION_ORDER = ("scoring", "harness", "submit", "finish", "doing", "doing_full", "cc_tools")
 
 
 def build_sections(names) -> str:

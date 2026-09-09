@@ -272,3 +272,22 @@ def test_both_sections_are_reachable_and_ordered():
     both = build_sections(["doing", "doing_full"])
     assert "# Finishing and persisting" in both
     assert "# Doing tasks" in both
+
+
+def test_the_tools_directive_targets_the_measured_bash_share():
+    """pi routes 86.1% of its tool calls through bash; Claude Code 73.2%.
+
+    Claude Code's `getUsingYourToolsSection` says to prefer the dedicated file
+    tools over their shell equivalents and keep the shell for shell work. The
+    Glob and Grep half of that is dropped: pi has neither tool, and Claude Code
+    called them zero times in 89 trials, so an instruction to prefer them would
+    only cost tokens.
+    """
+    from crux.prompts import PROMPT_SECTIONS
+
+    body = PROMPT_SECTIONS["cc_tools"]
+    assert "rather than `cat`" in body
+    assert "rather than `sed`" in body
+    assert "package installs" in body      # what the shell is still for
+    for absent in ("Glob", "Grep", "MCP", "deferred"):
+        assert absent not in body, absent
