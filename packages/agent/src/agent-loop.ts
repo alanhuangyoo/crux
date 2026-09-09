@@ -78,7 +78,7 @@ function deadlineNotice(remainingMs: number): string {
  * characters, entirely thinking, `stopReason: "length"`, and was recorded as
  * settled having taken no action at all.
  */
-const MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3;
+export const MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3;
 
 /** What the model is told once the raised ceiling has also been used up. */
 const OUTPUT_LIMIT_RECOVERY_NOTICE =
@@ -99,6 +99,40 @@ function escalatedMaxTokens(config: AgentLoopConfig): number | undefined {
 	if (current !== undefined && current >= ceiling) return undefined;
 	return ceiling;
 }
+
+/**
+ * The loop's recovery state, carried as one value rather than as loose flags.
+ *
+ * Claude Code's query loop threads a `State` object through every iteration and
+ * rebuilds it immutably on each `continue` -- `maxOutputTokensRecoveryCount`,
+ * `hasAttemptedReactiveCompact`, `maxOutputTokensOverride`, `turnCount`,
+ * `transition` -- so that a later iteration can see which recoveries have
+ * already been spent and refuse to repeat one.
+ *
+ * pi's loop had grown the same information as four unrelated locals: a boolean,
+ * a counter, another boolean, and a per-iteration `let`. Three of them were
+ * added by this work, each in the shape that suited the change being made, and
+ * nothing outside the function could read any of them. Collecting them makes
+ * the loop's recovery behaviour one value that can be logged, asserted on, and
+ * extended without adding a fifth flag.
+ */
+interface LoopState {
+	/** The output ceiling has been raised once; a second truncation speaks. */
+	readonly escalated: boolean;
+	/** Recovery notices sent, bounded by MAX_OUTPUT_TOKENS_RECOVERY_LIMIT. */
+	readonly outputLimitRecoveries: number;
+	/** The deadline warning is sent once; repeated, it becomes the subject. */
+	readonly deadlineWarned: boolean;
+	/** Turns completed, counting every assistant response the loop has taken. */
+	readonly turnCount: number;
+}
+
+const INITIAL_LOOP_STATE: LoopState = {
+	escalated: false,
+	outputLimitRecoveries: 0,
+	deadlineWarned: false,
+	turnCount: 0,
+};
 
 /**
  * Start an agent loop with a new prompt message.
@@ -241,15 +275,10 @@ async function runLoop(
 	let lastCompletedTurn: PrepareNextTurnContext | undefined;
 	// Consecutive turns handed back for producing neither a tool call nor an
 	// answer. Reset by any turn that does one of those.
-	// Two-phase recovery for a turn cut off at the output limit; see
-	// `escalatedMaxTokens`. `escalated` records that the ceiling has been
-	// raised, so a second truncation moves on to telling the model instead of
-	// raising it again.
-	let escalated = false;
-	let outputLimitRecoveries = 0;
-	// Whether the agent has been told the deadline is close. Once only: a
-	// warning repeated every turn becomes the thing it is reasoning about.
-	let deadlineWarned = false;
+	// Recovery state as one value; see `LoopState`. Replaced immutably at each
+	// point that spends a recovery, so what has been tried is always readable
+	// as a whole rather than reconstructed from four separate flags.
+	let state: LoopState = INITIAL_LOOP_STATE;
 	// Check for steering messages at start (user may have typed while waiting)
 	let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
 
@@ -301,8 +330,8 @@ async function runLoop(
 					await emit({ type: "agent_end", messages: newMessages });
 					return;
 				}
-				if (!deadlineWarned && remaining <= DEADLINE_WARNING_MS) {
-					deadlineWarned = true;
+				if (!state.deadlineWarned && remaining <= DEADLINE_WARNING_MS) {
+					state = { ...state, deadlineWarned: true };
 					const notice: AgentMessage = {
 						role: "user",
 						content: [{ type: "text", text: deadlineNotice(remaining) }],
@@ -356,16 +385,16 @@ async function runLoop(
 			const spentTheCeiling =
 				config.escalateOnSpentCeiling === true && ceiling > 0 && (message.usage?.output ?? 0) >= ceiling;
 			if (toolCalls.length === 0 && message.stopReason === "length" && spentTheCeiling) {
-				const ceiling = escalated ? undefined : escalatedMaxTokens(config);
+				const ceiling = state.escalated ? undefined : escalatedMaxTokens(config);
 				if (ceiling !== undefined) {
-					escalated = true;
+					state = { ...state, escalated: true };
 					retrySilently = true;
 					transition = { reason: "output_limit_escalate", maxTokens: ceiling };
 					config = { ...config, maxTokens: ceiling };
-				} else if (outputLimitRecoveries < MAX_OUTPUT_TOKENS_RECOVERY_LIMIT) {
-					outputLimitRecoveries += 1;
+				} else if (state.outputLimitRecoveries < MAX_OUTPUT_TOKENS_RECOVERY_LIMIT) {
+					state = { ...state, outputLimitRecoveries: state.outputLimitRecoveries + 1 };
 					recovery = OUTPUT_LIMIT_RECOVERY_NOTICE;
-					transition = { reason: "output_limit_recovery", attempt: outputLimitRecoveries };
+					transition = { reason: "output_limit_recovery", attempt: state.outputLimitRecoveries };
 				}
 			}
 			if (toolCalls.length > 0) {
@@ -388,6 +417,7 @@ async function runLoop(
 			if (!transition && toolCalls.length > 0 && hasMoreToolCalls) {
 				transition = { reason: "tool_calls", count: toolCalls.length };
 			}
+			state = { ...state, turnCount: state.turnCount + 1 };
 			await emit({ type: "turn_end", message, toolResults, transition });
 
 			lastCompletedTurn = {

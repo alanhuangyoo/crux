@@ -8,7 +8,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
-import { agentLoop, agentLoopContinue } from "../src/agent-loop.ts";
+import { agentLoop, agentLoopContinue, MAX_OUTPUT_TOKENS_RECOVERY_LIMIT } from "../src/agent-loop.ts";
 import { setDefaultStreamFn } from "../src/index.ts";
 import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool } from "../src/types.ts";
 
@@ -1891,5 +1891,68 @@ describe("why the loop continued, recorded rather than inferred", () => {
 	it("leaves the last turn without one", async () => {
 		const reasons = await transitionsFrom([answered()]);
 		expect(reasons).toEqual([undefined]);
+	});
+});
+
+describe("the loop's recovery state is one value, not four flags", () => {
+	// Claude Code threads a State object through every iteration and rebuilds it
+	// immutably on each continue, so a later iteration can see which recoveries
+	// have already been spent. pi's loop had the same information as four
+	// unrelated locals -- a boolean, a counter, another boolean, and a
+	// per-iteration let -- three of them added by this work, each shaped to suit
+	// the change being made, none readable from outside the function.
+
+	function run(replies: AssistantMessage[], patch: Partial<AgentLoopConfig> = {}) {
+		let call = 0;
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			const message = replies[Math.min(call, replies.length - 1)]!;
+			call++;
+			queueMicrotask(() => stream.push({ type: "done", reason: "stop", message }));
+			return stream;
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [] };
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			escalateOnSpentCeiling: true,
+			...patch,
+		};
+		return (async () => {
+			const transitions: string[] = [];
+			for await (const e of agentLoop([createUserMessage("go")], context, config, undefined, streamFn as any)) {
+				if (e.type === "turn_end" && (e as any).transition) {
+					transitions.push((e as any).transition.reason);
+				}
+			}
+			return { transitions, calls: call };
+		})();
+	}
+
+	const spentCeiling = () => {
+		const m = createAssistantMessage([{ type: "thinking", thinking: "..." }], "length");
+		m.usage.output = createModel().maxTokens;
+		return m;
+	};
+	const answered = () => createAssistantMessage([{ type: "text", text: "done" }]);
+
+	it("spends the escalation once, then moves to the spoken recovery", async () => {
+		// The whole point of carrying `escalated`: a second truncation must not
+		// raise the ceiling again, it must say something.
+		const r = await run([spentCeiling(), spentCeiling(), answered()]);
+		expect(r.transitions).toEqual(["output_limit_escalate", "output_limit_recovery"]);
+	});
+
+	it("counts the spoken recoveries and stops at the limit", async () => {
+		const r = await run([spentCeiling()]);
+		const spoken = r.transitions.filter((t) => t === "output_limit_recovery");
+		expect(r.transitions[0]).toBe("output_limit_escalate");
+		expect(spoken).toHaveLength(MAX_OUTPUT_TOKENS_RECOVERY_LIMIT);
+	});
+
+	it("leaves a clean run with no recovery transitions at all", async () => {
+		const r = await run([answered()]);
+		expect(r.transitions).toEqual([]);
+		expect(r.calls).toBe(1);
 	});
 });
