@@ -303,7 +303,10 @@ def test_the_install_check_does_not_depend_on_nvms_path(tmp_path):
     cmd = seen[0]
     assert 'ls -d "$HOME"/.nvm/versions/node/*/bin' in cmd   # resolved by glob
     assert '"$b/node" "$b/pi" --version' in cmd              # run by absolute path
-    assert "nvm.sh" not in cmd                               # nvm never consulted
+    # nvm.sh is written to (for the PATH), never sourced to find the binary --
+    # sourcing it is the dependency that failed installs that had worked.
+    assert ". \"$HOME/.nvm/nvm.sh\"" not in cmd
+    assert ". ~/.nvm" not in cmd
 
 
 def test_an_alpine_image_gets_the_musl_node(tmp_path):
@@ -351,3 +354,32 @@ def test_a_glibc_image_keeps_the_bundled_node(tmp_path):
     asyncio.run(agent.install(FakeEnv()))
     # The swap is conditional in the shell, so the glibc path is the else.
     assert "CRUX_PI_LIBC=glibc" in seen[0]
+
+
+def test_the_path_is_written_where_the_run_line_sources_it(tmp_path):
+    """Stronger than the /usr/local/bin symlink, and for the same failure.
+
+    Two SWE-Atlas trials installed cleanly -- the bundle unpacked, the version
+    printed -- and still died at run time on `pi: command not found` with the
+    symlink in place. harbor's run line always sources ~/.nvm/nvm.sh, so a PATH
+    written there does not depend on nvm selecting a version, on
+    /usr/local/bin being writable, or on it being on the PATH the run inherits.
+    """
+    import crux.pi_agent as pi_agent
+
+    bundle = tmp_path / "b.tar.gz"
+    bundle.write_bytes(b"x")
+    agent = pi_agent.CruxPiAgent.__new__(pi_agent.CruxPiAgent)
+    agent._bundle_path = str(bundle)
+    seen = []
+
+    async def as_agent(environment, command=None, **kw):
+        seen.append(command)
+        return _Exec("0.85.1\nCRUX_PI_BIN=/root/.nvm/versions/node/v22/bin\n")
+
+    agent.exec_as_agent = as_agent
+    asyncio.run(agent.install(FakeEnv()))
+    cmd = seen[0]
+    assert "crux-pi-path" in cmd            # marked, so a reinstall does not stack
+    assert 'export PATH=' in cmd
+    assert "nvm.sh" in cmd                  # the file the run line sources
