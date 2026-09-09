@@ -43,9 +43,18 @@ pairs, p=0.006). Seven explanations were checked and rejected:
 | "It thinks more between actions" | A units error. Its assistant messages carry one block each, so 115 "turns" is 40 tool calls |
 | "pi writes over-precise regexes" | Backwards: length-bounded patterns are 3.8% of claude-code's greps, 1.3% of pi's |
 | Prefix caching | pi 96.4%, claude-code 27.2% |
+| "pi's read tool fails 43% of the time" | Not a finding. `isError` is a field on every one of pi's tool results and I was keyword-matching result *text* instead: the hits were successful reads of files containing the word -- an nginx config with `error_log`, a TLS-checking script, a MIPS VM. The real rate is 0.7% |
 | "Four tasks pass every test and still score zero" | Not a finding. I read the verifier output of the current arm to explain losses measured in an earlier one; in the current arm those four score 1.0 |
 
-Seven of those are explanations the data rejected; the eighth was a
+Tool failure rates, measured from `isError` rather than guessed at: bash
+9.8%, edit 5.7%, write 1.8%, read 0.7%. edit is healthy, which is why
+codex's formally-specified `apply_patch` -- a real difference between the two
+harnesses -- is not the thing to port here. codex's `get_context_remaining`
+disqualifies itself the same way: pi's peak context is 14% of the window at
+the median, so a tool for asking how much is left would always answer that
+there is plenty.
+
+Eight of those are explanations the data rejected; three were
 comparison error of my own, which is the more useful of the two kinds. The
 pattern across all eight is the point: what I read out of trajectory
 statistics has not once survived being checked, so it is not a basis for
