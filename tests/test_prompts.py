@@ -145,3 +145,58 @@ def test_the_probe_counts_the_tool_it_claims_to():
     assert _count("crux_tools", "ls -la /app", "") == 0
     assert _count("crux_tools", "crux read /app/solver.py", "") == 1
     assert _count("crux_tools", "crux grep x . && crux files '*.py'", "") == 2
+
+
+# --------------------------------------------------------------------------
+# the section ported from Claude Code's own prompt
+
+
+def test_the_finish_section_names_both_measured_failures():
+    """Two lines from Claude Code's `# Doing tasks`, each with a number behind it.
+
+    Verify-before-done: 18 of pi's 24 failed Terminal-Bench trials ended with
+    `agent_settled`, and 69 of 73 never ran anything that looks like a check.
+    Diagnose-before-abandoning: on tasks it failed, stock pi issued a median of
+    7 tool calls across 5 turns; Claude Code issued 40.
+    """
+    from crux.prompts import build_sections
+
+    t = build_sections(("finish",)).lower()
+    assert "verify it actually works" in t
+    assert "say so explicitly rather than claiming success" in t
+    assert "diagnose why before switching tactics" in t
+    assert "do not abandon a viable approach after a single failure" in t
+
+
+def test_the_finish_section_leaves_out_what_is_about_claude_code():
+    """Its section runs to eighty lines; most of it is being Claude Code.
+
+    Porting the whole thing would carry slash commands, feedback channels and
+    its own tool names into a benchmark where none of them exist -- and would
+    make an A/B unattributable across a dozen unrelated instructions.
+    """
+    from crux.prompts import build_sections
+
+    t = build_sections(("finish",))
+    for foreign in ("/help", "/issue", "/share", "Claude Code", "TodoWrite",
+                    "AskUserQuestion", "Slack", "CLAUDE.md"):
+        assert foreign not in t
+
+
+def test_finish_composes_with_the_other_sections():
+    from crux.prompts import build_sections
+
+    both = build_sections(("scoring", "finish"))
+    assert "all or nothing" in both
+    assert "Finishing" in both
+    # Fixed order, so two runs asking for the same set produce the same bytes.
+    assert both.index("all or nothing") < both.index("Finishing")
+
+
+def test_an_unknown_section_still_raises():
+    import pytest
+
+    from crux.prompts import build_sections
+
+    with pytest.raises(ValueError):
+        build_sections(("finish", "finnish"))
