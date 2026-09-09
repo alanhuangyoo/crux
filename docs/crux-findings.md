@@ -56,6 +56,24 @@ agent ran, produced an answer, and the answer was wrong. No mechanism in the
 harness accounts for those, and seven attempts to find one have failed. The
 remaining 9 are the harness failures the changes above target.
 
+## The one difference not yet tested at its real size
+
+pi's core system prompt is 4,169 characters of literal text. Claude Code's is
+27,960 — 6.7x — and structured into sections (`# Doing tasks`, `## Bias toward
+action`, `## Be concise`, `## Pacing`, `# Environment`), where pi's carries no
+section structure at all.
+
+What was tested was appending 300 characters of it. That arm is running at 1
+gain and 3 losses, and it would be wrong to read that as "the prompt is not the
+difference": 4,169 + 300 against 27,960 is not the comparison. Nine prompt
+sections have now landed inside the noise here, and every one of them was a
+few hundred characters bolted onto a prompt an order of magnitude smaller than
+the one it was being compared against.
+
+That leaves the prompt as the largest untested difference, and the only one
+still standing after ten mechanism hypotheses. Testing it properly means
+porting the structure, not a paragraph of it.
+
 ## The method that produced this
 
 Every number here is a paired, same-task comparison with a sign test, never a
