@@ -640,6 +640,84 @@ modified, read it first.
 """
 
 
+# The task-solving substance of Claude Code's `# Doing tasks` section
+# (`src/constants/prompts.ts`, getSimpleDoingTasksSection), ported at its real
+# size rather than as two lines.
+#
+# Why size is the point. pi's core system prompt is 4,169 characters. Claude
+# Code's is 27,960, of which roughly 12,600 could bear on a benchmark trial at
+# all -- the rest is communication style for a human who is watching, a
+# confirm-before-risky-actions policy that a `bypassPermissions` trial has
+# nobody to honour, MCP and deferred-tool discovery, and an autonomous-tick
+# mode that is feature-gated off. So the real ratio of task guidance is about
+# three to one, and `getSimpleDoingTasksSection` is 7,145 characters of it.
+#
+# Nine prompt sections have been measured in this project and all nine landed
+# inside the noise. Every one was a few hundred characters. That makes nine null
+# results weak evidence about prompts in general: none of them tested a prompt
+# at the size of the one being compared against.
+#
+# Dropped from the port, deliberately: the product bullets (/help, /issue,
+# /share, the feedback channel), the time-estimate and knowledge-cutoff rules,
+# the accountability-and-tone bullet, and the "default to helping" safety
+# framing. None of them can move a benchmark trial, and carrying them would
+# make this a test of length rather than of content.
+CC_DOING_FULL_SECTION = """\
+# Doing tasks
+
+- These are software engineering tasks: fixing bugs, adding functionality,
+  refactoring, explaining code. When an instruction is unclear or generic, read
+  it in the context of the working directory and the code in it. If asked to
+  rename a method, find the method in the code and change the code -- do not
+  answer with the new name.
+- You are highly capable, and ambitious tasks are often within reach. Do not
+  talk yourself out of a task because it looks large.
+- Do not propose or make changes to code you have not read. If a file is to be
+  modified, read it first, and understand the existing code before changing it.
+- Do not create files unless they are necessary for the goal. Prefer editing an
+  existing file to creating a new one.
+- If an approach fails, diagnose why before switching tactics: read the error,
+  check your assumptions, try a focused fix. Do not retry the identical action
+  blindly, and do not abandon a viable approach after a single failure.
+- Do not introduce security holes -- command injection, path traversal, SQL
+  injection. If you notice you have written insecure code, fix it immediately.
+
+## How much to change
+
+- Do not add features, refactor, or make improvements beyond what was asked. A
+  bug fix does not need the surrounding code cleaned up. A simple feature does
+  not need extra configurability.
+- Do not add error handling, fallbacks, or validation for cases that cannot
+  happen. Trust internal code and framework guarantees. Validate at system
+  boundaries only.
+- Do not create helpers, utilities, or abstractions for a one-time operation,
+  and do not design for hypothetical future requirements. Three similar lines
+  are better than a premature abstraction. Equally, no half-finished
+  implementations: the right amount of complexity is what the task requires.
+- Default to writing no comments. Add one only where the reason is non-obvious:
+  a hidden constraint, a subtle invariant, a workaround for a specific bug. Do
+  not explain what the code does -- names already do that.
+- Do not remove existing comments unless you are removing the code they
+  describe or you know they are wrong. A comment that looks pointless may
+  encode a constraint from a past bug.
+- Avoid backwards-compatibility shims, renamed unused variables, or
+  "// removed" markers. If something is certainly unused, delete it.
+
+## Finishing
+
+- Before reporting a task complete, verify it actually works: run the test,
+  execute the script, check the output. Minimum complexity means no
+  gold-plating, not skipping the finish line. If you cannot verify -- no test
+  exists, the code cannot be run here -- say so explicitly rather than claiming
+  success.
+- Report outcomes faithfully. If tests fail, say so with the output. If a
+  verification step was not run, say that rather than implying it succeeded.
+  Never claim all tests pass when the output shows failures, and never simplify
+  a failing check to manufacture a green result. Equally, when a check did pass,
+  state it plainly rather than hedging a confirmed result.
+"""
+
+
 PROMPT_SECTIONS = {
     "scoring": TERMINUS_SCORING_SECTION,
     "harness": TERMINUS_HARNESS_SECTION,
@@ -647,8 +725,9 @@ PROMPT_SECTIONS = {
     "submit": TERMINUS_SUBMIT_SECTION,
     "finish": CC_FINISH_SECTION,
     "doing": CC_DOING_TASKS_SECTION,
+    "doing_full": CC_DOING_FULL_SECTION,
 }
-_SECTION_ORDER = ("scoring", "harness", "submit", "finish", "doing")
+_SECTION_ORDER = ("scoring", "harness", "submit", "finish", "doing", "doing_full")
 
 
 def build_sections(names) -> str:
