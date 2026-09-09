@@ -83,6 +83,43 @@ That leaves the prompt as the largest untested difference, and the only one
 still standing after ten mechanism hypotheses. Testing it properly means
 porting the structure, not a paragraph of it.
 
+## What 89 tasks can and cannot detect
+
+This should have been the first calculation, not the last.
+
+Two runs of one configuration disagree on 15-16% of tasks here, so a null
+comparison over 89 paired tasks produces about 14 discordant pairs. A sign test
+on 14 pairs reaches p<0.05 only at a 12-2 split:
+
+    discordant pairs   split needed   net effect it represents
+                  10            9-1                 9.0 points
+                  14           12-2                11.2 points
+                  20           15-5                11.2 points
+
+**So this design can only detect an effect of nine points or more.** Every
+effect measured in this project is smaller than that:
+
+    seven source changes      +7.6 points   (8-2,  p=0.109)
+    587-character prompt      -2.3 points   (2-3,  p=1.000)
+    64K output ceiling        -6.3 points   (1-2,  p=1.000)
+
+Which means "p=0.109, not significant" and "the change does not work" are
+different statements, and this project has been using them interchangeably. The
+seven changes may be worth seven points or nothing; 89 tasks cannot tell.
+
+It also makes one earlier decision wrong. A replication was stopped on the
+reasoning that the gains split evenly between pairs the change touched and
+pairs it did not, so "more samples will not change the attribution". The
+attribution argument stands, but the score question was never answered, and
+stopping the replication guaranteed it would not be.
+
+The claude-code gap is the one measurement this design can carry: 17 points is
+well above the floor, which is why p=0.006 there means what it says.
+
+The current run answers the question properly -- the same comparison at
+`--attempts 3`, 267 paired observations, which brings the detectable effect
+down to five or six points.
+
 ## The method that produced this
 
 Every number here is a paired, same-task comparison with a sign test, never a
