@@ -21,6 +21,7 @@ import type {
 	AgentToolResult,
 	PrepareNextTurnContext,
 	StreamFn,
+	TurnTransition,
 } from "./types.ts";
 
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
@@ -335,6 +336,7 @@ async function runLoop(
 			// first; only tell the model once the raised ceiling is used up too.
 			let recovery: string | undefined;
 			let retrySilently = false;
+			let transition: TurnTransition | undefined;
 			// Scoped to a turn that ran *out* of ceiling, not one the provider
 			// clamped below it. pi already recovers the second case a layer up:
 			// `isRecoverableLength` is `usage.output < desiredMaxOutput`, and
@@ -358,10 +360,12 @@ async function runLoop(
 				if (ceiling !== undefined) {
 					escalated = true;
 					retrySilently = true;
+					transition = { reason: "output_limit_escalate", maxTokens: ceiling };
 					config = { ...config, maxTokens: ceiling };
 				} else if (outputLimitRecoveries < MAX_OUTPUT_TOKENS_RECOVERY_LIMIT) {
 					outputLimitRecoveries += 1;
 					recovery = OUTPUT_LIMIT_RECOVERY_NOTICE;
+					transition = { reason: "output_limit_recovery", attempt: outputLimitRecoveries };
 				}
 			}
 			if (toolCalls.length > 0) {
@@ -381,7 +385,10 @@ async function runLoop(
 				}
 			}
 
-			await emit({ type: "turn_end", message, toolResults });
+			if (!transition && toolCalls.length > 0 && hasMoreToolCalls) {
+				transition = { reason: "tool_calls", count: toolCalls.length };
+			}
+			await emit({ type: "turn_end", message, toolResults, transition });
 
 			lastCompletedTurn = {
 				message,
@@ -396,6 +403,9 @@ async function runLoop(
 			}
 
 			pendingMessages = (await config.getSteeringMessages?.()) || [];
+			if (!transition && pendingMessages.length > 0) {
+				transition = { reason: "steering" };
+			}
 			// The escalation phase adds nothing to the conversation -- the point is
 			// that the model gets more room, not that it is told off for needing it.
 			if (retrySilently) {

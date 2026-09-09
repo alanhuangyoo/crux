@@ -1815,3 +1815,81 @@ describe("the escalation is off unless asked for", () => {
 		expect(call).toBe(1);
 	});
 });
+
+describe("why the loop continued, recorded rather than inferred", () => {
+	// Claude Code's query loop carries this on its State object and calls it
+	// `transition`: each continue records the path that caused it, so a later
+	// iteration can recognise a recovery it has already tried. pi's loop had
+	// grown four scattered booleans and counters doing that job, none of which
+	// any consumer could see.
+	//
+	// The practical cost of not having it: attributing an A/B result here meant
+	// grepping trial logs for the notice text a recovery happens to print, which
+	// finds nothing for a recovery that prints nothing -- the silent ceiling
+	// escalation being exactly that case.
+
+	const TOOL: AgentTool<any> = {
+		name: "noop",
+		label: "noop",
+		description: "does nothing",
+		parameters: Type.Object({}),
+		execute: async () => ({ content: [{ type: "text", text: "ok" }], details: undefined }),
+	};
+
+	function transitionsFrom(replies: AssistantMessage[], tools: AgentTool<any>[] = []) {
+		let call = 0;
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			const message = replies[Math.min(call, replies.length - 1)]!;
+			call++;
+			queueMicrotask(() => stream.push({ type: "done", reason: "stop", message }));
+			return stream;
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [], tools };
+		// The escalation is scoped to a turn that spent the ceiling, which is the
+		// case pi does not already recover a layer up, so both conditions have to
+		// hold for it to fire at all.
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			escalateOnSpentCeiling: true,
+		};
+		return (async () => {
+			const out: (string | undefined)[] = [];
+			for await (const event of agentLoop([createUserMessage("go")], context, config, undefined, streamFn as any)) {
+				if (event.type === "turn_end") out.push((event as any).transition?.reason);
+			}
+			return out;
+		})();
+	}
+
+	/** Spent the model's ceiling exactly: the case this path owns. */
+	const truncated = () => {
+		const m = createAssistantMessage([{ type: "thinking", thinking: "..." }], "length");
+		m.usage.output = createModel().maxTokens;
+		return m;
+	};
+	const answered = () => createAssistantMessage([{ type: "text", text: "done" }]);
+
+	it("names the silent escalation, which prints nothing else", async () => {
+		const reasons = await transitionsFrom([truncated(), answered()]);
+		expect(reasons[0]).toBe("output_limit_escalate");
+	});
+
+	it("names the spoken recovery, and counts the attempt", async () => {
+		const reasons = await transitionsFrom([truncated(), truncated(), answered()]);
+		expect(reasons[0]).toBe("output_limit_escalate");
+		expect(reasons[1]).toBe("output_limit_recovery");
+	});
+
+	it("names an ordinary tool round", async () => {
+		const withCall = createAssistantMessage([{ type: "toolCall", id: "c1", name: "noop", arguments: {} } as any]);
+		const reasons = await transitionsFrom([withCall, answered()], [TOOL]);
+		expect(reasons[0]).toBe("tool_calls");
+	});
+
+	it("leaves the last turn without one", async () => {
+		const reasons = await transitionsFrom([answered()]);
+		expect(reasons).toEqual([undefined]);
+	});
+});

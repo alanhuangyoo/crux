@@ -446,6 +446,36 @@ export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any
 }
 
 /** Context snapshot passed into the low-level agent loop. */
+/**
+ * Why the loop is about to run another turn, or `undefined` when the turn just
+ * ended is the last one.
+ *
+ * Claude Code's query loop carries this on its State object and calls it
+ * `transition`: each `continue` records the path that caused it, so a later
+ * iteration can recognise a recovery it has already tried and refuse to loop on
+ * it. pi's loop had grown four scattered booleans and counters doing that job
+ * -- `escalated`, `outputLimitRecoveries`, `deadlineWarned`,
+ * `unactionableTurns` -- which no consumer can see and no two of which agree on
+ * a representation.
+ *
+ * Emitting it on `turn_end` also answers a question that was otherwise
+ * unanswerable from outside: whether a recovery path fired at all. Attributing
+ * an A/B result here meant grepping trial logs for the notice text a recovery
+ * happens to print, which finds nothing for a recovery that prints nothing --
+ * the silent ceiling escalation being exactly that case.
+ */
+export type TurnTransition =
+	/** The assistant asked for tools; their results feed the next turn. */
+	| { reason: "tool_calls"; count: number }
+	/** A queued user message is being delivered. */
+	| { reason: "steering" }
+	/** Truncated at the output ceiling; retrying silently with a raised one. */
+	| { reason: "output_limit_escalate"; maxTokens: number }
+	/** Truncated again with the ceiling already raised; telling the model. */
+	| { reason: "output_limit_recovery"; attempt: number }
+	/** Follow-up messages arrived after the agent would have stopped. */
+	| { reason: "follow_up"; count: number };
+
 export interface AgentContext {
 	/** System prompt included with the request. */
 	systemPrompt: string;
@@ -468,7 +498,13 @@ export type AgentEvent =
 	| { type: "agent_end"; messages: AgentMessage[] }
 	// Turn lifecycle - a turn is one assistant response + any tool calls/results
 	| { type: "turn_start" }
-	| { type: "turn_end"; message: AgentMessage; toolResults: ToolResultMessage[] }
+	| {
+			type: "turn_end";
+			message: AgentMessage;
+			toolResults: ToolResultMessage[];
+			/** Why another turn follows, or absent when this was the last. */
+			transition?: TurnTransition;
+	  }
 	// Message lifecycle - emitted for user, assistant, and toolResult messages
 	| { type: "message_start"; message: AgentMessage }
 	// Only emitted for assistant messages during streaming
