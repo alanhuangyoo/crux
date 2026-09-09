@@ -83,6 +83,47 @@ That leaves the prompt as the largest untested difference, and the only one
 still standing after ten mechanism hypotheses. Testing it properly means
 porting the structure, not a paragraph of it.
 
+## The ten tasks that decide whether 80 is reachable
+
+Over 89 tasks and thirteen arms, 80 have been solved by at least one scaffold
+and 9 by none. So the ceiling on this model is 89.9%, and 80% is roughly "solve
+everything that has ever been solved".
+
+Ten of those are solved by other scaffolds and never by pi. Read one at a time,
+four of them turn out not to be about solving anything:
+
+**`pytorch-model-recovery` — a command line.** Its task text is a markdown
+list, so the instruction begins with a hyphen. harbor builds `pi --print ...
+'<instruction>'` with no terminator and pi's parser answers:
+
+    Error: Unknown option: - You are given a PyTorch state dictionary
+
+Every pi trial on it died before taking one action, in every arm, while six
+other scaffolds solved it -- claude-code in eleven actions. pi already honours
+`--` (`cli/args.ts:82`); nothing was passing one.
+
+**`circuit-fibsqrt`, `write-compressor`, `schemelike-metacircular-eval` — half
+a design.** Claude Code's token-budget section pairs a low output ceiling with a
+clean retry at the model's own ceiling for the <1% that truncate. I shipped the
+ceiling (16,384, chosen from this deployment's p99 of 16,161) and left the
+retry switched off: `PI_ESCALATE_SPENT_CEILING` was never passed. What the
+trials then look like:
+
+    stop=length  out=16384  think=48437ch    no tool call
+    stop=length  out=16384  think=46931ch    no tool call
+    stop=length  out=16384  think=45622ch    no tool call
+    stop=length  out=16384  think=53998ch    run ends
+
+Four consecutive turns spending the whole ceiling on reasoning and taking no
+action. I had been reading `stopReason: "length"` rising from 96 to 241 as
+evidence the ceiling was working. It was evidence of the harm: the recovery
+that makes a low ceiling safe never fired once.
+
+The remaining six -- `install-windows-3.11` at 136 actions,
+`winning-avg-corewars` at 135, `path-tracing-reverse` at 50,
+`pytorch-model-cli` at 46, `cancel-async-tasks`, `gcode-to-text` -- ran, worked,
+and answered wrong. Those need reading task by task.
+
 ## What 89 tasks can and cannot detect
 
 This should have been the first calculation, not the last.
