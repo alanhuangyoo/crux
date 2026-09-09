@@ -208,21 +208,38 @@ class CruxPiAgent(Pi):
                 "set -eu; "
                 # `tar` is not everywhere. Nine of forty SWE-Atlas trials failed
                 # here with exit 127 -- command not found -- and the network
-                # fallback could not run either because those images have no
-                # curl. Python's own tarfile module needs neither a package
-                # manager nor the network, and an image that holds a Python
-                # repository has Python.
+                # fallback could not run either, because those images have no
+                # curl. Python's tarfile module needs neither a package manager
+                # nor the network, and an image holding a Python repository has
+                # Python.
                 f'if command -v tar >/dev/null 2>&1; then tar xzf {_REMOTE_BUNDLE} -C "$HOME"; '
                 f'elif command -v python3 >/dev/null 2>&1; then '
                 f'python3 -m tarfile -e {_REMOTE_BUNDLE} "$HOME"; '
                 f'else echo "no tar and no python3" >&2; exit 127; fi; '
                 f"rm -f {_REMOTE_BUNDLE}; "
-                '. "$HOME/.nvm/nvm.sh"; '
-                "pi --version; "
-                # Printed so the root step below can link an absolute path.
-                # Resolving `$HOME/.nvm` again as root would look in root's
-                # home, which is the same mistake one layer down.
-                'echo "CRUX_PI_BIN=$(dirname "$(command -v pi)")"'
+                # Resolved by glob and run by absolute path. Sourcing nvm.sh and
+                # calling `pi` needs nvm to select a version, which it does not
+                # do on every image: the same bundle unpacked cleanly and then
+                # died on `pi: command not found` under `set -eu`, so the check
+                # that was meant to prove the install had worked was the thing
+                # that failed it.
+                'b=$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | head -1); '
+                '[ -n "$b" ] || { echo "no node bin dir after unpack" >&2; exit 1; }; '
+                # The bundled node is glibc-linked, and three of eleven
+                # SWE-Atlas images are Alpine: musl reports the mismatch as
+                # `env: can't execute 'node': No such file or directory`, which
+                # reads like a missing binary rather than an incompatible one.
+                # pi's package is pure JavaScript, so one package and two node
+                # binaries cover both; the musl build simply replaces the one in
+                # place.
+                'if [ -e /lib/ld-musl-x86_64.so.1 ] && [ -x "$HOME/.nvm/crux-musl/node" ]; then '
+                '  cp "$HOME/.nvm/crux-musl/node" "$b/node"; echo CRUX_PI_LIBC=musl; '
+                'else echo CRUX_PI_LIBC=glibc; fi; '
+                # node invoked directly rather than through pi's `#!/usr/bin/env
+                # node` shebang, which needs node on PATH -- the thing this
+                # install is in the middle of arranging.
+                '"$b/node" "$b/pi" --version; '
+                'echo "CRUX_PI_BIN=$b"'
             ),
         )
         out = (getattr(result, "stdout", "") or "") + (getattr(result, "stderr", "") or "")

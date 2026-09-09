@@ -67,7 +67,10 @@ def test_a_present_bundle_replaces_the_network_install(tmp_path, monkeypatch):
     assert calls == []                                  # no curl, no npm
     assert env.uploaded and env.uploaded[0][0] == str(bundle)
     joined = " ".join(env.commands)
-    assert "tar xzf" in joined and "pi --version" in joined
+    # `"$b/pi" --version`, not `pi --version`: the check must not depend on
+    # nvm putting pi on PATH, which is what failed the install on images where
+    # the bundle had in fact unpacked cleanly.
+    assert "tar xzf" in joined and '"$b/node" "$b/pi" --version' in joined
 
 
 def test_a_missing_bundle_still_installs(tmp_path, monkeypatch, caplog):
@@ -273,3 +276,78 @@ def test_the_unpack_does_not_require_tar(tmp_path):
     assert "command -v tar" in cmd            # preferred when present
     assert "python3 -m tarfile -e" in cmd     # and a way through when not
     assert "exit 127" in cmd                  # says so when neither exists
+
+
+def test_the_install_check_does_not_depend_on_nvms_path(tmp_path):
+    """The check that proved the install had worked was what failed it.
+
+    Sourcing nvm.sh and calling `pi` needs nvm to select a version, which it
+    does not do on every image. The bundle unpacked cleanly and then died on
+    `pi: command not found` under `set -eu`, so the install reported a broken
+    bundle and fell back to a network path those images cannot run either.
+    """
+    import crux.pi_agent as pi_agent
+
+    bundle = tmp_path / "b.tar.gz"
+    bundle.write_bytes(b"x")
+    agent = pi_agent.CruxPiAgent.__new__(pi_agent.CruxPiAgent)
+    agent._bundle_path = str(bundle)
+    seen = []
+
+    async def as_agent(environment, command=None, **kw):
+        seen.append(command)
+        return _Exec("0.85.1\nCRUX_PI_BIN=/root/.nvm/versions/node/v22/bin\n")
+
+    agent.exec_as_agent = as_agent
+    asyncio.run(agent.install(FakeEnv()))
+    cmd = seen[0]
+    assert 'ls -d "$HOME"/.nvm/versions/node/*/bin' in cmd   # resolved by glob
+    assert '"$b/node" "$b/pi" --version' in cmd              # run by absolute path
+    assert "nvm.sh" not in cmd                               # nvm never consulted
+
+
+def test_an_alpine_image_gets_the_musl_node(tmp_path):
+    """The bundled node is glibc-linked; three of eleven SWE-Atlas images are Alpine.
+
+    musl reports the mismatch as `env: can't execute 'node': No such file or
+    directory`, which reads like a missing binary rather than an incompatible
+    one. pi's package is pure JavaScript, so one package and two node binaries
+    cover both.
+    """
+    import crux.pi_agent as pi_agent
+
+    bundle = tmp_path / "b.tar.gz"
+    bundle.write_bytes(b"x")
+    agent = pi_agent.CruxPiAgent.__new__(pi_agent.CruxPiAgent)
+    agent._bundle_path = str(bundle)
+    seen = []
+
+    async def as_agent(environment, command=None, **kw):
+        seen.append(command)
+        return _Exec("0.85.1\nCRUX_PI_LIBC=musl\nCRUX_PI_BIN=/root/.nvm/versions/node/v22/bin\n")
+
+    agent.exec_as_agent = as_agent
+    asyncio.run(agent.install(FakeEnv()))
+    cmd = seen[0]
+    assert "/lib/ld-musl-x86_64.so.1" in cmd      # detected, not guessed
+    assert 'cp "$HOME/.nvm/crux-musl/node"' in cmd
+    assert "CRUX_PI_LIBC" in cmd                  # and recorded either way
+
+
+def test_a_glibc_image_keeps_the_bundled_node(tmp_path):
+    import crux.pi_agent as pi_agent
+
+    bundle = tmp_path / "b.tar.gz"
+    bundle.write_bytes(b"x")
+    agent = pi_agent.CruxPiAgent.__new__(pi_agent.CruxPiAgent)
+    agent._bundle_path = str(bundle)
+    seen = []
+
+    async def as_agent(environment, command=None, **kw):
+        seen.append(command)
+        return _Exec("0.85.1\nCRUX_PI_LIBC=glibc\nCRUX_PI_BIN=/root/.nvm/versions/node/v22/bin\n")
+
+    agent.exec_as_agent = as_agent
+    asyncio.run(agent.install(FakeEnv()))
+    # The swap is conditional in the shell, so the glibc path is the else.
+    assert "CRUX_PI_LIBC=glibc" in seen[0]
