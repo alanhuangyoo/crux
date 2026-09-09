@@ -568,13 +568,48 @@ the line you had in mind, and reports nothing when it matches four.
 Write a whole file with a heredoc when you are creating it. To change one that
 already exists, patch it."""
 
+# Two lines lifted from Claude Code's own system prompt
+# (`src/constants/prompts.ts`, the `# Doing tasks` section), because each one
+# names a failure measured in pi on this benchmark rather than a mechanism
+# reasoned out here.
+#
+# **Verify before reporting done.** 18 of pi's 24 failed Terminal-Bench trials
+# ended with `agent_settled` -- the agent deciding it was finished -- and 69 of
+# 73 trials never ran a command that looks like a check at all. Claude Code
+# tells the model to run the test, and to say so when it cannot.
+#
+# **Diagnose before abandoning.** On the tasks it failed, stock pi issued a
+# median of 7 tool calls across 5 turns and stopped; Claude Code issued 40.
+# Its prompt asks for a focused fix after reading the error, and explicitly
+# rules out both blind retries and giving up after one failure.
+#
+# Claude Code's section runs to some eighty lines and most of it is about being
+# Claude Code -- slash commands, feedback channels, its own tool names. These
+# two are the ones with a measurement behind them here, so these two are what
+# gets ported. Everything else in that section is a guess about this benchmark
+# until something says otherwise.
+CC_FINISH_SECTION = """\
+## Finishing
+
+Before reporting a task complete, verify it actually works: run the test,
+execute the script, check the output. Minimum complexity means no gold-plating,
+not skipping the finish line. If you cannot verify -- no test exists, the code
+cannot be run here -- say so explicitly rather than claiming success.
+
+If an approach fails, diagnose why before switching tactics: read the error,
+check your assumptions, try a focused fix. Do not retry the identical action
+blindly, and do not abandon a viable approach after a single failure. The task
+is not over because the first thing you tried did not work.
+"""
+
 PROMPT_SECTIONS = {
     "scoring": TERMINUS_SCORING_SECTION,
     "harness": TERMINUS_HARNESS_SECTION,
     "edit": TERMINUS_EDIT_SECTION,
     "submit": TERMINUS_SUBMIT_SECTION,
+    "finish": CC_FINISH_SECTION,
 }
-_SECTION_ORDER = ("scoring", "harness", "submit")
+_SECTION_ORDER = ("scoring", "harness", "submit", "finish")
 
 
 def build_sections(names) -> str:
