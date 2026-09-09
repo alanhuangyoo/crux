@@ -602,14 +602,53 @@ blindly, and do not abandon a viable approach after a single failure. The task
 is not over because the first thing you tried did not work.
 """
 
+# Two directives from Claude Code's own `# Doing tasks` system-prompt section
+# (`src/constants/prompts.ts`, getSimpleDoingTasksSection), carried over because
+# they name the two failures measured in pi on this benchmark and nothing in
+# pi's prompt addresses either.
+#
+#   - Eighteen of pi's twenty-four failed Terminal-Bench 2.1 trials ended with
+#     the agent declaring itself done and the verifier disagreeing.
+#   - Four more stopped after two to four actions.
+#
+# Claude Code answers the first with "verify it actually works: run the test,
+# execute the script, check the output ... if you can't verify, say so
+# explicitly rather than claiming success", and the second with "don't retry
+# the identical action blindly, but don't abandon a viable approach after a
+# single failure either".
+#
+# Worth being precise about what this is evidence for. Eight prompt sections
+# written for this project were measured on Terminal-Bench and every one landed
+# inside the noise, so the prior on a prompt section is poor. What is different
+# here is not the wording but the provenance: this is the text a scaffold that
+# leads by 17 points on the same model actually ships, and it is the largest
+# untested difference between the two -- every arm so far ran pi with no
+# appended prompt at all.
+CC_DOING_TASKS_SECTION = """\
+# Finishing and persisting
+
+Before reporting a task complete, verify it actually works: run the test,
+execute the script, check the output. If you cannot verify -- no test exists,
+the code cannot be run here -- say so explicitly rather than claiming success.
+
+If an approach fails, diagnose why before switching tactics: read the error,
+check your assumptions, try a focused fix. Do not retry the identical action
+blindly, and do not abandon a viable approach after a single failure.
+
+Do not propose or make changes to code you have not read. If a file is to be
+modified, read it first.
+"""
+
+
 PROMPT_SECTIONS = {
     "scoring": TERMINUS_SCORING_SECTION,
     "harness": TERMINUS_HARNESS_SECTION,
     "edit": TERMINUS_EDIT_SECTION,
     "submit": TERMINUS_SUBMIT_SECTION,
     "finish": CC_FINISH_SECTION,
+    "doing": CC_DOING_TASKS_SECTION,
 }
-_SECTION_ORDER = ("scoring", "harness", "submit", "finish")
+_SECTION_ORDER = ("scoring", "harness", "submit", "finish", "doing")
 
 
 def build_sections(names) -> str:
