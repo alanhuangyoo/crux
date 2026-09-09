@@ -206,7 +206,16 @@ class CruxPiAgent(Pi):
             environment,
             command=(
                 "set -eu; "
-                f"tar xzf {_REMOTE_BUNDLE} -C \"$HOME\"; "
+                # `tar` is not everywhere. Nine of forty SWE-Atlas trials failed
+                # here with exit 127 -- command not found -- and the network
+                # fallback could not run either because those images have no
+                # curl. Python's own tarfile module needs neither a package
+                # manager nor the network, and an image that holds a Python
+                # repository has Python.
+                f'if command -v tar >/dev/null 2>&1; then tar xzf {_REMOTE_BUNDLE} -C "$HOME"; '
+                f'elif command -v python3 >/dev/null 2>&1; then '
+                f'python3 -m tarfile -e {_REMOTE_BUNDLE} "$HOME"; '
+                f'else echo "no tar and no python3" >&2; exit 127; fi; '
                 f"rm -f {_REMOTE_BUNDLE}; "
                 '. "$HOME/.nvm/nvm.sh"; '
                 "pi --version; "
