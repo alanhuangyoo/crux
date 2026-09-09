@@ -230,3 +230,45 @@ def test_an_unknown_section_still_raises():
 
     with pytest.raises(ValueError):
         build_sections(["doing", "typo"])
+
+
+def test_the_full_port_is_an_order_of_magnitude_more_than_the_two_lines():
+    """Nine prompt sections here were a few hundred characters and all nine
+    landed inside the noise, which says little about prompts at the size of the
+    one being compared against.
+
+    pi's core system prompt is 4,169 characters; Claude Code's is 27,960, of
+    which roughly 12,600 could bear on a benchmark trial -- the rest is
+    communication style for a watching human, a confirm-before-risky-actions
+    policy a bypassPermissions trial cannot honour, MCP discovery, and a
+    feature-gated autonomous mode. `getSimpleDoingTasksSection` is 7,145 of it.
+    """
+    from crux.prompts import PROMPT_SECTIONS
+
+    small = PROMPT_SECTIONS["doing"]
+    full = PROMPT_SECTIONS["doing_full"]
+    assert len(small) < 800
+    assert len(full) > 2500
+    assert len(full) > 4 * len(small)
+
+
+def test_the_port_keeps_the_task_substance_and_drops_the_product_bullets():
+    from crux.prompts import PROMPT_SECTIONS
+
+    full = PROMPT_SECTIONS["doing_full"]
+    for kept in ("verify it actually works", "single failure", "Report outcomes faithfully",
+                 "premature abstraction", "Do not create files unless"):
+        assert kept in full, kept
+    # Nothing that cannot move a trial: no product surface, no tone rules, no
+    # time estimates -- carrying them would test length rather than content.
+    for dropped in ("/help", "/issue", "/share", "knowledge cutoff", "time estimates",
+                    "emoji", "one question per response"):
+        assert dropped not in full, dropped
+
+
+def test_both_sections_are_reachable_and_ordered():
+    from crux.prompts import build_sections
+
+    both = build_sections(["doing", "doing_full"])
+    assert "# Finishing and persisting" in both
+    assert "# Doing tasks" in both
