@@ -247,7 +247,13 @@ class CruxPiAgent(Pi):
                 # `pi: command not found` at run time with the symlink in place.
                 'f="$HOME/.nvm/nvm.sh"; grep -q "# crux-pi-path" "$f" 2>/dev/null || '
                 'printf \'%s\\n\' "# crux-pi-path" "export PATH=\\"$b:\\$PATH\\"" >> "$f"; '
-                'echo "CRUX_PI_BIN=$b"'
+                # Recorded because three SWE-Atlas trials installed cleanly and
+                # still died at run time on `pi: command not found`, with both
+                # the symlink and the PATH in place. The remaining explanation
+                # is that install and run do not share a HOME, and that is not
+                # answerable from a trial directory after the fact.
+                'echo "CRUX_PI_BIN=$b"; '
+                'echo "CRUX_PI_WHO=$(id -un 2>/dev/null) HOME=$HOME PATH=$PATH"'
             ),
         )
         out = (getattr(result, "stdout", "") or "") + (getattr(result, "stderr", "") or "")
