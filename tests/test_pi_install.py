@@ -383,3 +383,30 @@ def test_the_path_is_written_where_the_run_line_sources_it(tmp_path):
     assert "crux-pi-path" in cmd            # marked, so a reinstall does not stack
     assert 'export PATH=' in cmd
     assert "nvm.sh" in cmd                  # the file the run line sources
+
+
+def test_the_install_records_who_it_ran_as(tmp_path):
+    """Three SWE-Atlas trials installed cleanly and died on `pi: command not found`.
+
+    Both the symlink and the PATH were in place, which leaves install and run
+    not sharing a HOME -- and that is not answerable from a trial directory
+    after the fact. So the install says who it was and where it looked.
+    """
+    import crux.pi_agent as pi_agent
+
+    bundle = tmp_path / "b.tar.gz"
+    bundle.write_bytes(b"x")
+    agent = pi_agent.CruxPiAgent.__new__(pi_agent.CruxPiAgent)
+    agent._bundle_path = str(bundle)
+    seen = []
+
+    async def as_agent(environment, command=None, **kw):
+        seen.append(command)
+        return _Exec("0.85.1\nCRUX_PI_BIN=/root/.nvm/versions/node/v22/bin\n"
+                     "CRUX_PI_WHO=root HOME=/root PATH=/usr/bin\n")
+
+    agent.exec_as_agent = as_agent
+    asyncio.run(agent.install(FakeEnv()))
+    cmd = seen[0]
+    assert "CRUX_PI_WHO=" in cmd
+    assert "id -un" in cmd and "HOME=$HOME" in cmd and "PATH=$PATH" in cmd
