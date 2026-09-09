@@ -1127,3 +1127,33 @@ Worth doing because the same shape has been wrong twice today: `crux report`
 reading the jobs dir instead of the run inside it, and a mean taken over a task
 set that excluded four zeros on one side only. A figure quoted often enough
 starts to feel checked.
+
+## How x6 gets read, written before it has data
+
+`x6-ceiling` raises pi's default output ceiling from 16,384 to 65,536. It has
+to be read against a cost, because the change contradicts half of the design
+its other half came from.
+
+Claude Code caps its default low -- 8K against a p99 output of 4,911 tokens --
+and escalates to 64K only on a truncation, because a provider reserves
+inference capacity by `max_tokens`: asking for a large one costs queueing
+whether or not the tokens are used. pi now has that escalation. Raising the
+floor as well gives up the reason the floor was low.
+
+Why ask anyway: on the 16 tasks crux-Terminus solves and pi does not, five die
+truncated, three of them having taken 2, 4 and 9 actions. crux solved the same
+three in 76, 23 and 114. Escalation alone moved "runs whose last turn was
+truncated" from 36% to 24%, so it helps and does not finish the job.
+
+**The rule.** Two numbers, and the second can veto the first:
+
+- score, paired against `x5-control`, sign test
+- throughput: median trial wall-clock, and endpoint tokens/s at the same
+  container count
+
+A score gain that comes with a throughput collapse is not a gain on a benchmark
+whose failures are already 10% wall-clock: this project has measured 45
+containers taking total throughput from 587 tok/s to 320. If the median trial
+gets slower and the score does not move, the floor goes back to 16,384 and the
+escalation carries it alone -- which is the reference design, and would be the
+answer arrived at the expensive way.
