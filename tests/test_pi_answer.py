@@ -14,6 +14,11 @@ from pathlib import Path
 
 from crux.pi_agent import _answer_path, _final_answer
 
+
+class _Exec:
+    def __init__(self, stdout="", stderr=None, return_code=0):
+        self.stdout, self.stderr, self.return_code = stdout, stderr, return_code
+
 ATLAS = (
     "Consider the following question about the codebase...\n"
     "5. When you are confident in your answer, write your complete final answer "
@@ -81,3 +86,65 @@ def test_tool_results_are_not_mistaken_for_the_answer():
 def _tmp():
     import tempfile
     return Path(tempfile.mkdtemp())
+
+
+# --------------------------------------------------------------------------
+# pi's own settings have to arrive inside the container
+
+
+def test_pi_settings_are_parsed_from_one_kwarg():
+    import tempfile
+    from pathlib import Path
+
+    from crux.pi_agent import CruxPiAgent
+
+    # Parsed the same way the constructor does, without a live model.
+    raw = "PI_MAX_OUTPUT_TOKENS=16384,PI_TIME_BUDGET_SEC=7200"
+    parsed = dict(kv.split("=", 1) for kv in raw.split(",") if "=" in kv)
+    assert parsed == {"PI_MAX_OUTPUT_TOKENS": "16384", "PI_TIME_BUDGET_SEC": "7200"}
+
+
+def test_settings_land_in_the_file_pi_sources(tmp_path):
+    """harbor builds the exec env from the model connection alone.
+
+    A variable exported on the runner reaches nothing inside the container --
+    the same shape as a tmux `-e` the container's tmux rejects, and it looks
+    armed either way. pi's run command always begins `. ~/.nvm/nvm.sh`, which
+    makes that file the one place a setting is certain to be read.
+    """
+    import asyncio
+
+    from crux.pi_agent import CruxPiAgent
+
+    agent = CruxPiAgent.__new__(CruxPiAgent)
+    agent._pi_env = {"PI_MAX_OUTPUT_TOKENS": "16384"}
+    seen = []
+
+    async def as_agent(environment, command=None, **kw):
+        seen.append(command)
+        return _Exec("READY=16384\n")
+
+    agent.exec_as_agent = as_agent
+    asyncio.run(agent._deliver_pi_env(object()))
+    assert seen and ".nvm/nvm.sh" in seen[0]
+    assert "export PI_MAX_OUTPUT_TOKENS=16384" in seen[0]
+    # Marked, so a second install replaces rather than stacks.
+    assert "crux-pi-env" in seen[0] and "grep -q" in seen[0]
+
+
+def test_no_settings_means_no_write(tmp_path):
+    import asyncio
+
+    from crux.pi_agent import CruxPiAgent
+
+    agent = CruxPiAgent.__new__(CruxPiAgent)
+    agent._pi_env = {}
+    seen = []
+
+    async def as_agent(environment, command=None, **kw):
+        seen.append(command)
+        return _Exec("")
+
+    agent.exec_as_agent = as_agent
+    asyncio.run(agent._deliver_pi_env(object()))
+    assert seen == []
