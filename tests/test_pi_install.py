@@ -246,3 +246,30 @@ def test_a_bundle_that_reports_no_bin_dir_says_so(tmp_path, caplog):
         asyncio.run(agent.install(env))
     assert "bin dir" in caplog.text
     assert all("ln -sf" not in c for c in env.commands)
+
+
+def test_the_unpack_does_not_require_tar(tmp_path):
+    """Nine of forty SWE-Atlas trials failed on exit 127: no `tar`.
+
+    The network fallback could not run either, because those images have no
+    curl. Python's tarfile module needs neither a package manager nor the
+    network, and an image holding a Python repository has Python.
+    """
+    import crux.pi_agent as pi_agent
+
+    bundle = tmp_path / "b.tar.gz"
+    bundle.write_bytes(b"x")
+    agent = pi_agent.CruxPiAgent.__new__(pi_agent.CruxPiAgent)
+    agent._bundle_path = str(bundle)
+    seen = []
+
+    async def as_agent(environment, command=None, **kw):
+        seen.append(command)
+        return _Exec("0.85.1\nCRUX_PI_BIN=/root/.nvm/versions/node/v22/bin\n")
+
+    agent.exec_as_agent = as_agent
+    asyncio.run(agent.install(FakeEnv()))
+    cmd = seen[0]
+    assert "command -v tar" in cmd            # preferred when present
+    assert "python3 -m tarfile -e" in cmd     # and a way through when not
+    assert "exit 127" in cmd                  # says so when neither exists
