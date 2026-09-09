@@ -43,6 +43,13 @@ pairs, p=0.006). Seven explanations were checked and rejected:
 | "It thinks more between actions" | A units error. Its assistant messages carry one block each, so 115 "turns" is 40 tool calls |
 | "pi writes over-precise regexes" | Backwards: length-bounded patterns are 3.8% of claude-code's greps, 1.3% of pi's |
 | Prefix caching | pi 96.4%, claude-code 27.2% |
+| "Four tasks pass every test and still score zero" | Not a finding. I read the verifier output of the current arm to explain losses measured in an earlier one; in the current arm those four score 1.0 |
+
+Seven of those are explanations the data rejected; the eighth was a
+comparison error of my own, which is the more useful of the two kinds. The
+pattern across all eight is the point: what I read out of trajectory
+statistics has not once survived being checked, so it is not a basis for
+changing code.
 
 Of the 21 tasks claude-code wins and pi loses, 12 are "worked and lost" — the
 agent ran, produced an answer, and the answer was wrong. No mechanism in the
