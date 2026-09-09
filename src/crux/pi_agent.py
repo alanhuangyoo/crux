@@ -239,6 +239,14 @@ class CruxPiAgent(Pi):
                 # node` shebang, which needs node on PATH -- the thing this
                 # install is in the middle of arranging.
                 '"$b/node" "$b/pi" --version; '
+                # And the PATH written into the file harbor's run line sources,
+                # which is stronger than the /usr/local/bin symlink below: it
+                # does not depend on nvm selecting a version, on that directory
+                # being writable, or on it being on the PATH the run inherits.
+                # Two SWE-Atlas trials installed cleanly and still died on
+                # `pi: command not found` at run time with the symlink in place.
+                'f="$HOME/.nvm/nvm.sh"; grep -q "# crux-pi-path" "$f" 2>/dev/null || '
+                'printf \'%s\\n\' "# crux-pi-path" "export PATH=\\"$b:\\$PATH\\"" >> "$f"; '
                 'echo "CRUX_PI_BIN=$b"'
             ),
         )
