@@ -130,6 +130,11 @@ def test_settings_land_in_the_file_pi_sources(tmp_path):
     assert "export PI_MAX_OUTPUT_TOKENS=16384" in seen[0]
     # Marked, so a second install replaces rather than stacks.
     assert "crux-pi-env" in seen[0] and "grep -q" in seen[0]
+    # The marker must not share a line with the exports: behind a `#` the
+    # whole line is a comment, which is how the first version of this wrote
+    # the file, verified the marker was present, and reported success while
+    # the variables stayed unset.
+    assert "'# crux-pi-env' 'export" in seen[0] or "crux-pi-env' 'export" in seen[0]
 
 
 def test_no_settings_means_no_write(tmp_path):

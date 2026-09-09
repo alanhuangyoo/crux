@@ -273,7 +273,7 @@ class CruxPiAgent(Pi):
             command=(
                 'f="$HOME/.nvm/nvm.sh"; '
                 f"grep -q {shlex.quote(marker)} \"$f\" || "
-                f"printf '%s\\n' {shlex.quote(marker + ' ' + exports)} >> \"$f\"; "
+                f"printf '%s\\n' {shlex.quote(marker)} {shlex.quote(exports)} >> \"$f\"; "
                 'bash -lc \'. "$HOME/.nvm/nvm.sh"; echo READY=$PI_MAX_OUTPUT_TOKENS\' 2>/dev/null || true'
             ),
         )
