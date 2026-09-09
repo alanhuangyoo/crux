@@ -153,3 +153,31 @@ def test_no_settings_means_no_write(tmp_path):
     agent.exec_as_agent = as_agent
     asyncio.run(agent._deliver_pi_env(object()))
     assert seen == []
+
+
+def test_flags_end_with_the_terminator(monkeypatch):
+    import crux.pi_agent as pi_agent
+
+    class Base:
+        def build_cli_flags(self):
+            return "--model x "
+
+    agent = pi_agent.CruxPiAgent.__new__(pi_agent.CruxPiAgent)
+    agent._section_text = ""
+    monkeypatch.setattr(pi_agent.Pi, "build_cli_flags", Base.build_cli_flags, raising=False)
+    out = pi_agent.CruxPiAgent.build_cli_flags(agent)
+    assert out.endswith("-- ")
+    assert "--model x" in out
+
+
+def test_the_terminator_is_present_even_with_no_other_flags(monkeypatch):
+    import crux.pi_agent as pi_agent
+
+    class Base:
+        def build_cli_flags(self):
+            return ""
+
+    agent = pi_agent.CruxPiAgent.__new__(pi_agent.CruxPiAgent)
+    agent._section_text = ""
+    monkeypatch.setattr(pi_agent.Pi, "build_cli_flags", Base.build_cli_flags, raising=False)
+    assert pi_agent.CruxPiAgent.build_cli_flags(agent) == "-- "

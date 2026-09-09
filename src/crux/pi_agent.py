@@ -372,4 +372,15 @@ class CruxPiAgent(Pi):
                 f"--append-system-prompt {_REMOTE_PROMPT_PATH}",
                 f"--append-system-prompt {shlex.quote(_REMOTE_PROMPT_PATH)}",
             )
-        return flags
+        # `--` ends option parsing, so a task whose text begins with a hyphen is
+        # read as the prompt rather than as a flag. harbor builds the command as
+        # `pi --print ... '<instruction>'` with no terminator, and pi's parser
+        # rejects any single-hyphen argument:
+        #
+        #     Error: Unknown option: - You are given a PyTorch state dictionary
+        #
+        # `pytorch-model-recovery` states its task as a markdown list, so its
+        # first character is "-". Every pi trial on it died before taking an
+        # action, in every arm, while six other scaffolds solved it. pi already
+        # honours `--`; nothing was passing it one.
+        return f"{flags}-- " if flags else "-- "
