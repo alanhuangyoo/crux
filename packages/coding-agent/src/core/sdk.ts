@@ -200,6 +200,17 @@ function getDefaultAgentDir(): string {
  *
  * Unset leaves pi's behaviour exactly as it is.
  */
+/**
+ * Whether to retry a turn that spent its whole output ceiling without acting,
+ * from `PI_ESCALATE_SPENT_CEILING`. Off unless asked for: pi's behaviour here
+ * is a decision with a characterization test behind it, and only a deployment
+ * that knows its ceiling was inherited rather than chosen should overrule it.
+ */
+export function escalateOnSpentCeilingFromEnv(): boolean {
+	const raw = process.env.PI_ESCALATE_SPENT_CEILING;
+	return raw === "1" || raw === "true";
+}
+
 export function maxOutputTokensFromEnv(): number | undefined {
 	const raw = process.env.PI_MAX_OUTPUT_TOKENS;
 	if (!raw) return undefined;
@@ -358,6 +369,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		},
 		deadline: deadlineFromEnv(),
 		maxTokens: maxOutputTokensFromEnv(),
+		escalateOnSpentCeiling: escalateOnSpentCeilingFromEnv(),
 		convertToLlm: convertToLlmWithBlockImages,
 		streamFn: async (model, context, options) => {
 			const providerRetrySettings = settingsManager.getProviderRetrySettings();

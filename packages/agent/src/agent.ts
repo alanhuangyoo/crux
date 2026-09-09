@@ -122,6 +122,8 @@ export interface AgentOptions {
 	toolExecution?: ToolExecutionMode;
 	/** Absolute epoch ms after which the loop stops on its own. */
 	deadline?: number;
+	/** Retry a turn that spent its whole ceiling; see AgentLoopConfig. */
+	escalateOnSpentCeiling?: boolean;
 	/**
 	 * Default ceiling on one response. A provider reserves inference capacity
 	 * by `max_tokens`, so a large one costs queueing whether or not the tokens
@@ -192,6 +194,9 @@ export class Agent {
 	 */
 	public deadline?: number;
 
+	/** Retry a turn that spent its whole ceiling; see AgentLoopConfig. */
+	public escalateOnSpentCeiling?: boolean;
+
 	/** Default ceiling on one response; see `AgentOptions.maxTokens`. */
 	public maxTokens?: number;
 
@@ -255,6 +260,7 @@ export class Agent {
 		this.maxRetryDelayMs = runtimeOptions.maxRetryDelayMs;
 		this.toolExecution = runtimeOptions.toolExecution ?? "parallel";
 		this.deadline = options.deadline;
+		this.escalateOnSpentCeiling = options.escalateOnSpentCeiling;
 		this.maxTokens = options.maxTokens;
 	}
 
@@ -492,6 +498,7 @@ export class Agent {
 					: undefined,
 			convertToLlm: this.convertToLlm,
 			deadline: this.deadline,
+			escalateOnSpentCeiling: this.escalateOnSpentCeiling,
 			maxTokens: this.maxTokens,
 			transformContext: this.transformContext,
 			getApiKey: this.getApiKey,

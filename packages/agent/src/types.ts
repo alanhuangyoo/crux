@@ -163,6 +163,27 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	deadline?: number;
 
 	/**
+	 * Retry a turn that spent its whole output ceiling and made no tool call,
+	 * by raising the ceiling once and then asking the model to resume.
+	 *
+	 * Off by default, because pi's behaviour here is a decision and not an
+	 * oversight: `isRecoverableLength` is `usage.output < desiredMaxOutput`, so
+	 * a response clamped *below* the ceiling is recovered a layer up by
+	 * dropping it, compacting and retrying, while one that reached the ceiling
+	 * is read as the model spending the budget it was given. A
+	 * characterization test states that ("does not compact when a length stop
+	 * reaches the desired output limit"), and it still holds with this off.
+	 *
+	 * Worth turning on where the ceiling is not a considered value. A harness
+	 * that composes a provider from a URL and a model id inherits
+	 * `DEFAULT_UNDECLARED_MAX_TOKENS`; on one such deployment that 16,384 sat
+	 * inside the model's own output distribution (p99 16,161) and 36% of runs
+	 * ended on a turn cut off at it, three of them after 2, 4 and 9 actions on
+	 * tasks another scaffold solved in 76, 23 and 114.
+	 */
+	escalateOnSpentCeiling?: boolean;
+
+	/**
 	 * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.
 	 *
 	 * Each AgentMessage must be converted to a UserMessage, AssistantMessage, or ToolResultMessage

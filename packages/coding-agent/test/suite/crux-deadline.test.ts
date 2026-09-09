@@ -86,3 +86,33 @@ describe("PI_MAX_OUTPUT_TOKENS", () => {
 		}
 	});
 });
+
+describe("the ceiling an undeclared model inherits", () => {
+	// Silent, and load-bearing in a way its size does not suggest. A harness
+	// that composes a provider entry from an endpoint URL and a model id --
+	// the normal shape for a self-hosted server -- declares neither
+	// contextWindow nor maxTokens, so both defaults apply and nothing says so.
+	// On one such deployment the model's p99 single-turn output was 16,161
+	// tokens: the default sat inside the model's own output distribution, and
+	// 36% of runs ended on a turn cut off at it.
+	it("is a named constant, so the number is greppable", async () => {
+		const src = await import("node:fs/promises").then((fs) =>
+			fs.readFile(new URL("../../src/core/provider-composer.ts", import.meta.url), "utf8"),
+		);
+		expect(src).toContain("DEFAULT_UNDECLARED_MAX_TOKENS = 16384");
+		expect(src).toContain("maxTokens: definition.maxTokens ?? DEFAULT_UNDECLARED_MAX_TOKENS");
+		// And the reasoning travels with it: a bare number sent me into a
+		// container to find out where 16,384 came from.
+		expect(src).toContain("p99");
+		expect(src).toContain("escalatedMaxTokens");
+	});
+
+	it("still yields to a declared ceiling", async () => {
+		const src = await import("node:fs/promises").then((fs) =>
+			fs.readFile(new URL("../../src/core/provider-composer.ts", import.meta.url), "utf8"),
+		);
+		// `??`, not `||`: a declared 0 would be a mistake, but a declared value
+		// must win, and this is the line a deployment that knows its model uses.
+		expect(src).toContain("definition.maxTokens ??");
+	});
+});

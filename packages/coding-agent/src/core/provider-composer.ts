@@ -157,13 +157,35 @@ function modelFromJson(
 		thinkingLevelMap: definition.thinkingLevelMap,
 		input: (definition.input ?? ["text"]) as ("text" | "image")[],
 		cost: definition.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: definition.contextWindow ?? 128000,
-		maxTokens: definition.maxTokens ?? 16384,
+		contextWindow: definition.contextWindow ?? DEFAULT_UNDECLARED_CONTEXT_WINDOW,
+		maxTokens: definition.maxTokens ?? DEFAULT_UNDECLARED_MAX_TOKENS,
 		samplingParams: definition.samplingParams,
 		headers: undefined,
 		compat: mergeCompat(providerConfig.compat, definition.compat),
 	};
 }
+
+/**
+ * What a custom provider's model gets when its `models.json` entry declares no
+ * ceiling of its own.
+ *
+ * These are silent, and the output one is load-bearing in a way its size does
+ * not suggest. A harness that composes a provider entry from an endpoint URL
+ * and a model id -- which is the normal shape for a self-hosted server --
+ * declares neither field, so both defaults apply and nothing says so. On one
+ * such deployment the model's p99 single-turn output was 16,161 tokens: the
+ * default ceiling sat *inside* the model's own output distribution, and 36% of
+ * runs ended on a turn cut off at it.
+ *
+ * The agent loop recovers a truncated turn by escalating to the model's ceiling
+ * and retrying (see `escalatedMaxTokens`), which is what makes a low default
+ * safe rather than merely small -- a provider reserves inference capacity by
+ * `max_tokens`, so a large default costs queueing whether or not the tokens get
+ * used. A deployment that knows its model should still declare `maxTokens`
+ * rather than inherit this.
+ */
+const DEFAULT_UNDECLARED_CONTEXT_WINDOW = 128000;
+const DEFAULT_UNDECLARED_MAX_TOKENS = 16384;
 
 function findModelDefaults(models: readonly Model<Api>[], modelId: string, api?: Api): Model<Api> | undefined {
 	return (

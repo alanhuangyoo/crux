@@ -1636,7 +1636,12 @@ describe("a turn cut off at the output token limit", () => {
 			return stream;
 		};
 		const context: AgentContext = { systemPrompt: "", messages: [], tools: [] };
-		const config: AgentLoopConfig = { model: createModel(), convertToLlm: identityConverter, ...configPatch };
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			escalateOnSpentCeiling: true,
+			...configPatch,
+		};
 		return {
 			calls: () => call,
 			seenMaxTokens,
@@ -1650,7 +1655,13 @@ describe("a turn cut off at the output token limit", () => {
 		return events;
 	}
 
-	const truncated = () => createAssistantMessage([{ type: "thinking", thinking: "still going" }], "length");
+	const truncated = () => {
+		// Spent the ceiling exactly. Below it is pi's own case, recovered a
+		// layer up by compact-and-retry, and this must not take it away.
+		const m = createAssistantMessage([{ type: "thinking", thinking: "still going" }], "length");
+		m.usage.output = createModel().maxTokens;
+		return m;
+	};
 	const answered = () => createAssistantMessage([{ type: "text", text: "done" }]);
 
 	it("raises the ceiling and retries without saying anything", async () => {
@@ -1777,5 +1788,30 @@ describe("a deadline the loop can see", () => {
 		const { stream } = run({ deadline: Date.now() - 1 }, [createAssistantMessage([{ type: "text", text: "hi" }])]);
 		const events = await drain(stream);
 		expect(events.at(-1)?.type).toBe("agent_end");
+	});
+});
+
+describe("the escalation is off unless asked for", () => {
+	// pi's behaviour at the ceiling is a decision with a characterization test
+	// behind it ("does not compact when a length stop reaches the desired
+	// output limit"). Flipping a documented default in someone else's codebase
+	// is not a fix; a deployment whose ceiling was inherited rather than chosen
+	// can overrule it.
+	it("leaves a spent-ceiling turn alone by default", async () => {
+		let call = 0;
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			const m = createAssistantMessage([{ type: "thinking", thinking: "x" }], "length");
+			m.usage.output = createModel().maxTokens;
+			call++;
+			queueMicrotask(() => stream.push({ type: "done", reason: "stop", message: m }));
+			return stream;
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [] };
+		const config: AgentLoopConfig = { model: createModel(), convertToLlm: identityConverter };
+		const stream = agentLoop([createUserMessage("go")], context, config, undefined, streamFn);
+		for await (const _ of stream) {
+		}
+		expect(call).toBe(1);
 	});
 });

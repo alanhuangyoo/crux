@@ -335,7 +335,25 @@ async function runLoop(
 			// first; only tell the model once the raised ceiling is used up too.
 			let recovery: string | undefined;
 			let retrySilently = false;
-			if (toolCalls.length === 0 && message.stopReason === "length") {
+			// Scoped to a turn that ran *out* of ceiling, not one the provider
+			// clamped below it. pi already recovers the second case a layer up:
+			// `isRecoverableLength` is `usage.output < desiredMaxOutput`, and
+			// AgentSession answers it by dropping the truncated message,
+			// compacting, and retrying once -- the right move when the response
+			// was cut short because context left no room. Acting on that case
+			// here would take it away from the layer that handles it properly,
+			// which is what three of its characterization tests caught.
+			//
+			// Nothing owned the other case: output that reached the ceiling
+			// exactly. pi reads it as the model spending the budget it was given
+			// and lets the run end, and with no tool call in the message the run
+			// does end -- 36% of stock trials on this benchmark, whose ceiling
+			// (16,384) sits inside the model's own output distribution (p99
+			// 16,161).
+			const ceiling = config.maxTokens ?? config.model.maxTokens;
+			const spentTheCeiling =
+				config.escalateOnSpentCeiling === true && ceiling > 0 && (message.usage?.output ?? 0) >= ceiling;
+			if (toolCalls.length === 0 && message.stopReason === "length" && spentTheCeiling) {
 				const ceiling = escalated ? undefined : escalatedMaxTokens(config);
 				if (ceiling !== undefined) {
 					escalated = true;
