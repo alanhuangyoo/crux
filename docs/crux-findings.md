@@ -1,9 +1,9 @@
 # What was measured, and what it ruled out
 
-Seven changes to pi's agent loop and tools, each taken from a shipped reference
+Eight changes to pi's agent loop and tools, each taken from a shipped reference
 implementation rather than reasoned out, and each with the measurement that
 motivated it. Then seven explanations for the remaining gap, all of which the
-data rejected.
+data rejected, and one that survived.
 
 The benchmark throughout is Terminal-Bench 2.1, 89 tasks, one self-hosted
 Qwen3.8-27B behind an OpenAI-compatible endpoint, 8x agent budget, arms run
@@ -20,14 +20,75 @@ concurrently so throughput is shared.
 | A bash command the model did not bound is still bounded | Claude Code's tiered shell policy | 85.7% of 6,100 bash calls carried no timeout; 13 of 401 trials ended on a tool call that started and never finished |
 | Settings delivered where the run will read them | — | harbor builds the exec env from the model connection, so a variable exported on the runner reaches nothing inside the container |
 | An offline bundle that works on Alpine | — | Three of eleven SWE-Atlas images are musl; a glibc node reports the mismatch as `env: can't execute 'node'` |
+| Stopping is questioned while the budget is unspent | Terminus `_get_completion_confirmation_message` | pi's failed trials had spent a median 24% of their budget when they stopped, against Claude Code's 95% -- see below |
 
 They demonstrably act: across one arm, `Output token limit hit` appears in 29
 trials against 0 in the control, and `stopReason: "length"` 241 times against
 96 — the ceiling biting and each turn being retried rather than ending the run.
 
-**They do not demonstrably score.** 79 pairs, 8 gains, 2 losses, p=0.109, and
-the gains do not concentrate where the change acted (4:1 in the 28 pairs it
-touched, 4:1 in the 51 it did not). A replication is running to pool.
+**They score, and the replication is what settled it.** The first round was
+79 pairs, 8 gains, 2 losses, p=0.109 -- an effect the design could not resolve,
+since 89 tasks at a 15.5% flip rate need an 11-point swing to reach p<0.05. Two
+arms then ran concurrently against the same control:
+
+| Arm | What it added | pass@1 | pass@2 | vs control |
+|---|---|---|---|---|
+| control | stock pi, no ported prompt | 0.500 | 52/89 | — |
+| changed | seven changes + ported prompt | **0.588** | **61/89** | 23-9, p=0.020 |
+| think | same, plus `thinking=medium` | 0.584 | 52/89 | 19-7, p=0.029 |
+
+Both clear p<0.05 against the same control; against each other they are 12-12,
+p=1.0. So the +8.8 belongs to the loop changes and the ported prompt, and the
+reasoning level -- a harbor kwarg that had never been set on either side, while
+Claude Code's arms were always pinned to `medium` -- turns out not to matter
+here. It was worth an arm to find that out, and the arm is what makes the
++8.8 a replication rather than a single reading.
+
+`filter-js-from-html` was solved for the first time by any scaffold, which
+moves the every-scaffold ceiling from 80/89 to 81/89.
+
+## The one that survived: pi stops, the others run out of time
+
+Every explanation below was a guess about what the agent does *while* it works.
+This one is about the last thing it does, and it is the largest difference
+measured anywhere in this project.
+
+For each trial, the share of its own budget spent at the moment the run ended:
+
+| | solved | failed | failures under half the budget |
+|---|---|---|---|
+| pi (best arm) | 6% | **24%** | **47 of 73** |
+| Terminus (0.719) | 33% | 82% | 8 of 25 |
+| Claude Code (0.730) | 19% | **95%** | 7 of 24 |
+
+When Claude Code fails it has spent its whole run. When pi fails it has spent a
+quarter of one. Two thirds of pi's failures are voluntary stops, not timeouts --
+the loop reads "no tool calls" as done and takes the agent at its word, and the
+agent's word is a check it wrote for itself and then passed.
+
+This is not a subtle effect at the edge of what 89 tasks can resolve. It is a
+3.4x difference in a directly observed quantity over 73 failures.
+
+Terminus already asks "are you sure" here; its trajectories show a generic
+question earning a generic yes, and one run answering it five times. What its
+`_get_completion_confirmation_message` adds -- and what pi's loop now does at
+the same moment -- is the number the agent cannot see: how much of the run is
+left. The threshold bounds itself, because every round it buys costs time.
+
+Two things follow that were not visible before:
+
+**The scaffold gap is larger than the score gap.** Terminus, on this same model
+and task set, scores 0.719 against pi's best 0.640, and its agent wrapper is
+1,290 lines against pi's 386. The gap is not the model and not the prompt; it
+is a set of interventions that exist in one wrapper and not the other --
+completion confirmation, edit-debt accounting, stuck detection, parser
+hardening, output capping. They were written for Terminus and never ported.
+
+**Reliability, not capability, is the near-term ceiling.** In the best pi arm
+the 89 tasks split 43 solid (2/2), 18 flaky (1/2), 28 zero (0/2). Making the
+flaky ones stick is worth 10 points and requires solving nothing new. Reading
+those 18 for a shared failure shape found none -- the failing attempt is not
+systematically longer or shorter than the passing one (10-8, p≈0.8).
 
 ## What the gap is not
 
