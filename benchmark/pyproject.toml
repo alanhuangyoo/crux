@@ -1,0 +1,37 @@
+[project]
+name = "crux"
+version = "0.1.0"
+description = "A terminal agent scaffold targeting Terminal-Bench, optimized for DeepSeek models."
+readme = "README.md"
+requires-python = ">=3.12"  # harbor needs 3.12; ">=3.11" made the dep set unsolvable
+dependencies = [
+    "harbor>=0.22.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# pytest-asyncio: the wait-policy tests drive the agent's async command path
+# directly, which is the only way to assert on how send_keys was called.
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.6"]
+# `crux solve` shells out to mini-swe-agent's runner; the benchmark path
+# installs it into the task container instead and does not need it here.
+local = ["mini-swe-agent>=1.0"]
+
+[project.scripts]
+crux = "crux.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/crux"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+# Async tests are plain `async def` with a marker; auto mode keeps them from
+# silently passing as skipped coroutines.
+asyncio_mode = "auto"

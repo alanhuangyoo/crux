@@ -1,0 +1,692 @@
+"""The in-container toolkit.
+
+These run where we cannot watch them, and a bug surfaces as the model behaving
+strangely several turns later. The contracts worth pinning are the ones that
+make the tools safer than the shell commands they replace: uniqueness on edit,
+and bounded output on read and grep.
+"""
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+TOOL = Path(__file__).parent.parent / "src" / "crux" / "resources" / "crux_tool.py"
+
+
+def run(args, cwd, stdin=""):
+    return subprocess.run(
+        [sys.executable, str(TOOL), *args],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+    )
+
+
+# ---- read ------------------------------------------------------------------
+
+def test_read_numbers_lines(tmp_path):
+    (tmp_path / "a.py").write_text("alpha\nbeta\ngamma\n")
+    r = run(["read", "a.py"], tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "1: alpha\n2: beta\n3: gamma\n"
+
+
+def test_read_paginates_and_says_how_to_continue(tmp_path):
+    (tmp_path / "big.txt").write_text("\n".join(f"line{i}" for i in range(1, 101)))
+    r = run(["read", "big.txt", "--limit", "10"], tmp_path)
+    assert "1: line1" in r.stdout and "10: line10" in r.stdout
+    assert "11: line11" not in r.stdout
+    # The model has to know both that it is missing content and how to get it.
+    assert "90 more lines" in r.stdout
+    assert "--offset 11" in r.stdout
+
+
+def test_read_offset(tmp_path):
+    (tmp_path / "f.txt").write_text("a\nb\nc\nd\n")
+    r = run(["read", "f.txt", "--offset", "3"], tmp_path)
+    assert r.stdout == "3: c\n4: d\n"
+
+
+def test_read_truncates_a_pathological_line(tmp_path):
+    (tmp_path / "min.js").write_text("x" * 9000 + "\n")
+    r = run(["read", "min.js"], tmp_path)
+    assert len(r.stdout) < 4000
+    assert "more chars on this line" in r.stdout
+
+
+def test_read_directory_marks_subdirectories(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "file.py").write_text("x")
+    r = run(["read", "."], tmp_path)
+    assert "pkg/" in r.stdout and "file.py" in r.stdout
+
+
+def test_read_missing_file_fails(tmp_path):
+    r = run(["read", "nope.txt"], tmp_path)
+    assert r.returncode == 1 and "no such file" in r.stderr
+
+
+# ---- grep ------------------------------------------------------------------
+
+def test_grep_reports_path_line_and_text(tmp_path):
+    (tmp_path / "a.py").write_text("import os\ndef handler():\n    return None\n")
+    r = run(["grep", "def handler"], tmp_path)
+    assert "./a.py:2: def handler():" in r.stdout
+
+
+def test_grep_include_filter(tmp_path):
+    (tmp_path / "a.py").write_text("target\n")
+    (tmp_path / "b.txt").write_text("target\n")
+    r = run(["grep", "target", ".", "--include", "*.py"], tmp_path)
+    assert "a.py" in r.stdout and "b.txt" not in r.stdout
+
+
+def test_grep_skips_noise_directories(tmp_path):
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "x.js").write_text("target\n")
+    (tmp_path / "src.js").write_text("target\n")
+    r = run(["grep", "target"], tmp_path)
+    assert "src.js" in r.stdout and "node_modules" not in r.stdout
+
+
+def test_grep_no_match_says_so(tmp_path):
+    (tmp_path / "a.py").write_text("nothing here\n")
+    r = run(["grep", "absent"], tmp_path)
+    assert r.returncode == 0 and "no matches" in r.stdout
+
+
+def test_grep_bad_pattern_fails_clearly(tmp_path):
+    r = run(["grep", "[unclosed"], tmp_path)
+    assert r.returncode == 1 and "bad pattern" in r.stderr
+
+
+# ---- edit ------------------------------------------------------------------
+
+def test_edit_replaces_exact_text(tmp_path):
+    (tmp_path / "app.py").write_text("def f():\n    return 1\n")
+    r = run(
+        ["edit", "app.py"],
+        tmp_path,
+        stdin=json.dumps({"edits": [{"old": "return 1", "new": "return 42"}]}),
+    )
+    assert r.returncode == 0, r.stderr
+    assert (tmp_path / "app.py").read_text() == "def f():\n    return 42\n"
+
+
+def test_edit_refuses_an_ambiguous_anchor(tmp_path):
+    """The case where sed edits the wrong line and says nothing."""
+    (tmp_path / "app.py").write_text("x = 1\ny = 2\nx = 1\n")
+    original = (tmp_path / "app.py").read_text()
+    r = run(
+        ["edit", "app.py"],
+        tmp_path,
+        stdin=json.dumps({"edits": [{"old": "x = 1", "new": "x = 9"}]}),
+    )
+    assert r.returncode == 1
+    assert "occurs 2 times" in r.stderr and "must be unique" in r.stderr
+    assert (tmp_path / "app.py").read_text() == original
+
+
+def test_edit_batch_is_all_or_nothing(tmp_path):
+    """A half-applied batch leaves a file no one can reason about."""
+    (tmp_path / "app.py").write_text("a = 1\nb = 2\n")
+    original = (tmp_path / "app.py").read_text()
+    r = run(
+        ["edit", "app.py"],
+        tmp_path,
+        stdin=json.dumps(
+            {"edits": [{"old": "a = 1", "new": "a = 9"}, {"old": "zzz", "new": "!"}]}
+        ),
+    )
+    assert r.returncode == 1
+    assert "Nothing was written" in r.stderr
+    assert (tmp_path / "app.py").read_text() == original
+
+
+def test_edit_applies_several_disjoint_edits(tmp_path):
+    (tmp_path / "app.py").write_text("a = 1\nb = 2\nc = 3\n")
+    r = run(
+        ["edit", "app.py"],
+        tmp_path,
+        stdin=json.dumps(
+            {"edits": [{"old": "a = 1", "new": "a = 9"}, {"old": "c = 3", "new": "c = 7"}]}
+        ),
+    )
+    assert r.returncode == 0, r.stderr
+    assert (tmp_path / "app.py").read_text() == "a = 9\nb = 2\nc = 7\n"
+
+
+def test_edit_missing_anchor_shows_what_it_looked_for(tmp_path):
+    (tmp_path / "app.py").write_text("a = 1\n")
+    r = run(
+        ["edit", "app.py"],
+        tmp_path,
+        stdin=json.dumps({"edits": [{"old": "nonexistent", "new": "x"}]}),
+    )
+    assert r.returncode == 1
+    # Without the anchor echoed back the model cannot tell what went wrong.
+    assert "nonexistent" in r.stderr
+
+
+def test_edit_rejects_malformed_stdin(tmp_path):
+    (tmp_path / "app.py").write_text("a\n")
+    r = run(["edit", "app.py"], tmp_path, stdin="not json")
+    assert r.returncode == 1 and "not valid JSON" in r.stderr
+
+
+# ---- write / files ---------------------------------------------------------
+
+def test_write_creates_parent_directories(tmp_path):
+    r = run(["write", "a/b/c.txt"], tmp_path, stdin="hello\nworld\n")
+    assert r.returncode == 0, r.stderr
+    assert (tmp_path / "a/b/c.txt").read_text() == "hello\nworld\n"
+
+
+def test_files_lists_matching_paths(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "mod.py").write_text("x")
+    (tmp_path / "readme.md").write_text("x")
+    r = run(["files", "*.py"], tmp_path)
+    assert "mod.py" in r.stdout and "readme.md" not in r.stdout
+
+
+@pytest.mark.parametrize("command", ["read", "grep", "files", "edit", "write"])
+def test_every_subcommand_has_help(command):
+    r = subprocess.run(
+        [sys.executable, str(TOOL), command, "--help"], capture_output=True, text=True
+    )
+    assert r.returncode == 0 and r.stdout
+
+
+# ---- todo ------------------------------------------------------------------
+
+def todo(args, tmp_path, stdin=""):
+    """Run a todo subcommand against a list scoped to this test."""
+    import os
+
+    env = dict(os.environ, CRUX_TODO_PATH=str(tmp_path / "todo.json"))
+    return subprocess.run(
+        [sys.executable, str(TOOL), "todo", *args],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=env,
+    )
+
+
+def test_todo_add_and_list(tmp_path):
+    todo(["add", "block XSS", "preserve clean HTML"], tmp_path)
+    r = todo(["list"], tmp_path)
+    assert "1. [ ] block XSS" in r.stdout
+    assert "2. [ ] preserve clean HTML" in r.stdout
+    assert "2 of 2 still open" in r.stdout
+
+
+def test_todo_list_exits_nonzero_while_work_remains(tmp_path):
+    """So `crux todo list` cannot be read as confirmation of being finished."""
+    todo(["add", "one thing"], tmp_path)
+    assert todo(["list"], tmp_path).returncode == 2
+
+    todo(["done", "1"], tmp_path)
+    r = todo(["list"], tmp_path)
+    assert r.returncode == 0
+    assert "all 1 done" in r.stdout
+
+
+def test_todo_done_marks_the_item(tmp_path):
+    todo(["add", "a", "b"], tmp_path)
+    todo(["done", "2"], tmp_path)
+    out = todo(["list"], tmp_path).stdout
+    assert "1. [ ] a" in out and "2. [x] b" in out
+
+
+def test_todo_done_accepts_several_numbers(tmp_path):
+    todo(["add", "a", "b", "c"], tmp_path)
+    todo(["done", "1", "3"], tmp_path)
+    out = todo(["list"], tmp_path).stdout
+    assert "1. [x] a" in out and "2. [ ] b" in out and "3. [x] c" in out
+
+
+def test_todo_rejects_an_out_of_range_number(tmp_path):
+    todo(["add", "only one"], tmp_path)
+    r = todo(["done", "5"], tmp_path)
+    assert r.returncode == 1 and "no item 5" in r.stderr
+
+
+def test_todo_rejects_a_non_number(tmp_path):
+    todo(["add", "x"], tmp_path)
+    r = todo(["done", "first"], tmp_path)
+    assert r.returncode == 1 and "not an item number" in r.stderr
+
+
+def test_todo_persists_across_invocations(tmp_path):
+    todo(["add", "survives"], tmp_path)
+    assert "survives" in todo(["list"], tmp_path).stdout
+
+
+def test_todo_clear(tmp_path):
+    todo(["add", "a", "b"], tmp_path)
+    todo(["clear"], tmp_path)
+    r = todo(["list"], tmp_path)
+    assert "empty" in r.stdout and r.returncode == 0
+
+
+def test_empty_todo_list_is_not_an_error(tmp_path):
+    r = todo(["list"], tmp_path)
+    assert r.returncode == 0 and "empty" in r.stdout
+
+
+# ---- todo with bound checks -------------------------------------------------
+
+def test_closing_an_item_reruns_its_check(tmp_path):
+    """Closing is an observation, not a claim."""
+    todo(["add", "file exists", "--verify", "test -f target.txt"], tmp_path)
+    r = todo(["done", "1"], tmp_path)
+    assert r.returncode == 1
+    assert "its check still fails" in r.stderr
+    assert "[ ] file exists" in todo(["list"], tmp_path).stdout
+
+    (tmp_path / "target.txt").write_text("x")
+    assert todo(["done", "1"], tmp_path).returncode == 0
+    assert "[x] file exists" in todo(["list"], tmp_path).stdout
+
+
+def test_a_failing_check_shows_its_output(tmp_path):
+    """"It failed" is not actionable; the command's own output is."""
+    todo(["add", "grep works", "--verify", "grep NOPE missing.txt"], tmp_path)
+    r = todo(["done", "1"], tmp_path)
+    assert "grep NOPE missing.txt" in r.stderr
+
+
+def test_items_without_a_check_still_close(tmp_path):
+    """Not every requirement has a one-line command behind it."""
+    todo(["add", "reviewed the spec"], tmp_path)
+    assert todo(["done", "1"], tmp_path).returncode == 0
+
+
+def test_verify_reruns_every_check(tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    todo(["add", "b exists", "--verify", "test -f b.txt"], tmp_path)
+    r = todo(["verify"], tmp_path)
+    assert r.returncode == 2
+    assert "[pass] a exists" in r.stdout
+    assert "[FAIL] b exists" in r.stdout
+
+
+def test_verify_catches_a_regression_from_a_later_edit(tmp_path):
+    """The case this exists for: fixing one requirement breaks another."""
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    assert todo(["done", "1"], tmp_path).returncode == 0
+
+    (tmp_path / "a.txt").unlink()
+    r = todo(["verify"], tmp_path)
+    assert r.returncode == 2 and "[FAIL] a exists" in r.stdout
+
+
+def test_verify_passes_when_everything_holds(tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    r = todo(["verify"], tmp_path)
+    assert r.returncode == 0 and "all checks pass" in r.stdout
+
+
+def test_list_shows_the_pending_check(tmp_path):
+    todo(["add", "tests pass", "--verify", "pytest -q"], tmp_path)
+    assert "check: pytest -q" in todo(["list"], tmp_path).stdout
+
+
+# ---- submit gate ------------------------------------------------------------
+
+def crux(args, tmp_path, stdin=""):
+    import os
+
+    env = dict(os.environ, CRUX_TODO_PATH=str(tmp_path / "todo.json"))
+    return subprocess.run(
+        [sys.executable, str(TOOL), *args],
+        input=stdin, capture_output=True, text=True, cwd=tmp_path, env=env,
+    )
+
+
+def test_submit_refuses_while_items_are_open(tmp_path):
+    todo(["add", "still to do"], tmp_path)
+    r = crux(["submit"], tmp_path)
+    assert r.returncode == 1
+    assert "1 item(s) still open" in r.stderr
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" not in r.stdout
+
+
+def test_submit_rechecks_closed_items(tmp_path):
+    """The regression case: an item passed earlier, a later edit broke it."""
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    todo(["done", "1"], tmp_path)
+    (tmp_path / "a.txt").unlink()
+
+    r = crux(["submit"], tmp_path)
+    assert r.returncode == 1
+    assert "passed earlier now fail" in r.stderr
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" not in r.stdout
+
+
+def test_submit_emits_the_sentinel_when_everything_holds(tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    todo(["done", "1"], tmp_path)
+    r = crux(["submit", "--confirm"], tmp_path)
+    assert r.returncode == 0
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in r.stdout
+
+
+def test_submit_refuses_an_empty_checklist(tmp_path):
+    """Submitting without having enumerated anything proves nothing."""
+    r = crux(["submit"], tmp_path)
+    assert r.returncode == 1 and "checklist is empty" in r.stderr
+
+
+def test_submit_is_closed_by_a_check_not_by_reading_a_list(tmp_path, monkeypatch):
+    """The gate has to cost a bound check, because that is the measured gap.
+
+    First version listed generic categories -- empty input, exit codes,
+    tolerances -- and let the agent through if none applied. The trajectory
+    from that run says what it bought, in the model's own words: "The nudge to
+    add more checks lists generic categories ... none of which this task
+    actually specifies". It then ran --confirm with one check bound, and failed.
+    The dismissal was correct on its own terms, which is why the fix is not a
+    sterner list.
+    """
+    monkeypatch.setenv("CRUX_SUBMIT_GATE", "1")
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    todo(["done", "1"], tmp_path)
+
+    first = crux(["submit"], tmp_path)
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" not in first.stdout
+    assert "crux todo add" in first.stdout, "it must say how to close the gate"
+    assert "end to end" in first.stdout, "and what to bind when all else is covered"
+
+    # The flag on its own is what the first version let through.
+    bypass = crux(["submit", "--confirm"], tmp_path)
+    assert bypass.returncode == 1
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" not in bypass.stdout
+    assert "does not record what you found" in bypass.stderr
+
+    # Binding one is what closes it.
+    (tmp_path / "b.txt").write_text("y")
+    todo(["add", "b exists", "--verify", "test -f b.txt"], tmp_path)
+    todo(["done", "2"], tmp_path)
+
+    nudge = crux(["submit"], tmp_path)
+    assert "--confirm" in nudge.stdout
+    assert "1 added" in nudge.stdout
+
+    done = crux(["submit", "--confirm"], tmp_path)
+    assert done.returncode == 0
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in done.stdout
+
+
+def test_confirm_is_a_second_look_not_a_bypass(tmp_path):
+    # The extra phase must not become a way around a check that regressed.
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    todo(["done", "1"], tmp_path)
+    (tmp_path / "a.txt").unlink()
+
+    r = crux(["submit", "--confirm"], tmp_path)
+    assert r.returncode != 0
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" not in r.stdout
+
+
+def test_the_gate_is_off_unless_asked_for(tmp_path):
+    """An unverified change must not sit in the path of the next measurement.
+
+    The gate rests partly on a reading the finished runs disproved -- crux was
+    said to stop earlier than the arm that solved the same task, and on the
+    full 89 it stops later on nine of the ten it loses. Leaving it on would put
+    two changes in one experiment.
+    """
+    (tmp_path / "a.txt").write_text("x")
+    todo(["add", "a exists", "--verify", "test -f a.txt"], tmp_path)
+    todo(["done", "1"], tmp_path)
+
+    out = crux(["submit"], tmp_path)
+    assert out.returncode == 0
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in out.stdout
+
+
+# ---- what a check is worth at the moment it is bound -------------------------
+
+
+def test_a_check_that_already_passes_says_so(tmp_path):
+    """The retrospective-checklist finding, made visible where it happens.
+
+    Across 87 scored trials the first check is bound at 75-87% of the way
+    through a run, after the last edit, and 88% of trials never see a bound
+    check fail once -- including the ones that solved the task. A checklist
+    written afterwards describes what was built, and a description cannot fail.
+    """
+    (tmp_path / "f.txt").write_text("hello")
+    r = todo(["add", "f.txt exists", "--verify", "test -f f.txt"], tmp_path)
+    assert "already passes" in r.stdout
+    assert "testing what you did rather than what was asked" in r.stdout
+
+
+def test_a_check_that_fails_now_is_the_shape_that_is_wanted(tmp_path):
+    r = todo(["add", "g.txt exists", "--verify", "test -f g.txt"], tmp_path)
+    assert "its check fails now" in r.stdout
+    assert "already passes" not in r.stdout
+
+
+def test_an_item_with_no_check_probes_nothing(tmp_path):
+    r = todo(["add", "just a note"], tmp_path)
+    assert "already passes" not in r.stdout
+    assert "its check fails now" not in r.stdout
+
+
+def test_the_probe_does_not_close_or_reject_the_item(tmp_path):
+    # It states a fact and leaves the judgement where it was: the item is added
+    # either way, and it is still open.
+    (tmp_path / "f.txt").write_text("hello")
+    todo(["add", "f.txt exists", "--verify", "test -f f.txt"], tmp_path)
+    r = todo(["list"], tmp_path)
+    assert "1. [ ] f.txt exists" in r.stdout
+
+
+def test_a_slow_check_is_not_waited_on(tmp_path):
+    # A bound check is meant to be quick; anything slower is a build, and
+    # blocking `todo add` on it would be worse than not probing.
+    r = todo(["add", "slow", "--verify", "sleep 60"], tmp_path)
+    assert "did not finish" in r.stdout
+    assert "already passes" not in r.stdout
+
+
+# ---- how the repository runs its own tests ----------------------------------
+
+
+def _tool(args, cwd):
+    return subprocess.run([sys.executable, str(TOOL), *args],
+                          capture_output=True, text=True, cwd=cwd)
+
+
+def test_tests_finds_the_ci_invocation(tmp_path):
+    """The one fact in this loop the agent does not have to judge.
+
+    On a finished SWE-bench Verified run the grader used
+
+        ./tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1
+
+    and of the eight django failures none passed --parallel and two passed
+    --settings. django__django-16263 ran a 1243-test sweep, saw `Ran 1243 tests
+    OK`, and was failed on a module inside that sweep. Same module, same code,
+    different invocation.
+    """
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "tests.yml").write_text(
+        "jobs:\n  sqlite:\n    steps:\n      - name: Run tests\n"
+        "        run: python tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1\n"
+    )
+    r = _tool(["tests", str(tmp_path)], tmp_path)
+    assert "--settings=test_sqlite" in r.stdout
+    assert "--parallel 1" in r.stdout
+    assert "GitHub Actions" in r.stdout
+
+
+def test_tests_reads_tox_and_makefile(tmp_path):
+    (tmp_path / "tox.ini").write_text("[testenv]\ncommands = pytest -q --strict\n")
+    (tmp_path / "Makefile").write_text("test:\n\tpython -m pytest tests/\n")
+    out = _tool(["tests", str(tmp_path)], tmp_path).stdout
+    assert "pytest -q --strict" in out
+    assert "python -m pytest tests/" in out
+
+
+def test_a_dependency_pin_is_not_an_invocation(tmp_path):
+    """The first version reported crux's own pyproject.toml as three ways to
+    run the tests: a dependency pin, a section header and a comment."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project.optional-dependencies]\n'
+        'dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]\n\n'
+        '[tool.pytest.ini_options]\n'
+        'asyncio_mode = "auto"\n'
+    )
+    out = _tool(["tests", str(tmp_path)], tmp_path).stdout
+    assert "no test invocation stated" in out
+
+
+def test_a_comment_is_not_an_invocation(tmp_path):
+    (tmp_path / "Makefile").write_text("# run pytest to check things\nbuild:\n\techo hi\n")
+    assert "no test invocation stated" in _tool(["tests", str(tmp_path)], tmp_path).stdout
+
+
+def test_a_repo_that_says_nothing_says_so(tmp_path):
+    out = _tool(["tests", str(tmp_path)], tmp_path).stdout
+    assert "no test invocation stated" in out
+    assert "Looked in:" in out
+
+
+def test_a_cd_prefix_is_still_a_command(tmp_path):
+    (tmp_path / "CONTRIBUTING.md").write_text(
+        "To run the suite:\n\n    cd tests && ./runtests.py --settings=test_sqlite\n")
+    out = _tool(["tests", str(tmp_path)], tmp_path).stdout
+    assert "runtests.py --settings=test_sqlite" in out
+
+
+def test_tests_walks_up_to_the_repository_root(tmp_path):
+    """Run from /testbed/tests, the first version looked only there.
+
+    It reported "no test invocation stated" on a repository whose CI config was
+    one directory up, which is how it was actually invoked in a live run.
+    """
+    (tmp_path / ".git").mkdir()
+    wf = tmp_path / ".github" / "workflows"; wf.mkdir(parents=True)
+    (wf / "ci.yml").write_text("jobs:\n  t:\n    steps:\n      - run: pytest -q\n")
+    sub = tmp_path / "tests"; sub.mkdir()
+    out = _tool(["tests", str(sub)], sub).stdout
+    assert "pytest -q" in out
+    assert "no test invocation" not in out
+
+
+def test_an_unexpanded_ci_template_is_not_a_command(tmp_path):
+    """`tox ${{ matrix.toxenv }}` is not something anyone can run.
+
+    astropy's CI is written that way, and the first version printed it as an
+    invocation.
+    """
+    (tmp_path / "setup.py").write_text("")
+    wf = tmp_path / ".github" / "workflows"; wf.mkdir(parents=True)
+    (wf / "ci.yml").write_text(
+        "jobs:\n  t:\n    steps:\n"
+        "      - run: tox ${{ matrix.toxargs }} -e ${{ matrix.toxenv }}\n"
+        "      - run: python -m pytest astropy\n"
+    )
+    out = _tool(["tests", str(tmp_path)], tmp_path).stdout
+    assert "${{" not in out
+    assert "python -m pytest astropy" in out
+
+
+def test_another_ecosystem_is_not_offered_to_this_one(tmp_path):
+    """django's tox.ini has a javascript env, and `npm test` was the first
+    thing the tool told a python repository to run."""
+    (tmp_path / "setup.py").write_text("")
+    (tmp_path / "tox.ini").write_text(
+        "[testenv:javascript]\ncommands = npm test\n\n"
+        "[testenv]\ncommands = python tests/runtests.py\n"
+    )
+    out = _tool(["tests", str(tmp_path)], tmp_path).stdout
+    assert "npm test" not in out
+    assert "python tests/runtests.py" in out
+
+
+def test_it_says_what_it_is_not_authoritative_about(tmp_path):
+    # django's own docs say `./runtests.py`; --settings and --parallel are the
+    # caller's choice, and the tool must not imply otherwise.
+    (tmp_path / "tox.ini").write_text("[testenv]\ncommands = pytest\n")
+    out = _tool(["tests", str(tmp_path)], tmp_path).stdout
+    assert "leaves to you" in out
+
+
+# ---- falsify: does a bound check notice a broken deliverable ----------------
+
+
+def _tool_env(args, cwd):
+    import os
+
+    env = dict(os.environ, CRUX_TODO_PATH=str(cwd / "todo.json"))
+    return subprocess.run([sys.executable, str(TOOL), *args],
+                          capture_output=True, text=True, cwd=cwd, env=env)
+
+
+def test_falsify_names_a_check_that_cannot_fail(tmp_path):
+    """The measurement this exists for.
+
+    88% of trials never see a bound check go red -- including the ones that
+    solved the task -- and `crux submit` printed "all N item(s) verified" on
+    95% of runs that scored and 100% of runs that did not. `mteb-retrieve`'s
+    whole verification was that a file existed; it submitted confidently and
+    was wrong.
+    """
+    (tmp_path / "answer.txt").write_text("crux\n")
+    todo(["add", "answer says crux", "--verify", "grep -q crux answer.txt"], tmp_path)
+    todo(["add", "answer exists", "--verify", "test -f answer.txt"], tmp_path)
+    out = _tool_env(["falsify"], tmp_path).stdout
+    assert "ok -- fails when answer.txt is emptied" in out
+    assert "VACUOUS" in out
+    assert "1 of 2 checks pass whatever the file says" in out
+
+
+def test_falsify_restores_the_file(tmp_path):
+    """It breaks the deliverable on purpose, so this is the test that matters."""
+    f = tmp_path / "answer.txt"
+    f.write_text("crux\n")
+    before = f.read_bytes()
+    todo(["add", "x", "--verify", "test -f answer.txt"], tmp_path)
+    _tool_env(["falsify"], tmp_path)
+    assert f.read_bytes() == before
+    assert not list(tmp_path.glob("*.crux-falsify-backup"))
+
+
+def test_falsify_says_when_a_check_names_no_file(tmp_path):
+    todo(["add", "python runs", "--verify", "python3 -c 'print(1)'"], tmp_path)
+    out = _tool_env(["falsify"], tmp_path).stdout
+    assert "names no file that exists here" in out
+    assert "VACUOUS" not in out
+
+
+def test_falsify_refuses_system_paths(tmp_path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("crux_tool", TOOL)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    for cmd in ("test -f /etc/hosts", "grep x /usr/bin/env", "cat .git/HEAD"):
+        assert mod._breakable_targets(cmd, str(tmp_path)) == []
+
+
+def test_falsify_with_no_checklist_says_so(tmp_path):
+    assert "no checklist" in _tool_env(["falsify"], tmp_path).stdout

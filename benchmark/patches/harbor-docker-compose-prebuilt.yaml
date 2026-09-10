@@ -1,0 +1,12 @@
+services:
+  main:
+    image: ${PREBUILT_IMAGE_NAME}
+    # Cleared explicitly. harbor assumes a prebuilt image has no ENTRYPOINT and
+    # supplies the keepalive as `command`; the SWE-Atlas images set
+    # ENTRYPOINT ["/bin/bash"], so the two concatenate into
+    #   /bin/bash sh -c "sleep infinity"
+    # bash then runs the file `sh` as a script and exits 126 ("cannot execute
+    # binary file"). Every Terminal-Bench and SWE-bench image in use has a null
+    # entrypoint, so clearing it is a no-op for them.
+    entrypoint: []
+    command: [ "sh", "-c", "sleep infinity" ]
