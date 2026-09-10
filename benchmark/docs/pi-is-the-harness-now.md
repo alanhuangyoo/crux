@@ -161,3 +161,50 @@ and the first one that was already being built when the measurement arrived.
 What is left on these seven is the content of the approach rather than its
 volume, and no aggregate metric tried so far separates it. The next step is
 per-task reading against the Claude Code win, not another ratio.
+
+
+## Reading two trajectories side by side, and the twentieth explanation
+
+`qemu-alpine-ssh` is the sharpest inversion on the board: Claude Code wins it in
+33 tool calls, crux loses it in 104 and 70.
+
+Claude Code spends its first eighteen calls without starting a virtual machine
+at all -- unpacking the initramfs, reading its `init`, extracting
+`alpine-baselayout-data` to read `etc/inittab` and `etc/profile`, hunting for
+which apk ships `/etc/securetty`, in its own words "to know exactly what prompts
+to expect on the console". Only then does it write `driver.py`, launch QEMU
+detached, and drive the console from the script.
+
+crux runs the same plan. It inspects the ISO, extracts the kernel and initramfs,
+reads `syslinux.cfg` for the boot parameters, writes `vm_driver.py`, launches
+QEMU, and drives it. The idea that Claude Code automates an interactive thing
+while pi poked at it by hand is simply not what the trajectories say.
+
+Where crux loses the run is smaller and less general: a `mount -o loop` that the
+container forbids, costing three calls to route around; a QEMU invocation that
+was malformed and not noticed for eight calls; and a driver written against an
+assumed console dialogue whose `apk add` output came back, in the agent's own
+words, "empty/skewed". Then eighty calls debugging a driver built on those
+assumptions.
+
+The obvious generalisation -- Claude Code establishes more ground truth before
+it automates -- does not survive contact with the corpus. Median inspections
+before the first script written:
+
+| | solved | failed |
+|---|---:|---:|
+| Claude Code | 3.0 | 2.0 |
+| crux, full set | 2.0 | 3.0 |
+| crux, the nineteen | 1.5 | 3.0 |
+
+Everything sits between 1.5 and 3, and the direction flips between the two
+agents. Twentieth explanation measured away.
+
+**Where that leaves the seven.** Twenty aggregate explanations have now been
+proposed and rejected, and the last three were rejected specifically because a
+single trajectory made them look obvious. What separates these runs is the
+content of a particular technical judgement -- which boot parameters, which
+console dialogue, whether a malformed command gets noticed -- and no ratio
+computed over the corpus has isolated it. That is a real finding rather than a
+failure to look: it says the remaining gap on these seven is not a scaffold
+mechanism waiting to be ported, and further metric-hunting is the wrong move.
