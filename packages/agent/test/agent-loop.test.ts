@@ -1784,6 +1784,29 @@ describe("stopping early, with the budget still on the table", () => {
 		expect(JSON.stringify(events)).not.toContain("% of your budget");
 	});
 
+	it("keeps asking when the round it buys was cut off at the output limit", async () => {
+		// A turn that stopped on `length` did not decline to act, it was
+		// truncated mid-sentence, and the productivity gate above reads that as
+		// "nothing left to do". Measured on the arm that introduced the gate:
+		// of 37 failures, 13 ended under ten tool calls and 12 of those 13
+		// ended on `length`. `regex-chess` ran two turns and zero tool calls.
+		// Claude Code, same model, ends 1 of 24 failures under ten tool calls.
+		const truncated = createAssistantMessage([{ type: "text", text: "partial" }]);
+		truncated.stopReason = "length";
+		const { h, stream } = run({ ...early, maxCompletionNotices: 3 }, [truncated]);
+		await drain(stream);
+		expect(h.calls()).toBe(4);
+	});
+
+	it("says the turn was cut off rather than asking whether it is done", async () => {
+		const truncated = createAssistantMessage([{ type: "text", text: "partial" }]);
+		truncated.stopReason = "length";
+		const { stream } = run({ ...early, maxCompletionNotices: 1 }, [truncated]);
+		const text = JSON.stringify(await drain(stream));
+		expect(text).toContain("cut off at the output limit");
+		expect(text).not.toContain("say so and stop");
+	});
+
 	it("asks once when the round it buys runs no tool call", async () => {
 		// The agent that answers a notice with another bare "done" has nothing
 		// left to do; a second notice buys the same nothing out of the same

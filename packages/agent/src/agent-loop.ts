@@ -98,9 +98,18 @@ function humanDuration(ms: number): string {
  * run is left. The threshold is self-limiting -- each round it buys costs time,
  * so the share climbs and the notices stop.
  */
-function budgetNotice(elapsedMs: number, budgetMs: number, steps: number): string {
+function budgetNotice(elapsedMs: number, budgetMs: number, steps: number, cutOff = false): string {
 	const remaining = Math.max(0, budgetMs - elapsedMs);
 	const pct = Math.round((elapsedMs / budgetMs) * 100);
+	if (cutOff) {
+		return (
+			`Your last response was cut off at the output limit, so it never reached a tool call. You have been ` +
+			`working ${humanDuration(elapsedMs)} over ${steps} steps, which is ${pct}% of your budget, and about ` +
+			`${humanDuration(remaining)} is left.\n\n` +
+			"Do not restate your reasoning. Pick up from where you stopped and make the next concrete move -- one " +
+			"command, one edit, one file read -- so that this turn ends in an action rather than at the limit."
+		);
+	}
 	return (
 		`You have been working ${humanDuration(elapsedMs)} over ${steps} steps, which is ${pct}% of your ` +
 		`budget. About ${humanDuration(remaining)} is left.\n\n` +
@@ -543,8 +552,18 @@ async function runLoop(
 			const cap = config.maxCompletionNotices ?? DEFAULT_MAX_COMPLETION_NOTICES;
 			// A notice whose round ran no tool call bought nothing; a second one
 			// buys nothing either, and the turns come out of the same budget.
+			//
+			// Unless the round was cut off. A turn that stopped on `length` did
+			// not decline to act, it was truncated mid-sentence, and reading
+			// that as "nothing left to do" ends the run on the spot. Measured
+			// on the arm that introduced this gate: of 37 failures, 13 ended
+			// under ten tool calls, and 12 of those 13 ended on `length` --
+			// `regex-chess` ran two turns and zero tool calls, `polyglot-rust-c`
+			// the same. Claude Code, on the same model, ends 1 of 24 failures
+			// under ten tool calls; pi ends a third of them there.
+			const cutOff = lastCompletedTurn?.message.stopReason === "length";
 			const lastNoticeWasSpent =
-				state.toolCallsAtLastNotice < 0 || state.toolCallsMade > state.toolCallsAtLastNotice;
+				state.toolCallsAtLastNotice < 0 || state.toolCallsMade > state.toolCallsAtLastNotice || cutOff;
 			if (used >= 0 && used < share && state.completionNotices < cap && lastNoticeWasSpent) {
 				state = {
 					...state,
@@ -555,7 +574,7 @@ async function runLoop(
 				pendingMessages = [
 					{
 						role: "user",
-						content: [{ type: "text", text: budgetNotice(elapsed, budgetMs, state.turnCount) }],
+						content: [{ type: "text", text: budgetNotice(elapsed, budgetMs, state.turnCount, cutOff) }],
 						timestamp: Date.now(),
 					},
 				];
