@@ -23,6 +23,8 @@ def declare_reasoning(models_json):
     for provider in models_json.get("providers", {}).values():
         for model in provider.get("models", []):
             model["reasoning"] = True
+            compat = model.setdefault("compat", {})
+            compat.setdefault("supportsDeveloperRole", False)
     return models_json
 
 
@@ -51,6 +53,28 @@ def test_reasoning_is_declared_on_every_model():
             assert model["reasoning"] is True
 
 
+def test_the_role_stays_system():
+    """`reasoning: true` alone makes pi send `role: "developer"`, which this
+    server answers with `{"message":"Unexpected message role."}` and a 400 --
+    every turn, so a smoke run died at turn one and scored three ordinary
+    zeros."""
+    out = declare_reasoning(harbor_shape())
+    model = out["providers"]["harbor-endpoint"]["models"][0]
+    assert model["compat"]["supportsDeveloperRole"] is False
+
+
+def test_an_explicit_compat_is_not_overwritten():
+    j = harbor_shape()
+    j["providers"]["harbor-endpoint"]["models"][0]["compat"] = {
+        "supportsDeveloperRole": True,
+        "supportsStore": False,
+    }
+    out = declare_reasoning(j)
+    compat = out["providers"]["harbor-endpoint"]["models"][0]["compat"]
+    assert compat["supportsDeveloperRole"] is True
+    assert compat["supportsStore"] is False
+
+
 def test_nothing_else_is_touched():
     out = declare_reasoning(harbor_shape())
     p = out["providers"]["harbor-endpoint"]
@@ -71,3 +95,6 @@ def test_multiple_models_and_providers():
     out = declare_reasoning(j)
     ids = {m["id"]: m["reasoning"] for p in out["providers"].values() for m in p["models"]}
     assert ids == {"qwen3.8-27b": True, "other": True, "third": True}
+    for p in out["providers"].values():
+        for m in p["models"]:
+            assert m["compat"]["supportsDeveloperRole"] is False

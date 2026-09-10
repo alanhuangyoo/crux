@@ -394,6 +394,20 @@ class CruxPiAgent(Pi):
         here: 50 of 441 trials contain two or more consecutive turns of 20,000+
         thinking characters that emit nothing the loop can run, and 41 of those
         50 failed.
+
+        Declaring it is not sufficient on its own. pi reads a reasoning model as
+        an OpenAI reasoning model, so `useDeveloperRole` becomes
+        `model.reasoning && compat.supportsDeveloperRole`, and
+        `supportsDeveloperRole` is auto-detected from the base URL -- a bare
+        `host:port` reads as standard OpenAI, so it is true. The system prompt
+        then goes out as `role: "developer"`, which this server rejects:
+
+            {"message":"Unexpected message role.","type":"BadRequest"} -> 400
+
+        Every turn, so a smoke run of three tasks died at turn one with an
+        empty assistant message and no exception -- the shape that reaches the
+        scoreboard as three ordinary zeros. The compat override is what keeps
+        the role at `system` while the model still counts as reasoning.
         """
         models_json = super()._build_custom_models_json(access, model_id)
         if not models_json:
@@ -401,6 +415,8 @@ class CruxPiAgent(Pi):
         for provider in models_json.get("providers", {}).values():
             for model in provider.get("models", []):
                 model["reasoning"] = True
+                compat = model.setdefault("compat", {})
+                compat.setdefault("supportsDeveloperRole", False)
         return models_json
 
     def build_cli_flags(self) -> str:
