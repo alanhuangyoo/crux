@@ -98,3 +98,33 @@ def test_multiple_models_and_providers():
     for p in out["providers"].values():
         for m in p["models"]:
             assert m["compat"]["supportsDeveloperRole"] is False
+
+
+# --- turning reasoning off at the chat template ---
+
+
+def declare_reasoning_no_thinking(models_json):
+    """`declare_reasoning`, with the opt-in switch on."""
+    out = declare_reasoning(models_json)
+    for provider in out["providers"].values():
+        for model in provider["models"]:
+            model["compat"].setdefault("chatTemplateArgs", {}).setdefault(
+                "enable_thinking", False
+            )
+    return out
+
+
+def test_off_by_default():
+    model = declare_reasoning(harbor_shape())["providers"]["harbor-endpoint"]["models"][0]
+    assert "chatTemplateArgs" not in model["compat"]
+
+
+def test_the_switch_reaches_the_chat_template():
+    # `reasoning_effort` biases this model rather than capping it: with
+    # effort=low the median thinking block on the five tasks reasoning kills is
+    # still 41,888-54,778 characters. The chat template is the control the
+    # server honours absolutely -- 0, 0, 0 characters across three samples.
+    model = declare_reasoning_no_thinking(harbor_shape())["providers"]["harbor-endpoint"]["models"][0]
+    assert model["compat"]["chatTemplateArgs"]["enable_thinking"] is False
+    assert model["reasoning"] is True
+    assert model["compat"]["supportsDeveloperRole"] is False

@@ -146,7 +146,8 @@ class CruxPiAgent(Pi):
         return "crux-pi"
 
     def __init__(self, *args, sections: str | None = None,
-                 bundle: str | None = None, pi_env: str | None = None, **kwargs):
+                 bundle: str | None = None, pi_env: str | None = None,
+                 no_thinking: str | None = None, **kwargs):
         # Settings for the pi process itself, as `KEY=value,KEY=value`. They
         # cannot be passed through the environment of the run: harbor builds
         # that env from the model connection alone, so a variable exported on
@@ -161,6 +162,9 @@ class CruxPiAgent(Pi):
         # same code by the same path, and differ only in the bundle -- which is
         # the whole point of running them against each other.
         self._bundle_path = bundle or _PI_BUNDLE
+        # Whether to turn the model's reasoning off at the chat template.
+        # Off unless asked for; see `_build_custom_models_json`.
+        self._no_thinking = str(no_thinking or "").strip().lower() in ("1", "true", "yes")
         raw = _DEFAULT_SECTIONS if sections is None else tuple(
             s.strip() for s in str(sections).split(",") if s.strip()
         )
@@ -442,6 +446,24 @@ class CruxPiAgent(Pi):
                 model["reasoning"] = True
                 compat = model.setdefault("compat", {})
                 compat.setdefault("supportsDeveloperRole", False)
+                if self._no_thinking:
+                    # `reasoning_effort` biases this model, it does not cap it.
+                    # Measured on the five tasks where reasoning is what kills
+                    # the run: with effort=low the median thinking block is
+                    # still 41,888-54,778 characters, against 47,291-56,964
+                    # without it, and every run still ends on `length`. The
+                    # ceiling and its escalation make that worse rather than
+                    # better -- 8,192 truncates, the loop silently raises to
+                    # 16,384, and the model spends that too.
+                    #
+                    # The chat template is the only control this server honours
+                    # absolutely: three samples on a reasoning-heavy prompt gave
+                    # 0, 0, 0 reasoning characters with a *longer* answer (1,680
+                    # against 228). Off by default because it is a large change
+                    # to how the model works, and worth trying only where
+                    # reasoning is demonstrably the thing losing the run.
+                    args = compat.setdefault("chatTemplateArgs", {})
+                    args.setdefault("enable_thinking", False)
         return models_json
 
     @override
