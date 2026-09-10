@@ -4,11 +4,13 @@
 # Why not the full 89: a change aimed at ten tasks is *diluted* by the other
 # seventy-nine, which contribute nothing but noise to a paired test.
 #
-# And why only one arm. Every target below scores 0 across the three full arms
-# run so far -- 0/9, task by task -- so the question is not "does this arm beat
-# that one at some rate", it is "does a task that has never been solved get
-# solved". That is binary, the historical control is unambiguous, and it does
-# not need a concurrent twin. Dropping the control arm is what makes this fast:
+# And why only one arm. Twelve of the thirteen targets below score 0 across all
+# five full arms run so far -- 0/5, task by task -- so the question is not "does
+# this arm beat that one at some rate", it is "does a task that has never been
+# solved get solved". That is binary, the historical control is unambiguous, and
+# it does not need a concurrent twin. (The thirteenth, `pytorch-model-recovery`,
+# is a rate at 2/5 and is marked as such below. Two more candidates were dropped
+# after their records were read rather than assumed.) Dropping the control arm is what makes this fast:
 # the targets are the *slowest* tasks on the board, so two arms over them is no
 # cheaper in wall clock than a full run.
 #
@@ -34,12 +36,18 @@ THINKING_DEATH=(
   path-tracing-reverse regex-chess torch-pipeline-parallelism
   extract-moves-from-video
 )
-# Three tasks where pi was killed with the container, not by its own logic:
-# seven exit-137 trials, from `-j$(nproc)` reading the host's 192 cores and from
-# the agent's own `pkill -f` matching its shell.
-KILLED=(rstan-to-pystan install-windows-3.11 mcmc-sampling-stan)
+# Two tasks where pi was killed with the container, not by its own logic:
+# exit-137 trials from `-j$(nproc)` reading the host's 192 cores and from the
+# agent's own `pkill -f` matching its shell. `mcmc-sampling-stan` was on this
+# list until its record was checked -- it scores 4/5 historically, so its one
+# exit-137 is an unlucky trial rather than a shape, and putting it here would
+# have measured noise and called it a fix.
+KILLED=(rstan-to-pystan install-windows-3.11)
 # One task that died before taking an action because its instruction begins with
-# a hyphen and nothing passed pi an option terminator.
+# a hyphen and nothing passed pi an option terminator. Read this one as a rate,
+# not as a zero: it scores 2/5 historically, and the two that passed are the
+# arms that ran with no prompt sections -- with no flags to glue the terminator
+# onto, the bug could not bite. That is the diagnosis confirming itself.
 PARSE=(pytorch-model-recovery)
 
 # --- the guard ---------------------------------------------------------------
