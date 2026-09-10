@@ -138,37 +138,41 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 /**
  * The same settings, made to fit a window they were not written for.
  *
- * The defaults are absolute token counts chosen against a large context, and
- * the two of them collide on a small one. Compaction fires at
- * `contextWindow - reserveTokens`; on a 32K model that is 16,384 tokens, and it
- * then keeps 20,000 -- more than the threshold that triggered it. So the cut
- * cannot get the context back under the line, and the next turn is over it
- * again. Measured on one such deployment, requests were still being rejected at
- * 27-29K of input after compaction had already run.
+ * Two absolute defaults sized for a large context, and on a small one they
+ * collide with each other and with the completion budget.
  *
- * The fix is not to trigger earlier -- a smaller reserve triggers *later*, which
- * was this function's first version and its own test caught it. It is to make
- * what compaction keeps meaningfully smaller than what triggers it, so a cut
- * buys room to work in. Half the threshold, and only when the setting exceeds
- * that; a large window never binds and is returned untouched.
+ * `reserveTokens` decides where compaction fires: `contextWindow - reserve`. At
+ * the default 16,384 on a 32K window that is 16,384 -- and what a cut leaves
+ * behind (what it keeps, plus the summary, plus the system prompt and tools)
+ * lands at 12-17K. Measured across 36 compactions in one arm, the median cut
+ * removed 5,792 tokens and left the context at 14-17K, which is the trigger
+ * point again. So compaction fires, cuts, and is immediately over the line:
+ * 49 compactions in 63 turns, with the context pinned near the window and turns
+ * reporting `output: 1`.
+ *
+ * The first version of this tried to fix that by shrinking the reserve, which
+ * moves the trigger *later*; its own test caught it, and the reasoning was
+ * wrong twice over -- later is exactly what a small window needs here, but only
+ * together with a deeper cut. On its own it just delays the same thrash.
+ *
+ * So both move, and in opposite directions from the first attempt: the reserve
+ * is capped at a quarter of the window, which puts the trigger at three
+ * quarters and leaves the last quarter for a completion; and what a cut keeps
+ * is capped at a quarter of that trigger, so there is real room between a cut
+ * and the next one. On a large window neither cap binds and the defaults stand.
  */
 export function fitCompactionToWindow(
 	settings: CompactionSettings,
 	contextWindow: number | undefined,
 ): CompactionSettings {
 	if (!contextWindow || contextWindow <= 0) return settings;
-	// A reserve at or past the whole window would leave no threshold at all.
-	const reserveTokens = Math.min(settings.reserveTokens, Math.floor(contextWindow / 2));
+	const reserveTokens = Math.min(settings.reserveTokens, Math.floor(contextWindow / 4));
 	const threshold = contextWindow - reserveTokens;
-	const keepCeiling = Math.max(1024, Math.floor(threshold / 2));
-	if (settings.keepRecentTokens <= keepCeiling && reserveTokens === settings.reserveTokens) {
+	const keepRecentTokens = Math.min(settings.keepRecentTokens, Math.max(1024, Math.floor(threshold / 4)));
+	if (reserveTokens === settings.reserveTokens && keepRecentTokens === settings.keepRecentTokens) {
 		return settings;
 	}
-	return {
-		...settings,
-		reserveTokens,
-		keepRecentTokens: Math.min(settings.keepRecentTokens, keepCeiling),
-	};
+	return { ...settings, reserveTokens, keepRecentTokens };
 }
 
 // ============================================================================
