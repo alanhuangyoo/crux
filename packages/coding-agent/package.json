@@ -7,7 +7,8 @@
 		"configDir": ".pi"
 	},
 	"bin": {
-		"pi": "dist/bundle/cli.js"
+		"pi": "dist/bundle/cli.js",
+		"crux": "dist/bundle/cli.js"
 	},
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
