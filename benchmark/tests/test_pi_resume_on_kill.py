@@ -13,7 +13,7 @@ import shlex
 import pytest
 from harbor.agents.installed.base import NonZeroAgentExitCodeError
 
-from crux.pi_agent import CruxPiAgent, _MAX_RESUMES, _RESUME_INSTRUCTION
+from crux.pi_agent import CruxPiAgent, _MAX_RESUMES, _RESUME_INSTRUCTION, _was_killed
 
 REAL = (
     ". ~/.nvm/nvm.sh; PI_CODING_AGENT_DIR=/tmp/harbor-pi-agent pi --print --mode json "
@@ -115,3 +115,45 @@ def test_a_non_pi_command_is_never_retried():
     with pytest.raises(NonZeroAgentExitCodeError):
         asyncio.run(agent.exec_as_agent(None, "apt-get install -y qemu"))
     assert len(agent.commands) == 1
+
+
+# --- resuming is for a kill, not for a run that decided to stop ---
+
+
+class _FailsPlainly(_Fake):
+    async def _exec(self, environment, command, **kwargs):
+        self.commands.append(command)
+        raise NonZeroAgentExitCodeError(f"Command failed (exit 1): {command[:40]}")
+
+
+def test_a_plain_non_zero_exit_is_not_resumed():
+    # Retrying a deterministic failure costs three more agent runs and buys
+    # nothing, and it buried the real cause: the exception that surfaced was the
+    # resumed `--continue` command, three layers from the original exit code.
+    agent = _FailsPlainly(99)
+    with pytest.raises(NonZeroAgentExitCodeError):
+        asyncio.run(agent.exec_as_agent(None, REAL))
+    assert len(agent.commands) == 1
+    assert "--continue" not in agent.commands[0]
+
+
+def test_a_kill_still_is():
+    agent = _Fake(1)
+    assert asyncio.run(agent.exec_as_agent(None, REAL)) == "ok"
+    assert len(agent.commands) == 2
+
+
+def test_which_exits_count_as_killed():
+    def exc(code):
+        return NonZeroAgentExitCodeError(f"Command failed (exit {code}): x")
+
+    assert _was_killed(exc(137)) is True   # SIGKILL, the cgroup OOM case
+    assert _was_killed(exc(143)) is True   # SIGTERM
+    assert _was_killed(exc(1)) is False
+    assert _was_killed(exc(2)) is False
+    assert _was_killed(exc(126)) is False
+
+
+def test_an_unreadable_message_is_not_treated_as_a_kill():
+    # Retrying is the action with a cost, so it needs the evidence.
+    assert _was_killed(NonZeroAgentExitCodeError("something went wrong")) is False

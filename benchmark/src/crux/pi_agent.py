@@ -55,6 +55,38 @@ _TERMINATOR = " -- "
 # times is not being interrupted, it is failing.
 _MAX_RESUMES = 3
 
+# Shell exit codes for a process that was killed rather than one that failed.
+# 128+n is the shell's encoding of "died on signal n": 137 is SIGKILL, which is
+# what a cgroup out-of-memory kill looks like from outside, and 143 is SIGTERM.
+_KILLED_EXIT_CODES = (137, 143)
+_EXIT_CODE = re.compile(r"exit (\d+)")
+
+
+def _was_killed(exc: Exception) -> bool:
+    """Whether this failure is the kind resuming can actually help.
+
+    Resuming was built for a container out-of-memory kill: the process is
+    destroyed mid-task with the work still on disk, so picking it back up is
+    free progress. A plain non-zero exit is a different animal -- the run
+    decided to stop -- and retrying it three times costs three more agent runs
+    and buys nothing.
+
+    It also costs the diagnosis. When trials started failing en masse, the
+    exception they carried was the *resumed* command, `pi --print ... --continue
+    -- 'Your previous process was killed partway through'`, and the original
+    exit code was three layers back. The real cause was containers being removed
+    out from under a running arm, and the resume machinery had papered over
+    every trace of it.
+
+    An unparseable message is treated as not-killed: retrying is the action with
+    a cost, so it needs the evidence.
+    """
+    match = _EXIT_CODE.search(str(exc))
+    if not match:
+        return False
+    return int(match.group(1)) in _KILLED_EXIT_CODES
+
+
 _RESUME_INSTRUCTION = (
     "Your previous process was killed partway through this task -- most often "
     "because a command you started exhausted the container's memory and the "
@@ -560,7 +592,7 @@ class CruxPiAgent(Pi):
             except NonZeroAgentExitCodeError as exc:
                 attempt += 1
                 resumed = self._resume_command(command)
-                if resumed is None or attempt > _MAX_RESUMES:
+                if resumed is None or attempt > _MAX_RESUMES or not _was_killed(exc):
                     raise
                 logger.warning(
                     "pi exited non-zero (%s); resuming session, attempt %d of %d",
