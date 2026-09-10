@@ -26,6 +26,7 @@ import os
 import re
 import shlex
 import tempfile
+import urllib.request
 from pathlib import Path
 
 from harbor.agents.installed.base import CliFlag, NonZeroAgentExitCodeError
@@ -66,6 +67,33 @@ _RESUME_INSTRUCTION = (
     "than `-j$(nproc)` or a default worker count, and match `pkill -f` "
     "patterns so they cannot match the shell running them."
 )
+
+
+def _served_context_length(base_url: str | None, model_id: str) -> int | None:
+    """Ask the endpoint how much context it actually serves.
+
+    `/v1/models` reports `max_model_len`, which is the one number that decides
+    whether a request is accepted. Returns None on anything unexpected -- an
+    endpoint that will not answer is not a reason to fail a trial, it just means
+    pi keeps the default it would have had anyway.
+    """
+    if not base_url:
+        return None
+    url = base_url.rstrip("/") + "/models"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as response:
+            payload = json.load(response)
+    except Exception as exc:  # noqa: BLE001 - advisory lookup, never fatal
+        logger.warning("could not read context length from %s: %s", url, exc)
+        return None
+    for entry in payload.get("data") or []:
+        if entry.get("id") != model_id:
+            continue
+        for key in ("max_model_len", "context_length", "max_context_length"):
+            value = entry.get(key)
+            if isinstance(value, int) and value > 0:
+                return value
+    return None
 
 
 def _answer_path(instruction: str) -> str | None:
@@ -441,9 +469,27 @@ class CruxPiAgent(Pi):
         models_json = super()._build_custom_models_json(access, model_id)
         if not models_json:
             return models_json
+        window = _served_context_length(access.configured_base_url, model_id)
         for provider in models_json.get("providers", {}).values():
             for model in provider.get("models", []):
                 model["reasoning"] = True
+                if window:
+                    # Tell pi what the window actually is. harbor registers a
+                    # custom endpoint as `{"id": ...}`, so pi falls back to a
+                    # default that has nothing to do with this server, and on a
+                    # 32K deployment that default is catastrophic in two ways at
+                    # once: the loop does not compact until the input is already
+                    # too big, and `escalatedMaxTokens` reads the window as
+                    # roomy and raises the ceiling into space that is not there.
+                    # Both arrive as the same opaque failure:
+                    #
+                    #   400: 32899 = 16515 from the input and 16384 for the
+                    #        completion, against a limit of 32768
+                    #
+                    # Read from the server rather than configured, because a
+                    # number typed here is a number that goes stale.
+                    model["contextWindow"] = window
+                    model.setdefault("maxTokens", min(16384, window // 2))
                 compat = model.setdefault("compat", {})
                 compat.setdefault("supportsDeveloperRole", False)
                 if self._no_thinking:
