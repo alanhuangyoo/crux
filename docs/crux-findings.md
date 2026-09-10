@@ -37,12 +37,21 @@ arms then ran concurrently against the same control:
 | changed | seven changes + ported prompt | **0.588** | **61/89** | 23-9, p=0.020 |
 | think | same, plus `thinking=medium` | 0.584 | 52/89 | 19-7, p=0.029 |
 
-Both clear p<0.05 against the same control; against each other they are 12-12,
-p=1.0. So the +8.8 belongs to the loop changes and the ported prompt, and the
-reasoning level -- a harbor kwarg that had never been set on either side, while
-Claude Code's arms were always pinned to `medium` -- turns out not to matter
-here. It was worth an arm to find that out, and the arm is what makes the
-+8.8 a replication rather than a single reading.
+Both clear p<0.05 against the same control, so the +8.8 belongs to the loop
+changes and the ported prompt, replicated rather than read once.
+
+The second arm was meant to test the reasoning level as well, and it did not.
+Its `thinking=medium` never reached a request: harbor registers a custom
+endpoint as `{"id": model_id}`, pi reads `model.reasoning` as false, and
+`clampThinkingLevel` rewrites every level to `off` -- which both arms recorded
+in their own session logs. The other difference between them, a max-output
+ceiling set equal to the model's own, was a no-op for the reason in the next
+section. **The two arms were one configuration run twice.** They came out
+12-12, p=1.0, and I read that as "the reasoning level does not matter here". It
+is not evidence either way.
+
+What two identical arms do measure is noise: 0.588 and 0.584, so the per-trial
+mean carries about 0.4 points.
 
 `filter-js-from-html` was solved for the first time by any scaffold, which
 moves the every-scaffold ceiling from 80/89 to 81/89.
