@@ -28,7 +28,7 @@ import shlex
 import tempfile
 from pathlib import Path
 
-from harbor.agents.installed.base import CliFlag
+from harbor.agents.installed.base import CliFlag, NonZeroAgentExitCodeError
 from harbor.agents.installed.pi import Pi
 from harbor.environments.base import BaseEnvironment
 from typing_extensions import override
@@ -41,6 +41,31 @@ logger = logging.getLogger(__name__)
 # instruction rather than hardcoded, so this stays inert on a benchmark that
 # asks for nothing.
 _ANSWER_PATH = re.compile(r"(/[\w./-]*answer[\w.-]*\.(?:txt|md|json))")
+
+# The main pi invocation, as harbor builds it. Both markers are harbor's own:
+# the flags it always passes, and the redirect it always appends.
+_PI_MAIN = "pi --print --mode json "
+_PI_TAIL = " 2>&1 </dev/null |"
+# `build_cli_flags` always ends with the option terminator, so the instruction
+# is whatever follows the last one.
+_TERMINATOR = " -- "
+
+# How many times a killed run may be picked back up. A process that dies three
+# times is not being interrupted, it is failing.
+_MAX_RESUMES = 3
+
+_RESUME_INSTRUCTION = (
+    "Your previous process was killed partway through this task -- most often "
+    "because a command you started exhausted the container's memory and the "
+    "kernel killed the whole group, or because a `pkill -f` pattern matched "
+    "your own shell. The work you already did is still on disk and this "
+    "conversation is intact.\n\n"
+    "Do not start over. Check what is already there, then continue from where "
+    "you stopped. Whatever you restart, bound it: this container has far less "
+    "memory and CPU than `nproc` reports, so pass explicit small values rather "
+    "than `-j$(nproc)` or a default worker count, and match `pkill -f` "
+    "patterns so they cannot match the shell running them."
+)
 
 
 def _answer_path(instruction: str) -> str | None:
@@ -418,6 +443,70 @@ class CruxPiAgent(Pi):
                 compat = model.setdefault("compat", {})
                 compat.setdefault("supportsDeveloperRole", False)
         return models_json
+
+    @override
+    async def exec_as_agent(self, environment, command, **kwargs):
+        """Pick a killed run back up instead of scoring it a zero.
+
+        pi runs inside the trial container; Terminus drives the same container
+        from outside. That is not a stylistic difference -- a cgroup out-of-
+        memory kill takes every process in the group, so a task that exhausts
+        memory ends Terminus's command and ends pi's *run*. Measured over 501
+        trials, seven died on exit 137 across `rstan-to-pystan`,
+        `install-windows-3.11` and `mcmc-sampling-stan`; the trajectories show
+        two causes and neither is pi's own footprint, which is 89 MB against a
+        2 GiB limit. Some are `-j$(nproc)` inside a container where `nproc`
+        reports the host's 192 cores, and some are the agent's own `pkill -f`
+        matching the shell that issued it -- pi diagnosed both, in its own
+        words, in the run that then died.
+
+        `pi --continue` restores the session, verified end to end: a run told
+        to write BANANA into one file, then resumed with a second instruction
+        that never repeats the word, writes BANANA into the second file and
+        keeps one session file. So the recovery is real rather than a fresh
+        agent that happens to share a directory.
+
+        Only the main pi invocation is retried, and only three times.
+        """
+        if _PI_MAIN not in command:
+            return await super().exec_as_agent(environment, command, **kwargs)
+
+        attempt = 0
+        while True:
+            try:
+                return await super().exec_as_agent(environment, command, **kwargs)
+            except NonZeroAgentExitCodeError as exc:
+                attempt += 1
+                resumed = self._resume_command(command)
+                if resumed is None or attempt > _MAX_RESUMES:
+                    raise
+                logger.warning(
+                    "pi exited non-zero (%s); resuming session, attempt %d of %d",
+                    str(exc)[:120],
+                    attempt,
+                    _MAX_RESUMES,
+                )
+                command = resumed
+
+    @staticmethod
+    def _resume_command(command: str) -> str | None:
+        """Rewrite the run command to resume rather than restart.
+
+        Returns None when the command is not the shape this knows how to
+        rewrite, so an unexpected template raises the original error instead of
+        running something half-rebuilt.
+        """
+        head, tail_sep, tail = command.partition(_PI_TAIL)
+        if not tail_sep:
+            return None
+        prefix, term, _instruction = head.rpartition(_TERMINATOR)
+        if not term:
+            return None
+        if _PI_MAIN not in prefix:
+            return None
+        if "--continue " not in prefix:
+            prefix = prefix.replace(_PI_MAIN, _PI_MAIN + "--continue ", 1)
+        return f"{prefix}{_TERMINATOR}{shlex.quote(_RESUME_INSTRUCTION)} {tail_sep}{tail}"
 
     def build_cli_flags(self) -> str:
         flags = super().build_cli_flags()
