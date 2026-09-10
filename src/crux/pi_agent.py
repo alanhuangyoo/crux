@@ -383,4 +383,13 @@ class CruxPiAgent(Pi):
         # first character is "-". Every pi trial on it died before taking an
         # action, in every arm, while six other scaffolds solved it. pi already
         # honours `--`; nothing was passing it one.
-        return f"{flags}-- " if flags else "-- "
+        #
+        # The first version of this appended `"-- "` to a string that does not
+        # end in one, which glued the terminator to the previous argument:
+        #
+        #     --append-system-prompt /tmp/crux-sections.md--  '- You are given'
+        #
+        # so the flag took a path that does not exist, no terminator was ever
+        # parsed, and the task died exactly as before -- three more trials, same
+        # zero, from the fix. rstrip-then-join is the whole correction.
+        return f"{flags.rstrip()} -- " if flags.strip() else "-- "
