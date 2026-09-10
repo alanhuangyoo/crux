@@ -15,6 +15,7 @@ import {
 	getLastAssistantUsage,
 	prepareCompaction,
 	shouldCompact,
+	summaryTokenBudget,
 } from "../src/core/compaction/index.ts";
 import {
 	buildSessionContext,
@@ -645,5 +646,39 @@ describe("compaction settings on a window they were not written for", () => {
 	it("is inert without a window", () => {
 		expect(fitCompactionToWindow(DEFAULT_COMPACTION_SETTINGS, undefined)).toEqual(DEFAULT_COMPACTION_SETTINGS);
 		expect(fitCompactionToWindow(DEFAULT_COMPACTION_SETTINGS, 0)).toEqual(DEFAULT_COMPACTION_SETTINGS);
+	});
+});
+
+describe("a summary has to fit the window it lives in", () => {
+	// The budget was 0.8 * reserveTokens, and reserveTokens is an absolute
+	// default sized for a large window: 13,107 tokens on a 32K model, 40% of
+	// everything. The next compaction summarises that summary, so it grows every
+	// round. Measured on one run: 63 turns, 49 compactions, context pinned at
+	// 32,554-32,659 against a 32,768 window, and the last turns reporting
+	// `output: 1` -- room for a single token.
+
+	const big = { contextWindow: 200_000, maxTokens: 64_000 } as never;
+	const small = { contextWindow: 32_768, maxTokens: 16_384 } as never;
+
+	it("leaves a large window on the old budget", () => {
+		expect(summaryTokenBudget(big, 16_384, 0.8)).toBe(13_107);
+	});
+
+	it("bounds a small window to a fraction of it", () => {
+		expect(summaryTokenBudget(small, 16_384, 0.8)).toBe(4096);
+	});
+
+	it("leaves room for what compaction keeps, and for the work after it", () => {
+		const window = 32_768;
+		const summary = summaryTokenBudget(small, 16_384, 0.8);
+		const kept = fitCompactionToWindow(DEFAULT_COMPACTION_SETTINGS, window).keepRecentTokens;
+		// The old numbers were 13,107 + 8,192 = 21,299 of a 32,768 window before
+		// the agent had written anything.
+		expect(summary + kept).toBeLessThan(Math.floor(window / 2));
+	});
+
+	it("never returns a budget too small to say anything", () => {
+		const tiny = { contextWindow: 2048, maxTokens: 512 } as never;
+		expect(summaryTokenBudget(tiny, 16_384, 0.8)).toBeGreaterThanOrEqual(512);
 	});
 });

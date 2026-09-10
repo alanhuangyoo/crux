@@ -690,6 +690,31 @@ function buildSummarizationContext(promptText: string): Context {
 }
 
 /** Generate or update a conversation summary and return its provider usage. */
+
+/**
+ * How many tokens a summary may occupy.
+ *
+ * The budget was `0.8 * reserveTokens`, and `reserveTokens` is an absolute
+ * default sized for a large window. On a 32K model that is 13,107 tokens --
+ * 40% of everything -- and the next compaction summarises *that*, so the
+ * summary grows every round until it is the context.
+ *
+ * Measured on one such run: 63 turns, 49 compactions, and a context pinned at
+ * 32,554-32,659 tokens against a 32,768 window. The last turns report
+ * `output: 1` -- there was room for a single token. Compaction was running
+ * constantly and reducing nothing.
+ *
+ * So the summary is also bounded by the window it has to live in. An eighth
+ * leaves room for what compaction keeps and for the work that follows; on a
+ * large window the fraction never binds and the old budget stands.
+ */
+export function summaryTokenBudget(model: Model<any>, reserveTokens: number, share: number): number {
+	const fromReserve = Math.floor(share * reserveTokens);
+	const fromWindow = model.contextWindow > 0 ? Math.floor(model.contextWindow / 8) : Number.POSITIVE_INFINITY;
+	const modelCeiling = model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY;
+	return Math.max(512, Math.min(fromReserve, fromWindow, modelCeiling));
+}
+
 export async function generateSummaryWithUsage(
 	currentMessages: AgentMessage[],
 	model: Model<any>,
@@ -706,10 +731,7 @@ export async function generateSummaryWithUsage(
 	callbacks?: RetryCallbacks,
 	sessionId?: string,
 ): Promise<{ text: string; usage: Usage }> {
-	const maxTokens = Math.min(
-		Math.floor(0.8 * reserveTokens),
-		model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
-	);
+	const maxTokens = summaryTokenBudget(model, reserveTokens, 0.8);
 
 	// Use update prompt if we have a previous summary, otherwise initial prompt
 	let basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
@@ -1017,10 +1039,7 @@ async function generateTurnPrefixSummary(
 	callbacks?: RetryCallbacks,
 	sessionId?: string,
 ): Promise<{ text: string; usage: Usage }> {
-	const maxTokens = Math.min(
-		Math.floor(0.5 * reserveTokens),
-		model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
-	); // Smaller budget for turn prefix
+	const maxTokens = summaryTokenBudget(model, reserveTokens, 0.5); // Smaller budget for turn prefix
 	const llmMessages = convertToLlm(messages);
 	const conversationText = serializeConversation(llmMessages);
 	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
