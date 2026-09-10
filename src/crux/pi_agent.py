@@ -363,6 +363,46 @@ class CruxPiAgent(Pi):
         )
         logger.info("delivered the agent's final message to %s (%d chars)", path, len(answer))
 
+    def _build_custom_models_json(self, access, model_id):
+        """Declare what the model can do, so pi stops clamping the flag away.
+
+        harbor registers a custom endpoint as `{"id": model_id}` and nothing
+        else. pi reads `model.reasoning` as false, `getSupportedThinkingLevels`
+        returns `["off"]`, and `clampThinkingLevel` turns every `--thinking`
+        into `off` before a request is built. Both arms of the round that was
+        meant to test the reasoning level recorded `"thinkingLevel":"off"` in
+        their own session logs -- the kwarg was passed, accepted, and discarded
+        one layer below where anyone was looking, and the arms it produced were
+        the same configuration run twice.
+
+        Measured against this deployment (SGLang, Qwen3.8-27B), three samples
+        each on one reasoning-heavy prompt, reasoning_content characters:
+
+            baseline                       9333  10481   9423
+            reasoning_effort=low           4171   4686   6216
+            thinking_budget=128            9492   9364  10566
+            chat_template enable_thinking  false: 0 0 0
+
+        `reasoning_effort` halves it with no overlap between the groups.
+        `thinking_budget` is ignored by this server, so pi's
+        `thinkingTokenBudgetField` has nothing to talk to here. A first reading
+        of a single short prompt said `reasoning_effort` was ignored too; it was
+        noise, and three samples on a prompt that actually needs reasoning is
+        what the question required.
+
+        This matters because reasoning and the answer share one `max_tokens`
+        here: 50 of 441 trials contain two or more consecutive turns of 20,000+
+        thinking characters that emit nothing the loop can run, and 41 of those
+        50 failed.
+        """
+        models_json = super()._build_custom_models_json(access, model_id)
+        if not models_json:
+            return models_json
+        for provider in models_json.get("providers", {}).values():
+            for model in provider.get("models", []):
+                model["reasoning"] = True
+        return models_json
+
     def build_cli_flags(self) -> str:
         flags = super().build_cli_flags()
         # pi reads the argument as text or as a path; quote it so a path with a
