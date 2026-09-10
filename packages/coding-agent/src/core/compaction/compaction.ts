@@ -135,6 +135,42 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	keepRecentTokens: 20000,
 };
 
+/**
+ * The same settings, made to fit a window they were not written for.
+ *
+ * The defaults are absolute token counts chosen against a large context, and
+ * the two of them collide on a small one. Compaction fires at
+ * `contextWindow - reserveTokens`; on a 32K model that is 16,384 tokens, and it
+ * then keeps 20,000 -- more than the threshold that triggered it. So the cut
+ * cannot get the context back under the line, and the next turn is over it
+ * again. Measured on one such deployment, requests were still being rejected at
+ * 27-29K of input after compaction had already run.
+ *
+ * The fix is not to trigger earlier -- a smaller reserve triggers *later*, which
+ * was this function's first version and its own test caught it. It is to make
+ * what compaction keeps meaningfully smaller than what triggers it, so a cut
+ * buys room to work in. Half the threshold, and only when the setting exceeds
+ * that; a large window never binds and is returned untouched.
+ */
+export function fitCompactionToWindow(
+	settings: CompactionSettings,
+	contextWindow: number | undefined,
+): CompactionSettings {
+	if (!contextWindow || contextWindow <= 0) return settings;
+	// A reserve at or past the whole window would leave no threshold at all.
+	const reserveTokens = Math.min(settings.reserveTokens, Math.floor(contextWindow / 2));
+	const threshold = contextWindow - reserveTokens;
+	const keepCeiling = Math.max(1024, Math.floor(threshold / 2));
+	if (settings.keepRecentTokens <= keepCeiling && reserveTokens === settings.reserveTokens) {
+		return settings;
+	}
+	return {
+		...settings,
+		reserveTokens,
+		keepRecentTokens: Math.min(settings.keepRecentTokens, keepCeiling),
+	};
+}
+
 // ============================================================================
 // Token calculation
 // ============================================================================
@@ -234,7 +270,8 @@ export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEst
  */
 export function shouldCompact(contextTokens: number, contextWindow: number, settings: CompactionSettings): boolean {
 	if (!settings.enabled) return false;
-	return contextTokens > contextWindow - settings.reserveTokens;
+	const fitted = fitCompactionToWindow(settings, contextWindow);
+	return contextTokens > contextWindow - fitted.reserveTokens;
 }
 
 // ============================================================================

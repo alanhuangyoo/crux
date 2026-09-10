@@ -11,6 +11,7 @@ import {
 	DEFAULT_COMPACTION_SETTINGS,
 	estimateContextTokens,
 	findCutPoint,
+	fitCompactionToWindow,
 	getLastAssistantUsage,
 	prepareCompaction,
 	shouldCompact,
@@ -593,4 +594,56 @@ describe.skipIf(!process.env.ANTHROPIC_OAUTH_TOKEN)("LLM summarization", () => {
 		console.log("Original messages:", loaded.messages.length);
 		console.log("After compaction:", reloaded.messages.length);
 	}, 60000);
+});
+
+describe("compaction settings on a window they were not written for", () => {
+	// The defaults are absolute counts chosen against a large context: trigger
+	// at contextWindow - 16384, then keep 20000. On a 32K model those two
+	// collide -- compaction fires at 16,384 tokens and cannot cut below 20,000,
+	// which is 61% of the whole window, so the run is back over the line within
+	// a turn. Measured on one such deployment, requests were rejected at 27-29K
+	// of input after compaction had already run.
+
+	it("leaves a large window alone", () => {
+		const fitted = fitCompactionToWindow(DEFAULT_COMPACTION_SETTINGS, 200_000);
+		expect(fitted).toEqual(DEFAULT_COMPACTION_SETTINGS);
+	});
+
+	it("cuts deeper on a small window, and does not move the trigger", () => {
+		const fitted = fitCompactionToWindow(DEFAULT_COMPACTION_SETTINGS, 32_768);
+		// The trigger stays where it was: a smaller reserve would fire *later*.
+		expect(fitted.reserveTokens).toBe(DEFAULT_COMPACTION_SETTINGS.reserveTokens);
+		// What it keeps drops from 20,000 -- more than the threshold that
+		// triggered it -- to half of that threshold.
+		expect(fitted.keepRecentTokens).toBe(8192);
+	});
+
+	it("leaves room to work in after a cut", () => {
+		const window = 32_768;
+		const fitted = fitCompactionToWindow(DEFAULT_COMPACTION_SETTINGS, window);
+		// What compaction keeps has to be well under what triggers it again,
+		// or the next turn is immediately over the line.
+		expect(fitted.keepRecentTokens).toBeLessThan(window - fitted.reserveTokens);
+	});
+
+	it("still fires where it used to", () => {
+		const window = 32_768;
+		expect(shouldCompact(20_000, window, DEFAULT_COMPACTION_SETTINGS)).toBe(true);
+		expect(shouldCompact(10_000, window, DEFAULT_COMPACTION_SETTINGS)).toBe(false);
+	});
+
+	it("keeps less than the threshold that triggered it", () => {
+		// The whole defect in one assertion: unfitted, compaction fires at
+		// 16,384 and then keeps 20,000.
+		const window = 32_768;
+		const raw = DEFAULT_COMPACTION_SETTINGS;
+		expect(raw.keepRecentTokens).toBeGreaterThan(window - raw.reserveTokens);
+		const fitted = fitCompactionToWindow(raw, window);
+		expect(fitted.keepRecentTokens).toBeLessThan(window - fitted.reserveTokens);
+	});
+
+	it("is inert without a window", () => {
+		expect(fitCompactionToWindow(DEFAULT_COMPACTION_SETTINGS, undefined)).toEqual(DEFAULT_COMPACTION_SETTINGS);
+		expect(fitCompactionToWindow(DEFAULT_COMPACTION_SETTINGS, 0)).toEqual(DEFAULT_COMPACTION_SETTINGS);
+	});
 });
