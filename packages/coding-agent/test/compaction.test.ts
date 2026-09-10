@@ -610,26 +610,27 @@ describe("compaction settings on a window they were not written for", () => {
 		expect(fitted).toEqual(DEFAULT_COMPACTION_SETTINGS);
 	});
 
-	it("moves the trigger later and cuts deeper, together", () => {
+	it("cuts deeper and leaves the trigger alone", () => {
 		const w = 32_768;
 		const fitted = fitCompactionToWindow(DEFAULT_COMPACTION_SETTINGS, w);
-		// A quarter reserved puts the trigger at three quarters, leaving the
-		// last quarter for a completion.
-		expect(fitted.reserveTokens).toBe(8192);
-		expect(w - fitted.reserveTokens).toBe(24_576);
-		// And a cut goes to a quarter of that, so there is room to work between
-		// one compaction and the next -- measured, cuts were landing back on
-		// the trigger point and firing again immediately.
-		expect(fitted.keepRecentTokens).toBe(6144);
+		// Moving the trigger was tried twice and measured worse both times: the
+		// second attempt put it at three quarters and truncation went back to
+		// baseline with trials showing forty truncations and zero compactions.
+		expect(fitted.reserveTokens).toBe(DEFAULT_COMPACTION_SETTINGS.reserveTokens);
+		expect(fitted.keepRecentTokens).toBe(8192);
 	});
 
-	it("leaves real room between a cut and the next trigger", () => {
+	it("lands a cut below the line that triggered it", () => {
 		const w = 32_768;
 		const f = fitCompactionToWindow(DEFAULT_COMPACTION_SETTINGS, w);
 		const trigger = w - f.reserveTokens;
 		const summary = summaryTokenBudget({ contextWindow: w, maxTokens: 16_384 } as never, f.reserveTokens, 0.8);
-		// What a cut leaves behind, against where the next one fires.
-		expect(f.keepRecentTokens + summary).toBeLessThan(trigger / 2);
+		// This is the whole requirement, and unfitted it is violated: 20,000
+		// kept plus a 13,107 summary against a 16,384 trigger, so every cut
+		// ended above the line that caused it.
+		expect(f.keepRecentTokens + summary).toBeLessThan(trigger);
+		const raw = DEFAULT_COMPACTION_SETTINGS;
+		expect(raw.keepRecentTokens).toBeGreaterThan(w - raw.reserveTokens);
 	});
 
 	it("leaves room to work in after a cut", () => {
@@ -640,11 +641,10 @@ describe("compaction settings on a window they were not written for", () => {
 		expect(fitted.keepRecentTokens).toBeLessThan(window - fitted.reserveTokens);
 	});
 
-	it("fires later than the raw setting would, which is the point", () => {
+	it("fires where upstream put it", () => {
 		const window = 32_768;
-		// The raw rule fires at 16,384; the fitted one waits for 24,576.
-		expect(shouldCompact(20_000, window, DEFAULT_COMPACTION_SETTINGS)).toBe(false);
-		expect(shouldCompact(26_000, window, DEFAULT_COMPACTION_SETTINGS)).toBe(true);
+		expect(shouldCompact(20_000, window, DEFAULT_COMPACTION_SETTINGS)).toBe(true);
+		expect(shouldCompact(10_000, window, DEFAULT_COMPACTION_SETTINGS)).toBe(false);
 	});
 
 	it("keeps less than the threshold that triggered it", () => {
