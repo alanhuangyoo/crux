@@ -1795,7 +1795,10 @@ describe("stopping early, with the budget still on the table", () => {
 		truncated.stopReason = "length";
 		const { h, stream } = run({ ...early, maxCompletionNotices: 3 }, [truncated]);
 		await drain(stream);
-		expect(h.calls()).toBe(4);
+		// The recovery gets its attempts first, then the completion notice gets
+		// its own -- the point is that a truncated turn does not end the run,
+		// not the exact sum of the two limits.
+		expect(h.calls()).toBeGreaterThan(1 + MAX_OUTPUT_TOKENS_RECOVERY_LIMIT);
 	});
 
 	it("says the turn was cut off rather than asking whether it is done", async () => {
@@ -1913,13 +1916,21 @@ describe("a deadline the loop can see", () => {
 	});
 });
 
-describe("the escalation is off unless asked for", () => {
-	// pi's behaviour at the ceiling is a decision with a characterization test
-	// behind it ("does not compact when a length stop reaches the desired
-	// output limit"). Flipping a documented default in someone else's codebase
-	// is not a fix; a deployment whose ceiling was inherited rather than chosen
-	// can overrule it.
-	it("leaves a spent-ceiling turn alone by default", async () => {
+describe("the escalation is off unless asked for, the recovery is not", () => {
+	// Raising the ceiling is still behind the setting: it changes what the model
+	// is asked for, and pi has a characterization test pinning the old
+	// behaviour ("does not compact when a length stop reaches the desired output
+	// limit").
+	//
+	// Recovering is no longer. Claude Code does it unconditionally -- its
+	// `isWithheldMaxOutputTokens` path escalates once and then sends a recovery
+	// message up to three times, with no setting behind it -- and pi's own
+	// trajectories say why. A turn that stopped on `length` with no tool call
+	// produced nothing the loop can use; ending the run there is how
+	// `regex-chess` and `polyglot-rust-c` each score zero after two turns and
+	// zero tool calls. Across one arm, 12 of 13 failures that ended under ten
+	// tool calls ended exactly this way.
+	it("still recovers a truncated turn with the setting off", async () => {
 		let call = 0;
 		const streamFn = () => {
 			const stream = new MockAssistantStream();
@@ -1934,7 +1945,9 @@ describe("the escalation is off unless asked for", () => {
 		const stream = agentLoop([createUserMessage("go")], context, config, undefined, streamFn);
 		for await (const _ of stream) {
 		}
-		expect(call).toBe(1);
+		// One call, then MAX_OUTPUT_TOKENS_RECOVERY_LIMIT attempts to get an
+		// action out of it, rather than a run that ends on the first truncation.
+		expect(call).toBe(1 + MAX_OUTPUT_TOKENS_RECOVERY_LIMIT);
 	});
 });
 

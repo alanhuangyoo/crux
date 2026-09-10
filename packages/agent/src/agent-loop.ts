@@ -148,9 +148,18 @@ function budgetNotice(elapsedMs: number, budgetMs: number, steps: number, cutOff
 export const MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3;
 
 /** What the model is told once the raised ceiling has also been used up. */
+/**
+ * Claude Code's own recovery text, ported from its source rather than
+ * paraphrased. The clause this was missing is the last one: telling the model
+ * to resume is advice about the turn that just died, telling it to break the
+ * work up is advice about the next one, and without that a resumed turn walks
+ * into the same ceiling. Measured on 441 trials, a run that truncates once
+ * usually truncates again -- `regex-chess` and `polyglot-rust-c` each spent
+ * their whole trial doing it.
+ */
 const OUTPUT_LIMIT_RECOVERY_NOTICE =
-	"Output token limit hit. Resume directly from where you stopped -- do not " +
-	"start over, and reach a tool call or a final answer before the limit.";
+	"Output token limit hit. Resume directly -- no apology, no recap of what you were doing. " +
+	"Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces.";
 
 /**
  * The escalated ceiling for a retry, or undefined when there is no more room.
@@ -446,26 +455,23 @@ async function runLoop(
 			let retrySilently = false;
 			let transition: TurnTransition | undefined = pendingTransition;
 			pendingTransition = undefined;
-			// Scoped to a turn that ran *out* of ceiling, not one the provider
-			// clamped below it. pi already recovers the second case a layer up:
-			// `isRecoverableLength` is `usage.output < desiredMaxOutput`, and
-			// AgentSession answers it by dropping the truncated message,
-			// compacting, and retrying once -- the right move when the response
-			// was cut short because context left no room. Acting on that case
-			// here would take it away from the layer that handles it properly,
-			// which is what three of its characterization tests caught.
-			//
-			// Nothing owned the other case: output that reached the ceiling
-			// exactly. pi reads it as the model spending the budget it was given
-			// and lets the run end, and with no tool call in the message the run
-			// does end -- 36% of stock trials on this benchmark, whose ceiling
-			// (16,384) sits inside the model's own output distribution (p99
-			// 16,161).
-			const ceiling = config.maxTokens ?? config.model.maxTokens;
-			const spentTheCeiling =
-				config.escalateOnSpentCeiling === true && ceiling > 0 && (message.usage?.output ?? 0) >= ceiling;
-			if (toolCalls.length === 0 && message.stopReason === "length" && spentTheCeiling) {
-				const ceiling = state.escalated ? undefined : escalatedMaxTokens(config);
+			// Claude Code recovers a truncated turn unconditionally -- its
+			// `isWithheldMaxOutputTokens` path escalates once and then sends the
+			// recovery message up to three times, with no setting behind it. pi
+			// gated the same behaviour on `escalateOnSpentCeiling` because the
+			// escalation half is a real behaviour change with a characterization
+			// test. The recovery half is not: a turn that stopped on `length`
+			// having called no tool has produced nothing the loop can use, and
+			// ending the run there is how `regex-chess` scores zero after two
+			// turns. So the gate now only governs whether the ceiling is raised.
+			if (toolCalls.length === 0 && message.stopReason === "length") {
+				// The escalation half stays behind the setting: raising the
+				// ceiling changes what the model is asked for, and pi has a
+				// characterization test pinning the old behaviour. The recovery
+				// half does not, per the comment above.
+				const spentTheCeiling =
+					config.escalateOnSpentCeiling === true && (message.usage?.output ?? 0) >= (config.maxTokens ?? 0);
+				const ceiling = state.escalated || !spentTheCeiling ? undefined : escalatedMaxTokens(config);
 				if (ceiling !== undefined) {
 					state = { ...state, escalated: true };
 					retrySilently = true;
