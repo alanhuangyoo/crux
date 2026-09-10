@@ -101,3 +101,63 @@ Reading the 18 flaky tasks for a shared failure shape found none: the failing
 attempt is not systematically longer or shorter than the passing one (10-8,
 p≈0.8). That was the fourteenth pattern this project has proposed and measured
 away.
+
+
+## The nineteen Claude Code solves, and what happened to them
+
+The target set stopped being a matter of taste once the local Claude Code corpus
+was read properly: nineteen tasks where it scores above zero on this model and
+crux scores under a third. Worth about nineteen points if all of them came in.
+
+One targeted arm against them, two attempts each, plus four guards that pass 5/5
+today:
+
+| | |
+|---|---|
+| improved | **12 of 19** |
+| solved for the first time | 6 — `adaptive-rejection-sampler`, `feal-differential-cryptanalysis`, `path-tracing`, `rstan-to-pystan`, `path-tracing-reverse`, `write-compressor` |
+| regressed | 2 — `sanitize-git-repo` 2/6 to 0/2, `video-processing` 2/6 to 0/2 |
+| guards | 4 of 4 clean |
+
+Expected solves across the nineteen went 2.7 to 11.5, which is about ten points
+on the full set. That number is not a score: the subset was chosen for being
+where crux is worst, two attempts is thin, and the two regressions say how thin.
+A full-set run is what settles it.
+
+## Two explanations that died on the seven that did not move
+
+`circuit-fibsqrt`, `install-windows-3.11`, `qemu-alpine-ssh`, `qemu-startup`,
+`winning-avg-corewars`, and the two that regressed.
+
+**They are not early quits.** That story is real for the failure population as a
+whole -- 32% of crux's failures end under ten tool calls against Claude Code's
+4% -- and it is simply absent here. On these seven crux usually works *harder*
+and still loses:
+
+| task | Claude Code, winning | crux, failing |
+|---|---|---|
+| winning-avg-corewars | 141 | 245, 194 |
+| qemu-alpine-ssh | 33 | 104, 70 |
+| sanitize-git-repo | 33, 25 | 75, 43 |
+| install-windows-3.11 | 103 | 93, 209 |
+| video-processing | 38 | 61, 0 |
+
+**And they are not a missing habit of instrumenting.** Reading Claude Code's
+winning `circuit-fibsqrt` trajectory shows it writing an independent Python
+model of the state machine, then a port of the C simulator that dumps registers
+at chosen steps, then diffing against both -- which looked like the answer.
+Counting scratch files across the corpus says otherwise:
+
+| | scaffolding files per solved trial | per failed trial |
+|---|---:|---:|
+| Claude Code | 10.1 | 22.3 |
+| crux, on these targets | 10.6 | 36.3 |
+| crux, full set | 14.2 | 16.9 |
+
+crux builds *more* of it, not less, and the shape is the same on both sides.
+That was the nineteenth explanation this project has proposed and measured away,
+and the first one that was already being built when the measurement arrived.
+
+What is left on these seven is the content of the approach rather than its
+volume, and no aggregate metric tried so far separates it. The next step is
+per-task reading against the Claude Code win, not another ratio.
