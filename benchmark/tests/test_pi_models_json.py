@@ -108,15 +108,18 @@ def declare_reasoning_no_thinking(models_json):
     out = declare_reasoning(models_json)
     for provider in out["providers"].values():
         for model in provider["models"]:
-            model["compat"].setdefault("chatTemplateArgs", {}).setdefault(
-                "enable_thinking", False
-            )
+            compat = model["compat"]
+            compat["thinkingFormat"] = "chat-template"
+            kwargs = compat.setdefault("chatTemplateKwargs", {})
+            kwargs.setdefault("enable_thinking", False)
+            kwargs.setdefault("preserve_thinking", True)
     return out
 
 
 def test_off_by_default():
     model = declare_reasoning(harbor_shape())["providers"]["harbor-endpoint"]["models"][0]
-    assert "chatTemplateArgs" not in model["compat"]
+    assert "chatTemplateKwargs" not in model["compat"]
+    assert "thinkingFormat" not in model["compat"]
 
 
 def test_the_switch_reaches_the_chat_template():
@@ -125,6 +128,19 @@ def test_the_switch_reaches_the_chat_template():
     # still 41,888-54,778 characters. The chat template is the control the
     # server honours absolutely -- 0, 0, 0 characters across three samples.
     model = declare_reasoning_no_thinking(harbor_shape())["providers"]["harbor-endpoint"]["models"][0]
-    assert model["compat"]["chatTemplateArgs"]["enable_thinking"] is False
+    assert model["compat"]["chatTemplateKwargs"]["enable_thinking"] is False
     assert model["reasoning"] is True
     assert model["compat"]["supportsDeveloperRole"] is False
+
+
+def test_the_format_is_the_one_this_server_honours():
+    # Two samples each against this server, characters of reasoning_content:
+    #   chat_template_kwargs{enable_thinking:0}      0      0
+    #   chat_template_args{enable_thinking:0}     9211   9046   <- pi "baseten"
+    #   top-level enable_thinking:false           9011   8828   <- pi "qwen"
+    # The first version of this shipped the baseten field and the probe ran
+    # with reasoning fully on.
+    compat = declare_reasoning_no_thinking(harbor_shape())["providers"]["harbor-endpoint"]["models"][0]["compat"]
+    assert compat["thinkingFormat"] == "chat-template"
+    assert "chatTemplateArgs" not in compat, "baseten field: this server ignores it"
+    assert compat["chatTemplateKwargs"]["preserve_thinking"] is True

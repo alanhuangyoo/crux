@@ -448,22 +448,36 @@ class CruxPiAgent(Pi):
                 compat.setdefault("supportsDeveloperRole", False)
                 if self._no_thinking:
                     # `reasoning_effort` biases this model, it does not cap it.
-                    # Measured on the five tasks where reasoning is what kills
+                    # Measured on the five tasks where reasoning is what loses
                     # the run: with effort=low the median thinking block is
                     # still 41,888-54,778 characters, against 47,291-56,964
                     # without it, and every run still ends on `length`. The
-                    # ceiling and its escalation make that worse rather than
-                    # better -- 8,192 truncates, the loop silently raises to
-                    # 16,384, and the model spends that too.
+                    # output ceiling makes it worse rather than better, exactly
+                    # as designed -- 8,192 truncates, the loop silently raises
+                    # to 16,384, and the model spends that on thinking too.
+                    # More room was the wrong lever.
                     #
-                    # The chat template is the only control this server honours
-                    # absolutely: three samples on a reasoning-heavy prompt gave
-                    # 0, 0, 0 reasoning characters with a *longer* answer (1,680
-                    # against 228). Off by default because it is a large change
-                    # to how the model works, and worth trying only where
-                    # reasoning is demonstrably the thing losing the run.
-                    args = compat.setdefault("chatTemplateArgs", {})
-                    args.setdefault("enable_thinking", False)
+                    # Which wire format, measured against this server, two
+                    # samples each on one reasoning-heavy prompt (characters of
+                    # reasoning_content):
+                    #
+                    #   baseline                                  9730  11358
+                    #   chat_template_kwargs{enable_thinking:0}      0      0
+                    #   ... plus preserve_thinking                   0      0
+                    #   chat_template_args{enable_thinking:0}     9211   9046
+                    #   top-level enable_thinking:false           9011   8828
+                    #
+                    # So `chat_template_args` and the top-level flag are both
+                    # ignored here, which rules out pi's "baseten" and "qwen"
+                    # formats. The first version of this shipped the `baseten`
+                    # field, the probe ran with reasoning fully on, and only
+                    # counting thinking blocks in its own trajectories caught
+                    # it -- the models.json inside the container was exactly
+                    # what it was meant to be.
+                    compat["thinkingFormat"] = "chat-template"
+                    kwargs = compat.setdefault("chatTemplateKwargs", {})
+                    kwargs.setdefault("enable_thinking", False)
+                    kwargs.setdefault("preserve_thinking", True)
         return models_json
 
     @override
