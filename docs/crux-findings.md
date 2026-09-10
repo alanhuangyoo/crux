@@ -47,6 +47,42 @@ here. It was worth an arm to find that out, and the arm is what makes the
 `filter-js-from-html` was solved for the first time by any scaffold, which
 moves the every-scaffold ceiling from 80/89 to 81/89.
 
+## The ceiling was shipped without the headroom it needs
+
+`feal-differential-cryptanalysis`, one pi trial, in full:
+
+    THINK     86 chars
+    CALL      read /app/feal.py
+    THINK 38,535 chars   no action
+    THINK 42,488 chars   no action
+    THINK 40,338 chars   no action
+    THINK 40,000 chars   no action -- run over
+
+One file read, then four consecutive turns of forty thousand characters of
+reasoning with nothing in them the loop can execute. Terminus takes 90 steps on
+this task and solves it 2/2.
+
+Across 441 trials, 50 (11.3%) contain two or more consecutive no-action turns
+of 20,000+ thinking characters, and **41 of those 50 failed** against a base
+rate near 45%. The tasks are the zero list almost exactly:
+`schemelike-metacircular-eval`, `regex-chess`, `circuit-fibsqrt`,
+`adaptive-rejection-sampler`, `feal-differential-cryptanalysis`,
+`polyglot-rust-c`, `winning-avg-corewars`, `torch-pipeline-parallelism`,
+`extract-moves-from-video`, `path-tracing-reverse`.
+
+The mechanism for this is already in the loop and has never once been able to
+act. The two-phase recovery raises the ceiling and retries; but
+`PI_MAX_OUTPUT_TOKENS` was set to 16,384, chosen from this deployment's p99 of
+16,161, which is **also the model's own `maxTokens`**. `escalatedMaxTokens`
+returns undefined when the current ceiling is already the model's, so every arm
+that "tested the escalation" was testing a no-op. The trace says so plainly --
+four turns, `stop=length`, `out=16384` on every one, the ceiling never moving.
+
+Claude Code caps at 8K against a 64K model ceiling. The number that matters is
+not the cap, it is the gap. 8,192 against this model's 16,384 leaves the
+escalation somewhere to go, and p95 output here is 5,699, so ordinary turns are
+untouched while the forty-thousand-character turns truncate and get retried.
+
 ## The one that survived: pi stops, the others run out of time
 
 Every explanation below was a guess about what the agent does *while* it works.
