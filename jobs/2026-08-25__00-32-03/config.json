@@ -1,0 +1,11 @@
+{
+    "job_name": "2026-08-25__00-32-03",
+    "n_concurrent_trials": 2,
+    "datasets": [
+        {
+            "name": "terminal-bench/terminal-bench",
+            "ref": "sha256:a32a61879ea94eb9dc16fa1fbeb398759f0c07ca633d9d1f6aec760207036da3",
+            "n_tasks": 2
+        }
+    ]
+}

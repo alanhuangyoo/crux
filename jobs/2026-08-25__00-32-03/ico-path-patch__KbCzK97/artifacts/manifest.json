@@ -1,0 +1,30 @@
+[
+  {
+    "source": "/logs/artifacts",
+    "destination": "artifacts/logs/artifacts",
+    "type": "directory",
+    "status": "empty",
+    "service": null
+  },
+  {
+    "source": "/root/patch_ico.py",
+    "destination": "artifacts/root/patch_ico.py",
+    "type": "file",
+    "status": "ok",
+    "service": null
+  },
+  {
+    "source": "/root/ico/ico",
+    "destination": "artifacts/root/ico/ico",
+    "type": "file",
+    "status": "ok",
+    "service": null
+  },
+  {
+    "source": "/root/ico/ico_patched",
+    "destination": "artifacts/root/ico/ico_patched",
+    "type": "file",
+    "status": "ok",
+    "service": null
+  }
+]

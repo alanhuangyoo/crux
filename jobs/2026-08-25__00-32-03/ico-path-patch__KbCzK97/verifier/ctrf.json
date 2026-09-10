@@ -1,0 +1,251 @@
+{
+    "reportFormat": "CTRF",
+    "specVersion": "0.0.0",
+    "timestamp": "2026-08-24T16:35:39.248226+00:00",
+    "generatedBy": "pytest",
+    "results": {
+        "tool": {
+            "name": "pytest",
+            "version": "9.1.1"
+        },
+        "summary": {
+            "tests": 19,
+            "passed": 2,
+            "failed": 17,
+            "skipped": 0,
+            "pending": 0,
+            "other": 0,
+            "start": 1787589252574,
+            "stop": 1787589339247
+        },
+        "environment": {
+            "buildName": "Pytest JSON CTRF Report",
+            "buildNumber": "000",
+            "buildUrl": "https://ctrf.io"
+        },
+        "tests": [
+            {
+                "name": "test_outputs.py::test_patch_script_reproduces_patched_binary",
+                "status": "passed",
+                "duration": 80,
+                "start": 1787589252631,
+                "stop": 1787589252711,
+                "retries": 0,
+                "file_path": "test_outputs.py"
+            },
+            {
+                "name": "test_outputs.py::test_patched_binary_is_real_small_elf_patch",
+                "status": "passed",
+                "duration": 32,
+                "start": 1787589252711,
+                "stop": 1787589252743,
+                "retries": 0,
+                "file_path": "test_outputs.py"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_rejects_replacement_shape_paths_with_path_count_and_recovers",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5083,
+                "start": 1787589252743,
+                "stop": 1787589257826,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_rejects_replacement_shape_paths_with_path_count_and_recovers():\n        \"\"\"Invalid replacement path-reference lists must fail without mutating state.\"\"\"\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:560: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 47691: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_uses_live_path_count_for_replacement_boundaries",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5084,
+                "start": 1787589257826,
+                "stop": 1787589262910,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_uses_live_path_count_for_replacement_boundaries():\n        \"\"\"Boundary validity must track path-count changes in the current image.\"\"\"\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:585: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 41483: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_preserves_valid_shape_path_replacements",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5098,
+                "start": 1787589262910,
+                "stop": 1787589268008,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_preserves_valid_shape_path_replacements():\n        \"\"\"Valid nonempty and empty replacement path lists must still succeed.\"\"\"\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:615: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 38657: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_rejects_invalid_add_shape_path_and_recovers",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5062,
+                "start": 1787589268008,
+                "stop": 1787589273070,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_rejects_invalid_add_shape_path_and_recovers():\n        \"\"\"AddShapePath must reject out-of-range references without mutating state.\"\"\"\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:627: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 45061: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_add_shape_path_tracks_live_path_count",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5103,
+                "start": 1787589273070,
+                "stop": 1787589278173,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_add_shape_path_tracks_live_path_count():\n        \"\"\"A reference equal to the old path count becomes valid after a path is added.\"\"\"\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:640: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 45557: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_rejects_invalid_shape_style_and_recovers",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5095,
+                "start": 1787589278173,
+                "stop": 1787589283268,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_rejects_invalid_shape_style_and_recovers():\n        \"\"\"SetShapeStyle must reject out-of-range references without mutating state.\"\"\"\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:654: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 47815: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_set_shape_style_tracks_live_style_count",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5095,
+                "start": 1787589283268,
+                "stop": 1787589288363,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_set_shape_style_tracks_live_style_count():\n        \"\"\"A style index equal to the old style count becomes valid after a style is added.\"\"\"\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:666: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 49327: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_rejects_out_of_range_set_step_and_recovers",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5076,
+                "start": 1787589288363,
+                "stop": 1787589293439,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_rejects_out_of_range_set_step_and_recovers():\n        \"\"\"SetStep must reject out-of-range step/style references without corrupting state.\"\"\"\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:681: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 51421: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_rejects_out_of_range_add_step_and_recovers",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5099,
+                "start": 1787589293440,
+                "stop": 1787589298539,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_rejects_out_of_range_add_step_and_recovers():\n        \"\"\"AddStep must reject gap inserts / bad styles but still allow append and in-range insert.\"\"\"\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:699: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 60669: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_rejects_out_of_range_remove_step_and_recovers",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5101,
+                "start": 1787589298539,
+                "stop": 1787589303640,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_rejects_out_of_range_remove_step_and_recovers():\n        \"\"\"RemoveStep must reject out-of-range step/style references without corrupting state.\"\"\"\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:722: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 35417: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_step_edits_track_live_step_count",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5093,
+                "start": 1787589303641,
+                "stop": 1787589308734,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_step_edits_track_live_step_count():\n        \"\"\"Step-index boundaries must track the gradient's live step count.\"\"\"\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:738: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 53983: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_step_edits_track_step_count_shrink",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5124,
+                "start": 1787589308734,
+                "stop": 1787589313858,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_step_edits_track_step_count_shrink():\n        \"\"\"Step-index boundaries must also tighten when RemoveStep shrinks the gradient,\n        so a patch that caches the original step count is rejected.\"\"\"\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:751: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 44973: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_preserves_checkshape_on_whole_shape_handlers",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5072,
+                "start": 1787589313859,
+                "stop": 1787589318931,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_preserves_checkshape_on_whole_shape_handlers():\n        \"\"\"SetShape/AddShape already validate references; the patch must not break that,\n        and must not loosen it either (invalid style or path still rejected; valid OK).\"\"\"\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:772: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 52667: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_preserves_hvif_roundtrip_and_rendering",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5093,
+                "start": 1787589318931,
+                "stop": 1787589324024,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_preserves_hvif_roundtrip_and_rendering():\n        \"\"\"The repair must preserve normal HVIF store and PNG render behavior.\"\"\"\n        original_data = SAMPLE.read_bytes()\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:800: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 57693: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_matches_original_on_valid_workload",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5049,
+                "start": 1787589324024,
+                "stop": 1787589329073,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_matches_original_on_valid_workload():\n        \"\"\"Valid behavior must be unchanged: an identical sequence of legitimate edits,\n        stores, and renders must produce byte-identical results on both binaries.\"\"\"\n>       with _client(ORIGINAL) as sock:\n             ^^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:843: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 48437: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_survives_invalid_request_storm",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5094,
+                "start": 1787589329074,
+                "stop": 1787589334168,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_survives_invalid_request_storm():\n        \"\"\"Errored paths must be guarded: every invalid edit is rejected cleanly on a\n        single live connection, leaves all state untouched, and the service stays fully\n        functional afterwards (no crash, dropped connection, or corruption).\"\"\"\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:859: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 43147: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_outputs.py::test_patched_service_validates_non_primary_objects",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 5078,
+                "start": 1787589334168,
+                "stop": 1787589339246,
+                "retries": 0,
+                "file_path": "test_outputs.py",
+                "trace": "def test_patched_service_validates_non_primary_objects():\n        \"\"\"The fix must hold for any object, not just the sample's first shape and\n        gradient: create a second shape and a second gradient style and re-check the\n        invariant on those non-primary indices, so an index-keyed patch is rejected.\"\"\"\n>       with _client(PATCHED) as sock:\n             ^^^^^^^^^^^^^^^^\n\ntests/test_outputs.py:896: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nusr/local/lib/python3.12/contextlib.py:137: in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nbinary = PosixPath('/root/ico/ico_patched')\n\n    @contextmanager\n    def _client(binary):\n        with _service(binary) as (port, proc, stdout_path, stderr_path):\n            deadline = time.time() + 5.0\n            last_error = None\n            while time.time() < deadline:\n                try:\n                    sock = socket.create_connection((\"127.0.0.1\", port), timeout=0.5)\n                    break\n                except OSError as exc:\n                    last_error = exc\n                    time.sleep(0.05)\n            else:\n>               raise AssertionError(f\"service did not accept connection on port {port}: {last_error}\")\nE               AssertionError: service did not accept connection on port 50373: [Errno 111] Connection refused\n\ntests/test_outputs.py:260: AssertionError",
+                "message": "The test failed in the call phase due to an assertion error"
+            }
+        ]
+    }
+}

@@ -1,0 +1,619 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0 -- /usr/local/bin/python
+cachedir: .pytest_cache
+rootdir: /tests
+plugins: json-ctrf-0.5.2
+collecting ... collected 19 items
+
+tests/test_outputs.py::test_patch_script_reproduces_patched_binary PASSED [  5%]
+tests/test_outputs.py::test_patched_binary_is_real_small_elf_patch PASSED [ 10%]
+tests/test_outputs.py::test_patched_service_rejects_replacement_shape_paths_with_path_count_and_recovers FAILED [ 15%]
+tests/test_outputs.py::test_patched_service_uses_live_path_count_for_replacement_boundaries FAILED [ 21%]
+tests/test_outputs.py::test_patched_service_preserves_valid_shape_path_replacements FAILED [ 26%]
+tests/test_outputs.py::test_patched_service_rejects_invalid_add_shape_path_and_recovers FAILED [ 31%]
+tests/test_outputs.py::test_patched_service_add_shape_path_tracks_live_path_count FAILED [ 36%]
+tests/test_outputs.py::test_patched_service_rejects_invalid_shape_style_and_recovers FAILED [ 42%]
+tests/test_outputs.py::test_patched_service_set_shape_style_tracks_live_style_count FAILED [ 47%]
+tests/test_outputs.py::test_patched_service_rejects_out_of_range_set_step_and_recovers FAILED [ 52%]
+tests/test_outputs.py::test_patched_service_rejects_out_of_range_add_step_and_recovers FAILED [ 57%]
+tests/test_outputs.py::test_patched_service_rejects_out_of_range_remove_step_and_recovers FAILED [ 63%]
+tests/test_outputs.py::test_patched_service_step_edits_track_live_step_count FAILED [ 68%]
+tests/test_outputs.py::test_patched_service_step_edits_track_step_count_shrink FAILED [ 73%]
+tests/test_outputs.py::test_patched_service_preserves_checkshape_on_whole_shape_handlers FAILED [ 78%]
+tests/test_outputs.py::test_patched_service_preserves_hvif_roundtrip_and_rendering FAILED [ 84%]
+tests/test_outputs.py::test_patched_service_matches_original_on_valid_workload FAILED [ 89%]
+tests/test_outputs.py::test_patched_service_survives_invalid_request_storm FAILED [ 94%]
+tests/test_outputs.py::test_patched_service_validates_non_primary_objects FAILED [100%]
+
+=================================== FAILURES ===================================
+_ test_patched_service_rejects_replacement_shape_paths_with_path_count_and_recovers _
+
+    def test_patched_service_rejects_replacement_shape_paths_with_path_count_and_recovers():
+        """Invalid replacement path-reference lists must fail without mutating state."""
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:560: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 47691: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+_____ test_patched_service_uses_live_path_count_for_replacement_boundaries _____
+
+    def test_patched_service_uses_live_path_count_for_replacement_boundaries():
+        """Boundary validity must track path-count changes in the current image."""
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:585: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 41483: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+_________ test_patched_service_preserves_valid_shape_path_replacements _________
+
+    def test_patched_service_preserves_valid_shape_path_replacements():
+        """Valid nonempty and empty replacement path lists must still succeed."""
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:615: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 38657: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+_______ test_patched_service_rejects_invalid_add_shape_path_and_recovers _______
+
+    def test_patched_service_rejects_invalid_add_shape_path_and_recovers():
+        """AddShapePath must reject out-of-range references without mutating state."""
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:627: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 45061: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+__________ test_patched_service_add_shape_path_tracks_live_path_count __________
+
+    def test_patched_service_add_shape_path_tracks_live_path_count():
+        """A reference equal to the old path count becomes valid after a path is added."""
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:640: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 45557: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+________ test_patched_service_rejects_invalid_shape_style_and_recovers _________
+
+    def test_patched_service_rejects_invalid_shape_style_and_recovers():
+        """SetShapeStyle must reject out-of-range references without mutating state."""
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:654: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 47815: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+_________ test_patched_service_set_shape_style_tracks_live_style_count _________
+
+    def test_patched_service_set_shape_style_tracks_live_style_count():
+        """A style index equal to the old style count becomes valid after a style is added."""
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:666: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 49327: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+_______ test_patched_service_rejects_out_of_range_set_step_and_recovers ________
+
+    def test_patched_service_rejects_out_of_range_set_step_and_recovers():
+        """SetStep must reject out-of-range step/style references without corrupting state."""
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:681: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 51421: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+_______ test_patched_service_rejects_out_of_range_add_step_and_recovers ________
+
+    def test_patched_service_rejects_out_of_range_add_step_and_recovers():
+        """AddStep must reject gap inserts / bad styles but still allow append and in-range insert."""
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:699: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 60669: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+______ test_patched_service_rejects_out_of_range_remove_step_and_recovers ______
+
+    def test_patched_service_rejects_out_of_range_remove_step_and_recovers():
+        """RemoveStep must reject out-of-range step/style references without corrupting state."""
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:722: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 35417: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+____________ test_patched_service_step_edits_track_live_step_count _____________
+
+    def test_patched_service_step_edits_track_live_step_count():
+        """Step-index boundaries must track the gradient's live step count."""
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:738: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 53983: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+___________ test_patched_service_step_edits_track_step_count_shrink ____________
+
+    def test_patched_service_step_edits_track_step_count_shrink():
+        """Step-index boundaries must also tighten when RemoveStep shrinks the gradient,
+        so a patch that caches the original step count is rejected."""
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:751: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 44973: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+______ test_patched_service_preserves_checkshape_on_whole_shape_handlers _______
+
+    def test_patched_service_preserves_checkshape_on_whole_shape_handlers():
+        """SetShape/AddShape already validate references; the patch must not break that,
+        and must not loosen it either (invalid style or path still rejected; valid OK)."""
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:772: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 52667: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+_________ test_patched_service_preserves_hvif_roundtrip_and_rendering __________
+
+    def test_patched_service_preserves_hvif_roundtrip_and_rendering():
+        """The repair must preserve normal HVIF store and PNG render behavior."""
+        original_data = SAMPLE.read_bytes()
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:800: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 57693: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+___________ test_patched_service_matches_original_on_valid_workload ____________
+
+    def test_patched_service_matches_original_on_valid_workload():
+        """Valid behavior must be unchanged: an identical sequence of legitimate edits,
+        stores, and renders must produce byte-identical results on both binaries."""
+>       with _client(ORIGINAL) as sock:
+             ^^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:843: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 48437: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+_____________ test_patched_service_survives_invalid_request_storm ______________
+
+    def test_patched_service_survives_invalid_request_storm():
+        """Errored paths must be guarded: every invalid edit is rejected cleanly on a
+        single live connection, leaves all state untouched, and the service stays fully
+        functional afterwards (no crash, dropped connection, or corruption)."""
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:859: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 43147: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+______________ test_patched_service_validates_non_primary_objects ______________
+
+    def test_patched_service_validates_non_primary_objects():
+        """The fix must hold for any object, not just the sample's first shape and
+        gradient: create a second shape and a second gradient style and re-check the
+        invariant on those non-primary indices, so an index-keyed patch is rejected."""
+>       with _client(PATCHED) as sock:
+             ^^^^^^^^^^^^^^^^
+
+tests/test_outputs.py:896: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+usr/local/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+binary = PosixPath('/root/ico/ico_patched')
+
+    @contextmanager
+    def _client(binary):
+        with _service(binary) as (port, proc, stdout_path, stderr_path):
+            deadline = time.time() + 5.0
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+            else:
+>               raise AssertionError(f"service did not accept connection on port {port}: {last_error}")
+E               AssertionError: service did not accept connection on port 50373: [Errno 111] Connection refused
+
+tests/test_outputs.py:260: AssertionError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED tests/test_outputs.py::test_patch_script_reproduces_patched_binary
+PASSED tests/test_outputs.py::test_patched_binary_is_real_small_elf_patch
+FAILED tests/test_outputs.py::test_patched_service_rejects_replacement_shape_paths_with_path_count_and_recovers
+FAILED tests/test_outputs.py::test_patched_service_uses_live_path_count_for_replacement_boundaries
+FAILED tests/test_outputs.py::test_patched_service_preserves_valid_shape_path_replacements
+FAILED tests/test_outputs.py::test_patched_service_rejects_invalid_add_shape_path_and_recovers
+FAILED tests/test_outputs.py::test_patched_service_add_shape_path_tracks_live_path_count
+FAILED tests/test_outputs.py::test_patched_service_rejects_invalid_shape_style_and_recovers
+FAILED tests/test_outputs.py::test_patched_service_set_shape_style_tracks_live_style_count
+FAILED tests/test_outputs.py::test_patched_service_rejects_out_of_range_set_step_and_recovers
+FAILED tests/test_outputs.py::test_patched_service_rejects_out_of_range_add_step_and_recovers
+FAILED tests/test_outputs.py::test_patched_service_rejects_out_of_range_remove_step_and_recovers
+FAILED tests/test_outputs.py::test_patched_service_step_edits_track_live_step_count
+FAILED tests/test_outputs.py::test_patched_service_step_edits_track_step_count_shrink
+FAILED tests/test_outputs.py::test_patched_service_preserves_checkshape_on_whole_shape_handlers
+FAILED tests/test_outputs.py::test_patched_service_preserves_hvif_roundtrip_and_rendering
+FAILED tests/test_outputs.py::test_patched_service_matches_original_on_valid_workload
+FAILED tests/test_outputs.py::test_patched_service_survives_invalid_request_storm
+FAILED tests/test_outputs.py::test_patched_service_validates_non_primary_objects
+=================== 17 failed, 2 passed in 86.68s (0:01:26) ====================

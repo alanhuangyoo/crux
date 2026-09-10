@@ -1,0 +1,10 @@
+{
+    "task": {
+        "name": "terminal-bench/ico-path-patch",
+        "ref": "sha256:0115a4136189b48da79070f9b3004dc4e0dfc1a60725c5acebdd7f380d037d14",
+        "source": "terminal-bench/terminal-bench"
+    },
+    "trial_name": "ico-path-patch__KbCzK97",
+    "trials_dir": "jobs/2026-08-25__00-32-03",
+    "job_id": "63811ea5-2051-4a23-8491-1722f58eb38b"
+}

@@ -1,0 +1,1 @@
+patched /root/ico/ico -> /root/ico/ico_patched: cave 594B, 593 bytes changed

@@ -19,7 +19,11 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.6"]
 local = ["mini-swe-agent>=1.0"]
 
 [project.scripts]
-crux = "crux.cli:main"
+# The agent owns the name `crux` now -- it is installed by the TypeScript
+# package at the repository root, as `crux` and `pi`. This is the rig that
+# measures it, so it takes the longer name rather than shadowing the thing
+# under test. `python3 -m crux.cli` still works and is what the arm scripts use.
+crux-bench = "crux.cli:main"
 
 [build-system]
 requires = ["hatchling"]

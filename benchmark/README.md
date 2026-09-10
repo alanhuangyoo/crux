@@ -1,4 +1,14 @@
-# Crux
+# Crux — the benchmark rig
+
+The agent this measures lives at the repository root: crux is a fork of
+[pi](https://pi.dev), and [`../README.md`](../README.md) is the project's front
+door. This directory is the harness that decides what goes into it — the harbor
+agent, the prompt sections, the endpoint tooling, and the record of what was
+measured.
+
+Installed as `crux-bench`; the arm scripts invoke it as `python3 -m crux.cli`.
+
+---
 
 A terminal agent scaffold targeting [Terminal-Bench](https://www.tbench.ai/),
 built around a specific bet: **the official leaderboard has no current-generation
