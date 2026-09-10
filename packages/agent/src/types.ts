@@ -163,6 +163,40 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	deadline?: number;
 
 	/**
+	 * How long this run was given in total, in milliseconds.
+	 *
+	 * `deadline` says when the run ends; this says how big the run was, which is
+	 * the number the agent needs to know whether stopping now is early. Set both
+	 * or neither -- a deadline without a budget still paces the end of the run,
+	 * it just cannot say what fraction is left.
+	 */
+	timeBudgetMs?: number;
+
+	/**
+	 * Ask the agent to reconsider stopping while this share of the budget is
+	 * still unspent, between 0 and 1.
+	 *
+	 * Measured on Terminal-Bench 2.1 with one 27B deployment, by the fraction of
+	 * its own budget a trial had used at the moment it stopped: pi's failed
+	 * trials had spent a median of 24% and two thirds of them stopped under half,
+	 * while Claude Code's failed trials had spent 95% and Terminus's 82%. Failure
+	 * here is not running out of time; it is stopping on a green light the agent
+	 * wrote for itself. The threshold is where that question stops being worth
+	 * asking, so it is also what bounds the notice: each round consumes time, so
+	 * the share rises and the notices end.
+	 *
+	 * Omit to leave pi's behaviour as it is -- an interactive session has a person
+	 * to decide when the work is done.
+	 */
+	stopBudgetShare?: number;
+
+	/**
+	 * Hard cap on completion notices, in case the agent stops without spending
+	 * time -- the share alone terminates only if each round costs something.
+	 */
+	maxCompletionNotices?: number;
+
+	/**
 	 * Retry a turn that spent its whole output ceiling and made no tool call,
 	 * by raising the ceiling once and then asking the model to resume.
 	 *
@@ -474,7 +508,9 @@ export type TurnTransition =
 	/** Truncated again with the ceiling already raised; telling the model. */
 	| { reason: "output_limit_recovery"; attempt: number }
 	/** Follow-up messages arrived after the agent would have stopped. */
-	| { reason: "follow_up"; count: number };
+	| { reason: "follow_up"; count: number }
+	/** The agent stopped with budget left; it is being asked to reconsider. */
+	| { reason: "budget_notice"; attempt: number; shareUsed: number };
 
 export interface AgentContext {
 	/** System prompt included with the request. */

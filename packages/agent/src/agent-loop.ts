@@ -57,6 +57,57 @@ function deadlineNotice(remainingMs: number): string {
 }
 
 /**
+ * Cap on completion notices, for the case where stopping costs no time -- the
+ * share alone terminates only if each round it buys is spent on something.
+ * There is no default share: unset means the loop takes the agent at its word.
+ */
+const DEFAULT_MAX_COMPLETION_NOTICES = 8;
+
+function humanDuration(ms: number): string {
+	const total = Math.max(0, Math.round(ms / 1000));
+	const h = Math.floor(total / 3600);
+	const m = Math.floor((total % 3600) / 60);
+	if (h > 0) return `${h}h ${m}m`;
+	if (m > 0) return `${m}m`;
+	return `${total}s`;
+}
+
+/**
+ * What the agent is told when it stops with most of its budget unspent.
+ *
+ * The loop takes the agent at its word: no tool calls means done. Measured on
+ * Terminal-Bench 2.1 over one 27B deployment, by the fraction of its own budget
+ * a trial had spent at the moment it stopped:
+ *
+ *     pi            solved  6%   failed 24%   47 of 73 failures under half
+ *     Terminus      solved 33%   failed 82%    8 of 25 failures under half
+ *     Claude Code   solved 19%   failed 95%    7 of 24 failures under half
+ *
+ * The agents that score do not stop when they are done; they stop when the time
+ * is gone. pi's failures end with three quarters of the run unused, on a check
+ * the agent wrote for itself and then passed. Terminus already asks "are you
+ * sure" here and its trajectories show a generic question earning a generic
+ * yes, so what this adds is the one thing the agent cannot see: how much of its
+ * run is left. The threshold is self-limiting -- each round it buys costs time,
+ * so the share climbs and the notices stop.
+ */
+function budgetNotice(elapsedMs: number, budgetMs: number, steps: number): string {
+	const remaining = Math.max(0, budgetMs - elapsedMs);
+	const pct = Math.round((elapsedMs / budgetMs) * 100);
+	return (
+		`You have been working ${humanDuration(elapsedMs)} over ${steps} steps, which is ${pct}% of your ` +
+		`budget. About ${humanDuration(remaining)} is left.\n\n` +
+		"Measured on this benchmark: trials that solved the task had spent 6-33% of their budget when they " +
+		"stopped; trials that failed had spent 24-95%, and most of the failures were not out of time -- they " +
+		"stopped early, on a check the agent had written for itself and then passed.\n\n" +
+		"If time is what you have left, the cheapest thing you can do with it is one pass you have not done: " +
+		"re-read the task's own words, list what will be run against your work, and check the deliverable " +
+		"against that list rather than against the checks you already wrote. If you have genuinely finished " +
+		"and verified against the task's own wording, say so and stop."
+	);
+}
+
+/**
  * Recovery for a turn cut off at the output token limit, in the two phases
  * Claude Code's loop uses (`max_output_tokens_escalate`, then
  * `max_output_tokens_recovery`).
@@ -125,6 +176,8 @@ interface LoopState {
 	readonly deadlineWarned: boolean;
 	/** Turns completed, counting every assistant response the loop has taken. */
 	readonly turnCount: number;
+	/** Completion notices sent, bounded by `maxCompletionNotices`. */
+	readonly completionNotices: number;
 }
 
 const INITIAL_LOOP_STATE: LoopState = {
@@ -132,6 +185,7 @@ const INITIAL_LOOP_STATE: LoopState = {
 	outputLimitRecoveries: 0,
 	deadlineWarned: false,
 	turnCount: 0,
+	completionNotices: 0,
 };
 
 /**
@@ -279,6 +333,9 @@ async function runLoop(
 	// point that spends a recovery, so what has been tried is always readable
 	// as a whole rather than reconstructed from four separate flags.
 	let state: LoopState = INITIAL_LOOP_STATE;
+	// Set when the loop continues past a point where it would have stopped;
+	// carried to the next turn's `turn_end`, which is where that decision shows.
+	let pendingTransition: TurnTransition | undefined;
 	// Check for steering messages at start (user may have typed while waiting)
 	let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
 
@@ -365,7 +422,8 @@ async function runLoop(
 			// first; only tell the model once the raised ceiling is used up too.
 			let recovery: string | undefined;
 			let retrySilently = false;
-			let transition: TurnTransition | undefined;
+			let transition: TurnTransition | undefined = pendingTransition;
+			pendingTransition = undefined;
 			// Scoped to a turn that ran *out* of ceiling, not one the provider
 			// clamped below it. pi already recovers the second case a layer up:
 			// `isRecoverableLength` is `usage.output < desiredMaxOutput`, and
@@ -457,8 +515,31 @@ async function runLoop(
 		const followUpMessages = (await config.getFollowUpMessages?.()) || [];
 		if (followUpMessages.length > 0) {
 			// Set as pending so inner loop processes them
+			pendingTransition = { reason: "follow_up", count: followUpMessages.length };
 			pendingMessages = followUpMessages;
 			continue;
+		}
+
+		// The agent says it is done. Ask again while most of the budget is unspent
+		// -- see `budgetNotice` for what stopping early costs on this benchmark.
+		const budgetMs = config.timeBudgetMs;
+		const share = config.stopBudgetShare;
+		if (budgetMs !== undefined && budgetMs > 0 && share !== undefined && config.deadline !== undefined) {
+			const elapsed = budgetMs - (config.deadline - Date.now());
+			const used = elapsed / budgetMs;
+			const cap = config.maxCompletionNotices ?? DEFAULT_MAX_COMPLETION_NOTICES;
+			if (used >= 0 && used < share && state.completionNotices < cap) {
+				state = { ...state, completionNotices: state.completionNotices + 1 };
+				pendingTransition = { reason: "budget_notice", attempt: state.completionNotices, shareUsed: used };
+				pendingMessages = [
+					{
+						role: "user",
+						content: [{ type: "text", text: budgetNotice(elapsed, budgetMs, state.turnCount) }],
+						timestamp: Date.now(),
+					},
+				];
+				continue;
+			}
 		}
 
 		// No more messages, exit

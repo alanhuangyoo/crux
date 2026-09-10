@@ -122,6 +122,9 @@ export interface AgentOptions {
 	toolExecution?: ToolExecutionMode;
 	/** Absolute epoch ms after which the loop stops on its own. */
 	deadline?: number;
+	timeBudgetMs?: number;
+	stopBudgetShare?: number;
+	maxCompletionNotices?: number;
 	/** Retry a turn that spent its whole ceiling; see AgentLoopConfig. */
 	escalateOnSpentCeiling?: boolean;
 	/**
@@ -193,6 +196,10 @@ export class Agent {
 	 * which is right for an interactive session.
 	 */
 	public deadline?: number;
+	/** See `AgentLoopConfig.timeBudgetMs` and `stopBudgetShare`. */
+	public timeBudgetMs?: number;
+	public stopBudgetShare?: number;
+	public maxCompletionNotices?: number;
 
 	/** Retry a turn that spent its whole ceiling; see AgentLoopConfig. */
 	public escalateOnSpentCeiling?: boolean;
@@ -260,6 +267,9 @@ export class Agent {
 		this.maxRetryDelayMs = runtimeOptions.maxRetryDelayMs;
 		this.toolExecution = runtimeOptions.toolExecution ?? "parallel";
 		this.deadline = options.deadline;
+		this.timeBudgetMs = options.timeBudgetMs;
+		this.stopBudgetShare = options.stopBudgetShare;
+		this.maxCompletionNotices = options.maxCompletionNotices;
 		this.escalateOnSpentCeiling = options.escalateOnSpentCeiling;
 		this.maxTokens = options.maxTokens;
 	}
@@ -498,6 +508,9 @@ export class Agent {
 					: undefined,
 			convertToLlm: this.convertToLlm,
 			deadline: this.deadline,
+			timeBudgetMs: this.timeBudgetMs,
+			stopBudgetShare: this.stopBudgetShare,
+			maxCompletionNotices: this.maxCompletionNotices,
 			escalateOnSpentCeiling: this.escalateOnSpentCeiling,
 			maxTokens: this.maxTokens,
 			transformContext: this.transformContext,

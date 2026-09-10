@@ -227,6 +227,27 @@ export function deadlineFromEnv(): number | undefined {
 	return Date.now() + seconds * 1000;
 }
 
+/** The same budget as a duration, so the loop can say what fraction is left. */
+export function timeBudgetMsFromEnv(): number | undefined {
+	const raw = process.env.PI_TIME_BUDGET_SEC;
+	if (!raw) return undefined;
+	const seconds = Number(raw);
+	if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
+	return seconds * 1000;
+}
+
+/**
+ * Share of the budget below which a stop is questioned, from
+ * `PI_STOP_BUDGET_SHARE`. Unset leaves pi taking the agent at its word.
+ */
+export function stopBudgetShareFromEnv(): number | undefined {
+	const raw = process.env.PI_STOP_BUDGET_SHARE;
+	if (!raw) return undefined;
+	const share = Number(raw);
+	if (!Number.isFinite(share) || share <= 0 || share > 1) return undefined;
+	return share;
+}
+
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
@@ -368,6 +389,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			tools: [],
 		},
 		deadline: deadlineFromEnv(),
+		timeBudgetMs: timeBudgetMsFromEnv(),
+		stopBudgetShare: stopBudgetShareFromEnv(),
 		maxTokens: maxOutputTokensFromEnv(),
 		escalateOnSpentCeiling: escalateOnSpentCeilingFromEnv(),
 		convertToLlm: convertToLlmWithBlockImages,

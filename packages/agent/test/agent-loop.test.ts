@@ -1717,6 +1717,100 @@ describe("a turn cut off at the output token limit", () => {
 	});
 });
 
+describe("stopping early, with the budget still on the table", () => {
+	// The loop takes "no tool calls" as done. Measured on Terminal-Bench 2.1
+	// over one 27B deployment, by the share of its own budget a trial had spent
+	// when it stopped: pi's failures had spent a median of 24% and 47 of 73
+	// stopped under half, against Claude Code's 95% and Terminus's 82%. The
+	// agents that score do not stop when they are done, they stop when the time
+	// is gone. Terminus already asks "are you sure" at this moment and its
+	// trajectories show a generic question earning a generic yes -- so what is
+	// added here is the number the agent cannot see.
+
+	function harness(replies: AssistantMessage[]) {
+		let call = 0;
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			const message = replies[Math.min(call, replies.length - 1)]!;
+			call++;
+			queueMicrotask(() => stream.push({ type: "done", reason: "stop", message }));
+			return stream;
+		};
+		return { streamFn, calls: () => call };
+	}
+
+	async function drain(stream: ReturnType<typeof agentLoop>) {
+		const events: AgentEvent[] = [];
+		for await (const event of stream) events.push(event);
+		return events;
+	}
+
+	function run(config: Partial<AgentLoopConfig>, replies: AssistantMessage[]) {
+		const h = harness(replies);
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [] };
+		const full: AgentLoopConfig = { model: createModel(), convertToLlm: identityConverter, ...config };
+		return { h, stream: agentLoop([createUserMessage("go")], context, full, undefined, h.streamFn) };
+	}
+
+	const budget = 60 * 60_000;
+	/** A run one tenth in: exactly the moment the measurement is about. */
+	const early = { timeBudgetMs: budget, deadline: Date.now() + budget * 0.9, stopBudgetShare: 0.8 };
+
+	it("asks again when the agent stops with most of the budget unspent", async () => {
+		const { h, stream } = run({ ...early, maxCompletionNotices: 1 }, [
+			createAssistantMessage([{ type: "text", text: "done" }]),
+		]);
+		const events = await drain(stream);
+		expect(h.calls()).toBe(2);
+		expect(JSON.stringify(events)).toContain("% of your budget");
+	});
+
+	it("tells the agent how much of the run it has spent", async () => {
+		const { stream } = run({ ...early, maxCompletionNotices: 1 }, [
+			createAssistantMessage([{ type: "text", text: "done" }]),
+		]);
+		const text = JSON.stringify(await drain(stream));
+		expect(text).toContain("10% of your budget");
+		expect(text).toContain("54m is left");
+	});
+
+	it("says nothing once most of the budget is gone", async () => {
+		// Past the threshold the question has no answer worth the turn it costs.
+		const { h, stream } = run({ timeBudgetMs: budget, deadline: Date.now() + budget * 0.05, stopBudgetShare: 0.8 }, [
+			createAssistantMessage([{ type: "text", text: "done" }]),
+		]);
+		const events = await drain(stream);
+		expect(h.calls()).toBe(1);
+		expect(JSON.stringify(events)).not.toContain("% of your budget");
+	});
+
+	it("stops asking at the cap, so the question cannot become the run", async () => {
+		const { h, stream } = run({ ...early, maxCompletionNotices: 3 }, [
+			createAssistantMessage([{ type: "text", text: "done" }]),
+		]);
+		await drain(stream);
+		expect(h.calls()).toBe(4);
+	});
+
+	it("is inert without a share, which is every interactive session", async () => {
+		const { h, stream } = run({ timeBudgetMs: budget, deadline: Date.now() + budget }, [
+			createAssistantMessage([{ type: "text", text: "done" }]),
+		]);
+		const events = await drain(stream);
+		expect(h.calls()).toBe(1);
+		expect(JSON.stringify(events)).not.toContain("% of your budget");
+	});
+
+	it("labels the turn it continues past, which is how a trajectory shows it", async () => {
+		const { stream } = run({ ...early, maxCompletionNotices: 1 }, [
+			createAssistantMessage([{ type: "text", text: "done" }]),
+		]);
+		const events = await drain(stream);
+		const reasons = events.filter((e) => e.type === "turn_end").map((e: any) => e.transition?.reason);
+		expect(reasons).toContain("budget_notice");
+	});
+});
+
 describe("a deadline the loop can see", () => {
 	// The loop has had no notion of time. A benchmark harness enforces one from
 	// outside -- harbor kills the trial at its budget -- so the run ends
