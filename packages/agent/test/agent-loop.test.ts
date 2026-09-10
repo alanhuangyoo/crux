@@ -1784,12 +1784,17 @@ describe("stopping early, with the budget still on the table", () => {
 		expect(JSON.stringify(events)).not.toContain("% of your budget");
 	});
 
-	it("stops asking at the cap, so the question cannot become the run", async () => {
-		const { h, stream } = run({ ...early, maxCompletionNotices: 3 }, [
+	it("asks once when the round it buys runs no tool call", async () => {
+		// The agent that answers a notice with another bare "done" has nothing
+		// left to do; a second notice buys the same nothing out of the same
+		// budget. Measured on a smoke run, a fixed cap was the binding
+		// constraint instead -- eight notices moved a trial from 3% of its
+		// budget to 10% and then stopped, nowhere near the share.
+		const { h, stream } = run({ ...early, maxCompletionNotices: 40 }, [
 			createAssistantMessage([{ type: "text", text: "done" }]),
 		]);
 		await drain(stream);
-		expect(h.calls()).toBe(4);
+		expect(h.calls()).toBe(2);
 	});
 
 	it("is inert without a share, which is every interactive session", async () => {

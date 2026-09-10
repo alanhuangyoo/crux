@@ -57,11 +57,18 @@ function deadlineNotice(remainingMs: number): string {
 }
 
 /**
- * Cap on completion notices, for the case where stopping costs no time -- the
- * share alone terminates only if each round it buys is spent on something.
- * There is no default share: unset means the loop takes the agent at its word.
+ * Cap on completion notices, for the case where stopping costs no time.
+ *
+ * Terminus's version is self-limiting because each round it buys is spent, so
+ * the share climbs and the question stops being asked. pi's turns are cheap
+ * enough that this does not hold: a smoke run took eight notices to move from
+ * 3% of its budget to 10%, hitting the cap long before the share. So the cap
+ * is loose and the real stop is productivity -- a notice that buys a round with
+ * no tool call in it has found an agent with nothing left to do, and asking
+ * again only spends turns. There is no default share: unset means the loop
+ * takes the agent at its word, which is every interactive session.
  */
-const DEFAULT_MAX_COMPLETION_NOTICES = 8;
+const DEFAULT_MAX_COMPLETION_NOTICES = 40;
 
 function humanDuration(ms: number): string {
 	const total = Math.max(0, Math.round(ms / 1000));
@@ -178,6 +185,10 @@ interface LoopState {
 	readonly turnCount: number;
 	/** Completion notices sent, bounded by `maxCompletionNotices`. */
 	readonly completionNotices: number;
+	/** Tool calls the loop has run, to tell a bought round from a spent one. */
+	readonly toolCallsMade: number;
+	/** `toolCallsMade` when the last completion notice was sent. */
+	readonly toolCallsAtLastNotice: number;
 }
 
 const INITIAL_LOOP_STATE: LoopState = {
@@ -186,6 +197,8 @@ const INITIAL_LOOP_STATE: LoopState = {
 	deadlineWarned: false,
 	turnCount: 0,
 	completionNotices: 0,
+	toolCallsMade: 0,
+	toolCallsAtLastNotice: -1,
 };
 
 /**
@@ -475,7 +488,7 @@ async function runLoop(
 			if (!transition && toolCalls.length > 0 && hasMoreToolCalls) {
 				transition = { reason: "tool_calls", count: toolCalls.length };
 			}
-			state = { ...state, turnCount: state.turnCount + 1 };
+			state = { ...state, turnCount: state.turnCount + 1, toolCallsMade: state.toolCallsMade + toolCalls.length };
 			await emit({ type: "turn_end", message, toolResults, transition });
 
 			lastCompletedTurn = {
@@ -528,8 +541,16 @@ async function runLoop(
 			const elapsed = budgetMs - (config.deadline - Date.now());
 			const used = elapsed / budgetMs;
 			const cap = config.maxCompletionNotices ?? DEFAULT_MAX_COMPLETION_NOTICES;
-			if (used >= 0 && used < share && state.completionNotices < cap) {
-				state = { ...state, completionNotices: state.completionNotices + 1 };
+			// A notice whose round ran no tool call bought nothing; a second one
+			// buys nothing either, and the turns come out of the same budget.
+			const lastNoticeWasSpent =
+				state.toolCallsAtLastNotice < 0 || state.toolCallsMade > state.toolCallsAtLastNotice;
+			if (used >= 0 && used < share && state.completionNotices < cap && lastNoticeWasSpent) {
+				state = {
+					...state,
+					completionNotices: state.completionNotices + 1,
+					toolCallsAtLastNotice: state.toolCallsMade,
+				};
 				pendingTransition = { reason: "budget_notice", attempt: state.completionNotices, shareUsed: used };
 				pendingMessages = [
 					{
