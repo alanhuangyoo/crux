@@ -1916,6 +1916,84 @@ describe("a deadline the loop can see", () => {
 	});
 });
 
+describe("the escalated ceiling has to fit the context", () => {
+	// Claude Code escalates 8K into 64K against a 200K window, so the ceiling
+	// and the context never interact. On a 32K model they do, and the
+	// escalation turns a truncated turn into a rejected request:
+	//
+	//   400: You requested a total of 32918 tokens: 16534 from the input
+	//        messages and 16384 for the completion
+	//
+	// which is strictly worse than the truncation it was recovering from -- the
+	// turn produces nothing at all rather than something cut short. Nine of
+	// these came back from one arm before the ceiling was taught about the
+	// window.
+
+	function harness(replies: AssistantMessage[]) {
+		let call = 0;
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			const message = replies[Math.min(call, replies.length - 1)]!;
+			call++;
+			queueMicrotask(() => stream.push({ type: "done", reason: "stop", message }));
+			return stream;
+		};
+		return { streamFn, calls: () => call, lastMax: () => undefined };
+	}
+
+	function truncatedAt(output: number, input: number) {
+		const m = createAssistantMessage([{ type: "thinking", thinking: "x" }], "length");
+		m.usage.output = output;
+		m.usage.input = input;
+		return m;
+	}
+
+	async function run(model: ReturnType<typeof createModel>, message: AssistantMessage) {
+		const h = harness([message]);
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [] };
+		const config: AgentLoopConfig = {
+			model,
+			convertToLlm: identityConverter,
+			maxTokens: 8192,
+			escalateOnSpentCeiling: true,
+		};
+		const events: AgentEvent[] = [];
+		for await (const e of agentLoop([createUserMessage("go")], context, config, undefined, h.streamFn))
+			events.push(e);
+		return events.filter((e) => e.type === "turn_end").map((e: any) => e.transition);
+	}
+
+	function escalation(transitions: any[]) {
+		return transitions.find((t) => t?.reason === "output_limit_escalate");
+	}
+
+	it("escalates to the model ceiling when the window has room", async () => {
+		const model = { ...createModel(), maxTokens: 16384, contextWindow: 200_000 };
+		const t = await run(model, truncatedAt(8192, 16534));
+		expect(escalation(t)?.maxTokens).toBe(16384);
+	});
+
+	it("escalates only as far as the window allows", async () => {
+		const model = { ...createModel(), maxTokens: 16384, contextWindow: 32768 };
+		const input = 16534;
+		const t = await run(model, truncatedAt(8192, input));
+		const raised = escalation(t)?.maxTokens;
+		expect(raised).toBeLessThan(16384);
+		expect(raised).toBeGreaterThan(8192);
+		// The whole point: the request it produces is one the server accepts.
+		expect(input + raised).toBeLessThanOrEqual(model.contextWindow);
+	});
+
+	it("does not escalate when the window leaves no more room than it already has", async () => {
+		// 32768 - 25000 - 512 leaves 7256, under the 8192 already configured.
+		const model = { ...createModel(), maxTokens: 16384, contextWindow: 32768 };
+		const t = await run(model, truncatedAt(8192, 25000));
+		expect(escalation(t)).toBeUndefined();
+		// And it still speaks rather than ending the run silently.
+		expect(t.map((x: any) => x?.reason)).toContain("output_limit_recovery");
+	});
+});
+
 describe("the escalation is off unless asked for, the recovery is not", () => {
 	// Raising the ceiling is still behind the setting: it changes what the model
 	// is asked for, and pi has a characterization test pinning the old

@@ -145,6 +145,13 @@ function budgetNotice(elapsedMs: number, budgetMs: number, steps: number, cutOff
  * characters, entirely thinking, `stopReason: "length"`, and was recorded as
  * settled having taken no action at all.
  */
+/**
+ * Slack left between the escalated ceiling and the context window. The input
+ * count is the previous turn's, and the recovery notice this run is about to
+ * add is not in it.
+ */
+const CONTEXT_SAFETY_MARGIN_TOKENS = 512;
+
 export const MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3;
 
 /** What the model is told once the raised ceiling has also been used up. */
@@ -168,11 +175,28 @@ const OUTPUT_LIMIT_RECOVERY_NOTICE =
  * produce a provider error. Escalation therefore happens at most once, and a
  * config already at the ceiling goes straight to the recovery phase.
  */
-function escalatedMaxTokens(config: AgentLoopConfig): number | undefined {
+function escalatedMaxTokens(config: AgentLoopConfig, inputTokens?: number): number | undefined {
 	const ceiling = config.model.maxTokens;
 	if (!ceiling || ceiling <= 0) return undefined;
 	const current = config.maxTokens;
 	if (current !== undefined && current >= ceiling) return undefined;
+	// The ceiling has to fit next to what is already in the context, not just
+	// be a number the model accepts on its own. Claude Code escalates 8K into
+	// 64K against a 200K window, so the two never interact; on a 32K model they
+	// do, and the escalation turns a truncated turn into a rejected request:
+	//
+	//   400: You requested a total of 32918 tokens: 16534 from the input
+	//        messages and 16384 for the completion
+	//
+	// which is strictly worse than the truncation it was meant to recover --
+	// the turn produces nothing at all rather than something cut short. Room
+	// below the current setting is not room; escalating into it is pointless.
+	const window = config.model.contextWindow;
+	if (window && window > 0 && inputTokens !== undefined && inputTokens > 0) {
+		const room = window - inputTokens - CONTEXT_SAFETY_MARGIN_TOKENS;
+		if (room <= (current ?? 0)) return undefined;
+		return Math.min(ceiling, room);
+	}
 	return ceiling;
 }
 
@@ -471,7 +495,8 @@ async function runLoop(
 				// half does not, per the comment above.
 				const spentTheCeiling =
 					config.escalateOnSpentCeiling === true && (message.usage?.output ?? 0) >= (config.maxTokens ?? 0);
-				const ceiling = state.escalated || !spentTheCeiling ? undefined : escalatedMaxTokens(config);
+				const ceiling =
+					state.escalated || !spentTheCeiling ? undefined : escalatedMaxTokens(config, message.usage?.input);
 				if (ceiling !== undefined) {
 					state = { ...state, escalated: true };
 					retrySilently = true;
