@@ -1,0 +1,68 @@
+#!/bin/bash
+# Check an arm's configuration before it costs hours, not after.
+#
+# Five arms were thrown away in one session, none of them for a reason the
+# launch command could show: tool calls arriving as text because the server had
+# no parser, a forgotten `pi_env`, an escalated ceiling that overflowed a 32K
+# context, containers removed out from under a running arm, and an attempt count
+# that made the run too slow to be worth finishing. On this hardware the GPUs sit
+# at 100% and a turn takes eight seconds, so a wasted arm is two to three hours
+# that no amount of concurrency buys back.
+#
+# Usage: preflight.sh   (run it before every launch)
+set -uo pipefail
+fail=0
+say() { printf '  %-44s %s\n' "$1" "$2"; }
+
+echo "== endpoint =="
+BASE=$(grep -oP '(?<=^OPENAI_BASE_URL=).*' /scratch/crux/.env 2>/dev/null)
+MODEL=$(grep -oP '(?<=--model openai/)[^ ]*' /tmp/confirm.sh 2>/dev/null | head -1)
+code=$(curl -s -o /tmp/pf-models.json -w '%{http_code}' -m 15 "$BASE/models")
+[ "$code" = "200" ] && say "reachable at $BASE" "ok" || { say "reachable at $BASE" "FAIL ($code)"; fail=1; }
+
+win=$(python3 -c "
+import json
+try: j=json.load(open('/tmp/pf-models.json'))
+except Exception: raise SystemExit
+for e in j.get('data') or []:
+    if e.get('id')=='$MODEL': print(e.get('max_model_len') or '')
+" 2>/dev/null)
+[ -n "$win" ] && say "context window ($MODEL)" "$win" || { say "context window ($MODEL)" "UNKNOWN - model name mismatch?"; fail=1; }
+
+# The failure that cost the most: the model emits tool calls, the server does
+# not parse them, and pi sees text. Nine trials took zero actions.
+tc=$(curl -s -m 90 "$BASE/chat/completions" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$MODEL\",\"max_tokens\":200,\"messages\":[{\"role\":\"user\",\"content\":\"List files in /app. Use the bash tool.\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"bash\",\"parameters\":{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},\"required\":[\"command\"]}}}]}" \
+  | python3 -c "import sys,json;j=json.load(sys.stdin);print(len((j['choices'][0]['message'].get('tool_calls') or [])))" 2>/dev/null)
+[ "${tc:-0}" -ge 1 ] && say "server returns native tool_calls" "ok" || { say "server returns native tool_calls" "FAIL - needs --tool-call-parser"; fail=1; }
+
+echo "== completion budget vs window =="
+mx=$(grep -oP '(?<=PI_MAX_OUTPUT_TOKENS=)[0-9]+' /tmp/confirm.sh 2>/dev/null | head -1)
+if [ -n "$win" ] && [ -n "$mx" ]; then
+  [ "$mx" -le $((win / 2)) ] && say "PI_MAX_OUTPUT_TOKENS=$mx vs window $win" "ok" \
+    || { say "PI_MAX_OUTPUT_TOKENS=$mx vs window $win" "FAIL - leaves under half for input"; fail=1; }
+else
+  say "PI_MAX_OUTPUT_TOKENS set" "FAIL - unset, pi will ask for its default"; fail=1
+fi
+
+echo "== arm settings =="
+for k in PI_TIME_BUDGET_SEC PI_STOP_BUDGET_SHARE; do
+  grep -q "$k=" /tmp/confirm.sh && say "$k" "ok" || { say "$k" "MISSING"; fail=1; }
+done
+
+echo "== box =="
+n=$(docker ps -q | wc -l)
+[ "$n" -le 4 ] && say "containers already running" "$n" \
+  || { say "containers already running" "$n - another arm is live, or orphans"; fail=1; }
+# Orphans from a killed arm keep competing for a GPU that is already at 100%.
+# Identify them by creation time against the live run's start, never by "not in
+# the list of live trials" -- that races with harbor creating the next trial,
+# and removing containers out from under a running arm is what voided one of the
+# five. A snapshot taken a second before a removal loop is not evidence.
+say "how to clear orphans" "docker rm -f containers created before the run started"
+u=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader | head -1 | tr -dc 0-9)
+say "gpu utilisation" "${u}% (100% means throughput is the floor, not concurrency)"
+
+echo
+[ "$fail" = 0 ] && echo "PREFLIGHT OK" || echo "PREFLIGHT FAILED - fix the above before spending hours"
+exit "$fail"
