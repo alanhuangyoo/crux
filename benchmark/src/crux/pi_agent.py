@@ -524,6 +524,14 @@ class CruxPiAgent(Pi):
                     model.setdefault("maxTokens", min(16384, window // 2))
                 compat = model.setdefault("compat", {})
                 compat.setdefault("supportsDeveloperRole", False)
+                # This server does not need the model's own reasoning sent back
+                # to it -- the answer and the tool calls are the conversation.
+                # Measured over one 88-task run, reasoning was 39.7% of every
+                # character living in the replayed conversation, and 89% of it
+                # on `regex-chess`. The trials that failed sat at a median
+                # maximum context of 31,948 against a 32,768 window; the ones
+                # that solved sat at 20,787.
+                compat.setdefault("replaysReasoning", False)
                 if self._no_thinking:
                     # `reasoning_effort` biases this model, it does not cap it.
                     # Measured on the five tasks where reasoning is what loses

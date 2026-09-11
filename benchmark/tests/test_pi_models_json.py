@@ -25,6 +25,7 @@ def declare_reasoning(models_json):
             model["reasoning"] = True
             compat = model.setdefault("compat", {})
             compat.setdefault("supportsDeveloperRole", False)
+            compat.setdefault("replaysReasoning", False)
     return models_json
 
 
@@ -187,3 +188,11 @@ def test_an_unreadable_endpoint_changes_nothing():
     model = apply_window(harbor_shape(), None)["providers"]["harbor-endpoint"]["models"][0]
     assert "contextWindow" not in model
     assert model["reasoning"] is True
+
+
+def test_reasoning_is_not_replayed():
+    """Reasoning was 39.7% of every character in the replayed conversation across
+    one 88-task run, and 89% of it on `regex-chess`. The server does not need it:
+    the answer and the tool calls are the conversation."""
+    compat = declare_reasoning(harbor_shape())["providers"]["harbor-endpoint"]["models"][0]["compat"]
+    assert compat["replaysReasoning"] is False

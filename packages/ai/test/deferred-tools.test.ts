@@ -367,6 +367,7 @@ describe("deferred tools", () => {
 			supportsReasoningEffort: false,
 			supportsUsageInStreaming: true,
 			supportsFinishReason: true,
+			replaysReasoning: true,
 			maxTokensField: "max_tokens",
 			requiresToolResultName: false,
 			requiresAssistantAfterToolResult: false,

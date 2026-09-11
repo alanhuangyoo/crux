@@ -1307,7 +1307,9 @@ export function convertMessages(
 					}
 
 					// reasoning_details is the structured alternative to a raw reasoning field.
-					if (!preservedReasoningDetails) {
+					// Both are skipped when the server has no use for replayed reasoning:
+					// see `replaysReasoning`.
+					if (!preservedReasoningDetails && compat.replaysReasoning !== false) {
 						// Use the signature from the first thinking block if available (for llama.cpp server + gpt-oss)
 						let signature = nonEmptyThinkingBlocks[0].thinkingSignature;
 						if (model.provider === "opencode-go" && signature === "reasoning") {
@@ -1636,6 +1638,8 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 			!isGrok && !isZai && !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia && !isAntLing,
 		supportsUsageInStreaming: true,
 		supportsFinishReason: true,
+		// Replaying reasoning is the historical behaviour; see `replaysReasoning`.
+		replaysReasoning: true,
 		maxTokensField: useMaxTokens ? "max_tokens" : "max_completion_tokens",
 		requiresToolResultName: false,
 		requiresAssistantAfterToolResult: false,
@@ -1694,6 +1698,7 @@ function getCompat(model: Model<"openai-completions">): ResolvedOpenAICompletion
 		requiresAssistantAfterToolResult:
 			model.compat.requiresAssistantAfterToolResult ?? detected.requiresAssistantAfterToolResult,
 		requiresThinkingAsText: model.compat.requiresThinkingAsText ?? detected.requiresThinkingAsText,
+		replaysReasoning: model.compat.replaysReasoning ?? true,
 		requiresReasoningContentOnAssistantMessages:
 			model.compat.requiresReasoningContentOnAssistantMessages ??
 			detected.requiresReasoningContentOnAssistantMessages,

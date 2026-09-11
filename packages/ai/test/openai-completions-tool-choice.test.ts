@@ -1321,6 +1321,7 @@ describe("openai-completions tool_choice", () => {
 			},
 			{
 				...model.compat,
+				replaysReasoning: true,
 				supportsStore: false,
 				supportsDeveloperRole: false,
 				supportsReasoningEffort: true,

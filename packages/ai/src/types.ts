@@ -586,6 +586,23 @@ export interface OpenAICompletionsCompat {
 	requiresThinkingAsText?: boolean;
 	/** Whether all replayed assistant messages must include an empty reasoning_content field when reasoning is enabled. Default: auto-detected from URL. */
 	requiresReasoningContentOnAssistantMessages?: boolean;
+	/**
+	 * Whether a replayed assistant message carries the reasoning it produced.
+	 *
+	 * Reasoning is not conversation state for most servers -- the model produced
+	 * it, the answer and any tool calls are what the next turn needs, and sending
+	 * the reasoning back only spends context. On a large window that is merely
+	 * wasteful; on a small one it is the whole problem. Measured over one 88-task
+	 * run, reasoning was 39.7% of everything living in the replayed conversation
+	 * (12.2M characters against 18.6M for assistant text, tool arguments and tool
+	 * results combined), and on `regex-chess` it was 89% -- 507,799 characters of
+	 * reasoning against 61,746 of everything else.
+	 *
+	 * Default true, which is the existing behaviour. Providers that validate a
+	 * reasoning signature across turns need it; a plain OpenAI-compatible server
+	 * does not.
+	 */
+	replaysReasoning?: boolean;
 	/** Format for reasoning/thinking parameter. "openai" uses reasoning_effort, "openrouter" uses reasoning: { effort }, "deepseek" uses thinking: { type } plus reasoning_effort when supported, "together" uses reasoning: { enabled } plus reasoning_effort when supported, "baseten" uses configurable chat_template_args plus reasoning_effort when supported, "zai" uses thinking: { type }, "qwen" uses top-level enable_thinking: boolean, "qwen-chat-template" uses chat_template_kwargs.enable_thinking and preserve_thinking, "chat-template" uses configurable chat_template_kwargs, "string-thinking" uses top-level thinking: string, and "ant-ling" uses reasoning: { effort } only when the mapped effort is non-null. Default: "openai". */
 	thinkingFormat?:
 		| "openai"
