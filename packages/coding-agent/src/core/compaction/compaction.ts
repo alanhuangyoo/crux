@@ -163,7 +163,16 @@ export function fitCompactionToWindow(
 	if (!contextWindow || contextWindow <= 0) return settings;
 	const reserveTokens = Math.min(settings.reserveTokens, Math.floor(contextWindow / 2));
 	const threshold = contextWindow - reserveTokens;
-	const keepCeiling = Math.max(1024, Math.floor(threshold / 2));
+	// A quarter, not a half. `findCutPoint` walks back through *message* text,
+	// while the threshold that triggered it counts the whole prompt -- system
+	// prompt and tool schemas included, which are not messages. On a small
+	// window the messages estimate well below the trigger, so a keep budget of
+	// half the threshold is larger than everything there is to keep and the cut
+	// removes nothing. Measured over 1,109 compactions in one full run: median
+	// reduction 1,836 tokens, and 210 of them left the context the same size or
+	// larger, because the summary being written back cost more than the cut
+	// saved.
+	const keepCeiling = Math.max(1024, Math.floor(threshold / 4));
 	if (settings.keepRecentTokens <= keepCeiling && reserveTokens === settings.reserveTokens) {
 		return settings;
 	}

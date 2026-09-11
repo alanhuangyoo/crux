@@ -617,7 +617,7 @@ describe("compaction settings on a window they were not written for", () => {
 		// second attempt put it at three quarters and truncation went back to
 		// baseline with trials showing forty truncations and zero compactions.
 		expect(fitted.reserveTokens).toBe(DEFAULT_COMPACTION_SETTINGS.reserveTokens);
-		expect(fitted.keepRecentTokens).toBe(8192);
+		expect(fitted.keepRecentTokens).toBe(4096);
 	});
 
 	it("lands a cut below the line that triggered it", () => {
