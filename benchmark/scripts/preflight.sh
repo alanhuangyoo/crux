@@ -50,6 +50,31 @@ for k in PI_TIME_BUDGET_SEC PI_STOP_BUDGET_SHARE; do
   grep -q "$k=" /tmp/confirm.sh && say "$k" "ok" || { say "$k" "MISSING"; fail=1; }
 done
 
+echo "== the code that will actually run =="
+# The check this was missing, and it cost a whole arm. A `rsync src/ ...` issued
+# from the wrong directory merged pi's TypeScript over the harness package
+# without --delete: the crux package still imported, every trial still ran and
+# scored, and the change under test was simply not there. The arm came back
+# 16.7 points below its own control and looked like a regression.
+SRC=/scratch/crux-next-src
+if [ -d "$SRC/crux" ] && [ ! -d "$SRC/core" ]; then
+  say "harness source tree" "clean ($(ls "$SRC" | tr '\n' ' '))"
+else
+  say "harness source tree" "POLLUTED - $(ls "$SRC" 2>/dev/null | head -4 | tr '\n' ' ')"; fail=1
+fi
+# Compare what is on the box against what is committed in the checkout. This
+# script runs on the box, which cannot see the checkout, so the expected sum is
+# passed in -- `EXPECTED_HARNESS_SUM=$(benchmark/scripts/harness-sum.sh)`.
+# Without it the check says so rather than quietly passing.
+REMOTE_SUM=$(cd "$SRC" && find . -name '*.py' -not -path '*__pycache__*' | LC_ALL=C sort | xargs cat 2>/dev/null | md5sum | cut -d' ' -f1)
+if [ -z "${EXPECTED_HARNESS_SUM:-}" ]; then
+  say "harness matches the checkout" "UNCHECKED (pass EXPECTED_HARNESS_SUM)"
+elif [ "$EXPECTED_HARNESS_SUM" = "$REMOTE_SUM" ]; then
+  say "harness matches the checkout" "ok"
+else
+  say "harness matches the checkout" "STALE - rsync benchmark/src/ before launching"; fail=1
+fi
+
 echo "== box =="
 n=$(docker ps -q | wc -l)
 [ "$n" -le 4 ] && say "containers already running" "$n" \
