@@ -24,29 +24,38 @@ describe("a summarization request that fits", () => {
 	});
 
 	it("never asks for more than the window holds, at any history size", () => {
+		// 2.66 characters per token is the densest this deployment's tokenizer was
+		// measured at; the request has to fit even there, not just on average.
 		for (const promptTokens of [1000, 8000, 16409, 24000, 30534, 32000, 40000, 120000]) {
-			const prompt = "x".repeat(4 * promptTokens);
+			const prompt = "x".repeat(Math.round(2.66 * promptTokens));
 			const fitted = fitSummarizationRequest(prompt, WINDOW, 16384);
-			expect(Math.ceil(fitted.promptText.length / 4) + fitted.maxTokens).toBeLessThanOrEqual(WINDOW);
-			expect(fitted.maxTokens).toBeGreaterThanOrEqual(512);
+			const worstCaseTokens = Math.ceil(fitted.promptText.length / 2.66);
+			expect(worstCaseTokens + fitted.maxTokens).toBeLessThanOrEqual(WINDOW);
+		}
+	});
+
+	it("leaves the summary room to think, since reasoning shares the same cap", () => {
+		for (const promptTokens of [24000, 30534, 40000, 120000]) {
+			const fitted = fitSummarizationRequest("x".repeat(Math.round(2.66 * promptTokens)), WINDOW, 16384);
+			expect(fitted.maxTokens).toBeGreaterThanOrEqual(Math.floor(WINDOW / 8));
 		}
 	});
 
 	it("spends the prompt, not the summary, once there is no room left", () => {
-		const fitted = fitSummarizationRequest("x".repeat(4 * 32000), WINDOW, 16384);
+		const fitted = fitSummarizationRequest("x".repeat(3 * 32000), WINDOW, 16384);
 		expect(fitted.promptText.length).toBeLessThan(4 * 32000);
 		expect(fitted.promptText).toContain("middle of the conversation omitted");
 	});
 
 	it("keeps both ends when it drops the middle", () => {
-		const prompt = `THE-TASK${"m".repeat(4 * 40000)}WHAT-JUST-HAPPENED`;
+		const prompt = `THE-TASK${"m".repeat(3 * 40000)}WHAT-JUST-HAPPENED`;
 		const fitted = fitSummarizationRequest(prompt, WINDOW, 16384);
 		expect(fitted.promptText.startsWith("THE-TASK")).toBe(true);
 		expect(fitted.promptText.endsWith("WHAT-JUST-HAPPENED")).toBe(true);
 	});
 
 	it("does not meddle when the window is large or unknown", () => {
-		const prompt = "x".repeat(4 * 30000);
+		const prompt = "x".repeat(3 * 30000);
 		expect(fitSummarizationRequest(prompt, 200000, 16384).maxTokens).toBe(16384);
 		expect(fitSummarizationRequest(prompt, 0, 16384).promptText).toBe(prompt);
 	});

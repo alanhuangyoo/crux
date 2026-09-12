@@ -729,6 +729,28 @@ export function summaryTokenBudget(model: Model<any>, reserveTokens: number, sha
 
 const SUMMARIZATION_MARGIN_TOKENS = 512;
 const MIN_SUMMARY_TOKENS = 512;
+
+/**
+ * Characters per token, for deciding whether a request fits.
+ *
+ * `estimateTokens` uses 4, which is the usual English prose figure and is wrong
+ * for what a coding agent accumulates. Measured against this deployment's own
+ * tokenizer on five trials' worth of real conversation, 20,000 characters each:
+ *
+ *     adaptive-rejection-sampler   3.39      build-cython-ext   3.68
+ *     bn-fit-modify                2.66      build-pmars        2.96
+ *     break-filter-js-from-html    3.99
+ *
+ * So a prompt believed to be 16,000 tokens can really be 24,000, which is how
+ * requests kept overflowing a window they had been fitted to. This figure is
+ * below the worst case on purpose: fitting too conservatively costs a shorter
+ * summary, and fitting too loosely costs the whole compaction.
+ */
+const CHARS_PER_TOKEN = 2.5;
+
+function estimatePromptTokens(text: string): number {
+	return Math.ceil(text.length / CHARS_PER_TOKEN);
+}
 /** A length-stopped summary shorter than this is a fragment, not a checkpoint. */
 const PARTIAL_SUMMARY_MIN_CHARS = 400;
 
@@ -761,14 +783,21 @@ export function fitSummarizationRequest(
 	const available = contextWindow - SUMMARIZATION_MARGIN_TOKENS;
 	if (available <= MIN_SUMMARY_TOKENS) return { promptText, maxTokens };
 
-	const promptTokens = Math.ceil(promptText.length / 4);
+	const promptTokens = estimatePromptTokens(promptText);
 	if (promptTokens + maxTokens <= available) return { promptText, maxTokens };
 
+	// The floor is not "enough to say something", it is enough to say something
+	// *after thinking*: reasoning and the answer share one max_tokens on this
+	// API, so a budget of a few hundred tokens is spent entirely on reasoning
+	// and returns an empty summary, which is a failure rather than a short one.
+	const floor = Math.min(maxTokens, Math.max(MIN_SUMMARY_TOKENS, Math.floor(contextWindow / 8)));
 	const roomLeft = available - promptTokens;
-	if (roomLeft >= MIN_SUMMARY_TOKENS) return { promptText, maxTokens: Math.min(maxTokens, roomLeft) };
+	if (roomLeft >= floor) return { promptText, maxTokens: Math.min(maxTokens, roomLeft) };
 
-	const summaryTokens = Math.min(maxTokens, Math.max(MIN_SUMMARY_TOKENS, Math.floor(available / 8)));
-	return { promptText: keepEnds(promptText, (available - summaryTokens) * 4), maxTokens: summaryTokens };
+	return {
+		promptText: keepEnds(promptText, Math.floor((available - floor) * CHARS_PER_TOKEN)),
+		maxTokens: floor,
+	};
 }
 
 /**
