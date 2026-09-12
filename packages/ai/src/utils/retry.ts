@@ -75,6 +75,15 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	"stream ended before a terminal response event",
 	"http2 request did not get a response",
 
+	// A stream that connected and then stopped sending. The SDK's own timeout
+	// covers getting a response, not keeping one, so this one hangs instead of
+	// ending: measured across one pair of 89-task benchmark arms, 25 trials were
+	// killed by the harness a median of 112 minutes after their last event, eight
+	// of them having received response headers and not one chunk after. The
+	// watchdog that now fails those needs its failure to be retryable, because
+	// nothing about the request was wrong.
+	"stream went idle",
+
 	// Provider-requested retry delay cap failures should flow through the outer
 	// retry policy so callers can surface/abort the backoff (#1123).
 	"retry delay",

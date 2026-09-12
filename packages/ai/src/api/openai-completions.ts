@@ -546,7 +546,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 				return block;
 			};
 
-			for await (const chunk of openaiStream) {
+			for await (const chunk of withIdleTimeout(openaiStream, options?.streamIdleTimeoutMs)) {
 				if (!chunk || typeof chunk !== "object") continue;
 
 				// OpenAI documents ChatCompletionChunk.id as the unique chat completion identifier,
@@ -1173,6 +1173,63 @@ function addCacheControlToTextContent(
 	}
 
 	return false;
+}
+
+/**
+ * How long a connected stream may say nothing before it is treated as dead.
+ *
+ * The SDK's `timeout` covers getting a response, not keeping one. A request that
+ * connects, returns headers, and then stops sending chunks waits forever --
+ * measured across one pair of 89-task arms, 25 trials ended in
+ * `AgentTimeoutError` with their agent event stream stopped a median of 112
+ * minutes before harbor killed them, and eight of those had `message_start` as
+ * their final event: headers received, not one chunk after.
+ * `install-windows-3.11` held its container for eight hours that way.
+ *
+ * Five minutes, because chunks arrive per token once generation starts and the
+ * only legitimately long gap is prefill -- a 30K prompt on an engine carrying
+ * sixteen concurrent streams, which is tens of seconds, not minutes.
+ */
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000;
+
+/**
+ * The same stream, but it fails if it goes quiet.
+ *
+ * Deliberately a generator around the iterator rather than an abort on the
+ * request: what is wanted is for the `for await` to throw, so the failure joins
+ * the path every other mid-stream failure already takes.
+ */
+export async function* withIdleTimeout<T>(source: AsyncIterable<T>, idleMs?: number): AsyncGenerator<T> {
+	const limit = idleMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
+	if (!Number.isFinite(limit) || limit <= 0) {
+		yield* source;
+		return;
+	}
+	const iterator = source[Symbol.asyncIterator]();
+	try {
+		while (true) {
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const idle = new Promise<never>((_resolve, reject) => {
+				timer = setTimeout(
+					() => reject(new Error(`stream went idle for ${Math.round(limit / 1000)}s with no data`)),
+					limit,
+				);
+			});
+			try {
+				const next = await Promise.race([iterator.next(), idle]);
+				if (next.done) return;
+				yield next.value;
+			} finally {
+				if (timer !== undefined) clearTimeout(timer);
+			}
+		}
+	} finally {
+		// Not awaited on purpose. A stalled iterator's `return()` does not settle
+		// either -- it is queued behind the same suspended `await` -- so waiting on
+		// it here reproduces the hang one level down, which is how the first version
+		// of this turned a 40ms timeout into a test that ran for a minute.
+		void Promise.resolve(iterator.return?.()).catch(() => {});
+	}
 }
 
 export function convertMessages(

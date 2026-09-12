@@ -215,6 +215,13 @@ export interface StreamOptions extends ProviderRequestOptions<Model<Api>> {
 	 */
 	websocketConnectTimeoutMs?: number;
 	/**
+	 * How long a connected stream may send nothing before it is failed, in
+	 * milliseconds. `timeoutMs` covers getting a response; this covers keeping
+	 * one, which is a different failure and the one that hangs for hours.
+	 * Default: 300000. Set to 0 to wait indefinitely.
+	 */
+	streamIdleTimeoutMs?: number;
+	/**
 	 * Optional metadata to include in API requests.
 	 * Providers extract the fields they understand and ignore the rest.
 	 * For example, Anthropic uses `user_id` for abuse tracking and rate limiting.

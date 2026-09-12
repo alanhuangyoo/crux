@@ -22,8 +22,28 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const MAX_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000;
 
-function resolveTimeoutMs(timeout: number | undefined): number | undefined {
-	if (timeout === undefined) return undefined;
+/**
+ * What a command gets when it does not ask.
+ *
+ * There was no default, so a command that never returns takes the trial with
+ * it. Measured across one pair of 89-task arms, 25 trials ended in
+ * `AgentTimeoutError` and their agent event stream had stopped a median of 112
+ * minutes before harbor killed them -- 93% of the wall clock with nothing
+ * happening. Eight of those were a bash command that never came back:
+ * `grep -rl ... /` over the whole filesystem, a `vncsnapshot` against a VM that
+ * never booted, a node script reading a device. `install-windows-3.11` ran 48
+ * seconds of agent turns and then held its container for eight hours.
+ *
+ * Claude Code ships a two-minute default here. Ten is the number for this
+ * benchmark instead: its tasks build things, and killing a five-minute compile
+ * would take away trials that currently pass, while ten minutes still turns an
+ * eight-hour hang into one lost turn. A command that genuinely needs longer can
+ * ask for it, and the timeout message says so.
+ */
+export const DEFAULT_BASH_TIMEOUT_SECONDS = 600;
+
+export function resolveTimeoutMs(timeout: number | undefined): number {
+	if (timeout === undefined) return DEFAULT_BASH_TIMEOUT_SECONDS * 1000;
 	if (!Number.isFinite(timeout) || timeout <= 0) {
 		throw new Error("Invalid timeout: must be a finite number of seconds");
 	}
@@ -37,7 +57,11 @@ function resolveTimeoutMs(timeout: number | undefined): number | undefined {
 
 const bashSchema = Type.Object({
 	command: Type.String({ description: "Shell command to execute" }),
-	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
+	timeout: Type.Optional(
+		Type.Number({
+			description: `Timeout in seconds (default ${DEFAULT_BASH_TIMEOUT_SECONDS}; pass a larger value for a build or test run that needs it)`,
+		}),
+	),
 });
 
 export const bashToolSystemPromptContribution = {
@@ -104,6 +128,7 @@ export function createLocalShellOperations(shellName: string, resolveShellConfig
 				child.stdin?.end(command);
 			}
 			if (child.pid) trackDetachedChildPid(child.pid);
+			const timeoutSeconds = timeout ?? DEFAULT_BASH_TIMEOUT_SECONDS;
 			let timedOut = false;
 			let timeoutHandle: NodeJS.Timeout | undefined;
 			const onAbort = () => {
@@ -111,13 +136,10 @@ export function createLocalShellOperations(shellName: string, resolveShellConfig
 			};
 
 			try {
-				// Set timeout if provided.
-				if (timeoutMs !== undefined) {
-					timeoutHandle = setTimeout(() => {
-						timedOut = true;
-						if (child.pid) killProcessTree(child.pid);
-					}, timeoutMs);
-				}
+				timeoutHandle = setTimeout(() => {
+					timedOut = true;
+					if (child.pid) killProcessTree(child.pid);
+				}, timeoutMs);
 				// Stream stdout and stderr.
 				child.stdout?.on("data", onData);
 				child.stderr?.on("data", onData);
@@ -133,7 +155,7 @@ export function createLocalShellOperations(shellName: string, resolveShellConfig
 					throw new Error("aborted");
 				}
 				if (timedOut) {
-					throw new Error(`timeout:${timeout}`);
+					throw new Error(`timeout:${timeoutSeconds}`);
 				}
 				return { exitCode };
 			} finally {
@@ -354,7 +376,12 @@ export function createShellToolDefinition(
 					}
 					if (err instanceof Error && err.message.startsWith("timeout:")) {
 						const timeoutSecs = err.message.split(":")[1];
-						throw new Error(appendStatus(text, `Command timed out after ${timeoutSecs} seconds`));
+						throw new Error(
+							appendStatus(
+								text,
+								`Command timed out after ${timeoutSecs} seconds. Re-run it with a larger \`timeout\` if it genuinely needs longer, or narrow what it does.`,
+							),
+						);
 					}
 					throw err;
 				}
