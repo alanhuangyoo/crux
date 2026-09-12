@@ -476,13 +476,33 @@ export function findCutPoint(
 
 		// Check if we've exceeded the budget
 		if (accumulatedTokens >= keepRecentTokens) {
-			// Find the closest valid cut point at or after this entry
+			// The closest valid cut point at or after this entry -- and when there
+			// is none, the last one there is.
+			//
+			// A cut point is a user or assistant message, never a tool result, so
+			// when the budget is spent by trailing tool results alone there is
+			// nothing at or after `i` to cut at. Falling through left `cutIndex` at
+			// `cutPoints[0]`, which keeps the conversation from its beginning: the
+			// compaction runs, reports success, and removes nothing. That is not a
+			// rare shape -- one `read` of a large file is thousands of tokens
+			// against a keep budget of a quarter of the threshold, which on a 32K
+			// window is 4,096.
+			//
+			// It is not the big one, though: measured over both arms, 2% and 4% of
+			// the compactions that *succeeded* removed nothing, so the 67% figure
+			// for one arm belongs almost entirely to compactions that failed
+			// outright, not to this. Keeping the least is the intent here; keeping
+			// everything is the opposite of it, and two characterization tests were
+			// already red because of it.
+			let found = false;
 			for (let c = 0; c < cutPoints.length; c++) {
 				if (cutPoints[c] >= i) {
 					cutIndex = cutPoints[c];
+					found = true;
 					break;
 				}
 			}
+			if (!found) cutIndex = cutPoints[cutPoints.length - 1];
 			break;
 		}
 	}
