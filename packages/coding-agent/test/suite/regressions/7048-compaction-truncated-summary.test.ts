@@ -40,7 +40,13 @@ describe("#7048 truncated compaction summaries", () => {
 	it("does not persist a length-limited summary", async () => {
 		harness = await createHarness();
 		seedCompactableSession(harness);
-		harness.setResponses([fauxAssistantMessage("partial summar", { stopReason: "length" })]);
+		// A length stop now buys a retry on half the prompt, because on a small
+		// window it is the ordinary outcome rather than a sign of trouble. What
+		// #7048 is about survives that: a summary cut off mid-sentence must never
+		// become the checkpoint, so every attempt is scripted truncated here and
+		// the compaction still has to fail with nothing persisted.
+		const truncated = fauxAssistantMessage("partial summar", { stopReason: "length" });
+		harness.setResponses([truncated, truncated, truncated]);
 
 		await expect(harness.session.compact()).rejects.toThrow("generation hit the token cap");
 		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction")).toHaveLength(0);

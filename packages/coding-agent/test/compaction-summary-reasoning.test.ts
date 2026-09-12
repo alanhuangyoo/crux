@@ -172,8 +172,27 @@ describe("generateSummary reasoning options", () => {
 		);
 	});
 
-	it("rejects a length-limited history summary", async () => {
+	// A length stop used to be fatal, on the reasoning that partial text must not
+	// become a session checkpoint. On a 32K window it is the ordinary case --
+	// 2,242 of one arm's 3,018 compactions ended this way -- and each one threw
+	// away a summary already paid for and left the context untouched. A fragment
+	// this short is still refused, but it now buys a retry on half the prompt
+	// rather than ending the compaction.
+	it("retries a length-limited history summary instead of ending there", async () => {
 		completeSimpleMock.mockResolvedValueOnce({
+			...mockSummaryResponse,
+			stopReason: "length",
+			content: [{ type: "text", text: "partial" }],
+		});
+
+		const result = await generateSummaryWithUsage(messages, createModel(false), 2000, "test-key");
+
+		expect(result.text).toBe("## Goal\nTest summary");
+		expect(completeSimpleMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("gives up on a length-limited history summary once the retries are spent", async () => {
+		completeSimpleMock.mockResolvedValue({
 			...mockSummaryResponse,
 			stopReason: "length",
 			content: [{ type: "text", text: "partial" }],
@@ -184,7 +203,7 @@ describe("generateSummary reasoning options", () => {
 		);
 	});
 
-	it("rejects a length-limited split-turn summary", async () => {
+	it("retries a length-limited split-turn summary too", async () => {
 		completeSimpleMock.mockResolvedValueOnce({
 			...mockSummaryResponse,
 			stopReason: "length",
@@ -200,9 +219,9 @@ describe("generateSummary reasoning options", () => {
 			settings: { enabled: true, reserveTokens: 2000, keepRecentTokens: 20 },
 		};
 
-		await expect(compact(preparation, createModel(false), "test-key")).rejects.toThrow(
-			"generation hit the token cap",
-		);
+		const result = await compact(preparation, createModel(false), "test-key");
+
+		expect(result.summary).toContain("Test summary");
 	});
 
 	it("does not set reasoning when thinking is off", async () => {
@@ -292,6 +311,13 @@ describe("generateSummary reasoning options", () => {
 			totalTokens: 40,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		});
-		expect(completeSimpleMock.mock.calls.map((call) => call[2]?.maxTokens)).toEqual([128000, 128000]);
+		// The model's own cap is 128,000 here and it is no longer what binds: a
+		// summary is also capped at an eighth of the window it has to live inside,
+		// because the next compaction summarises the summary. Left uncapped on a
+		// 32K model that reached 13,107 tokens -- 40% of everything -- and grew
+		// each round until it *was* the context: 63 turns, 49 compactions, a
+		// context pinned at 32,554-32,659 against a 32,768 window, and turns
+		// reporting `output: 1`. An eighth of 200,000 is 25,000.
+		expect(completeSimpleMock.mock.calls.map((call) => call[2]?.maxTokens)).toEqual([25000, 25000]);
 	});
 });

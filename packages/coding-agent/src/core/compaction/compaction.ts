@@ -814,6 +814,54 @@ function keepEnds(text: string, charLimit: number): string {
 	return text.slice(0, head) + marker + text.slice(text.length - (room - head));
 }
 
+/** A rejected request gets this many further attempts, each on half the prompt. */
+const SUMMARIZATION_ATTEMPTS = 3;
+
+/**
+ * The same request with half the prompt.
+ *
+ * Fitting by a character ratio cannot be made correct, only less wrong: the
+ * ratio is a property of the text, and measured against this deployment's
+ * tokenizer it runs from 3.99 on prose down to **1.95** on what
+ * `write-compressor` accumulates and 2.17 on `model-extraction-relu-logits`.
+ * A constant chosen for one of those overflows the other, and the next task
+ * brings a density nobody sampled.
+ *
+ * So the constant is only the opening guess, and a rejection is information:
+ * halving the prompt converges on something that fits without knowing anything
+ * about the tokenizer. Three attempts take the prompt to an eighth, which cleared
+ * every case measured here.
+ */
+function halveSummarizationRequest(request: { promptText: string; maxTokens: number }): {
+	promptText: string;
+	maxTokens: number;
+} {
+	return { ...request, promptText: keepEnds(request.promptText, Math.floor(request.promptText.length / 2)) };
+}
+
+/**
+ * Whether a smaller request could plausibly succeed where this one failed.
+ *
+ * Shrinking is only harmless when the failure was about size. pi already has a
+ * retry policy for transient stream drops, and it deliberately does not retry
+ * `insufficient_quota`, and does not retry at all when retry is disabled --
+ * halving on *every* failure quietly retries those too, which three of its own
+ * regression tests caught. So this asks the narrower question: did the request
+ * not fit?
+ *
+ * A length stop did not fit by definition: the budget ran out mid-summary. The
+ * other shape is the server refusing it outright, which on an OpenAI-compatible
+ * endpoint is a 400 or 413 and often carries no body at all --
+ * `Summarization failed: 400 status code (no body)` is the whole of what this
+ * deployment says.
+ */
+function couldFitInSmaller(response: AssistantMessage): boolean {
+	if (response.stopReason === "length") return true;
+	if (response.stopReason !== "error") return false;
+	const message = response.errorMessage ?? "";
+	return /\b(?:400|413)\b/.test(message) || /context length|too large|too long|exceeds/i.test(message);
+}
+
 /**
  * The summary to persist, or a throw.
  *
@@ -871,33 +919,29 @@ export async function generateSummaryWithUsage(
 	}
 	promptText += basePrompt;
 
-	const fitted = fitSummarizationRequest(promptText, model.contextWindow, maxTokens);
+	let fitted = fitSummarizationRequest(promptText, model.contextWindow, maxTokens);
 
-	const completionOptions = createSummarizationOptions(
-		model,
-		fitted.maxTokens,
-		apiKey,
-		headers,
-		env,
-		signal,
-		thinkingLevel,
-		sessionId,
-	);
+	for (let attempt = 1; ; attempt++) {
+		const response = await completeSummarization(
+			model,
+			buildSummarizationContext(fitted.promptText),
+			createSummarizationOptions(model, fitted.maxTokens, apiKey, headers, env, signal, thinkingLevel, sessionId),
+			streamFn,
+			retry,
+			callbacks,
+		);
 
-	const response = await completeSummarization(
-		model,
-		buildSummarizationContext(fitted.promptText),
-		completionOptions,
-		streamFn,
-		retry,
-		callbacks,
-	);
+		if (response.content.some((block) => block.type === "toolCall")) {
+			throw new Error("Summarization attempted to call a tool");
+		}
 
-	if (response.content.some((block) => block.type === "toolCall")) {
-		throw new Error("Summarization attempted to call a tool");
+		try {
+			return { text: summaryText(response, "Summarization"), usage: response.usage };
+		} catch (error) {
+			if (attempt >= SUMMARIZATION_ATTEMPTS || signal?.aborted || !couldFitInSmaller(response)) throw error;
+			fitted = halveSummarizationRequest(fitted);
+		}
 	}
-
-	return { text: summaryText(response, "Summarization"), usage: response.usage };
 }
 
 // ============================================================================
@@ -1160,23 +1204,27 @@ async function generateTurnPrefixSummary(
 	const conversationText = serializeConversation(llmMessages);
 	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
 
-	const fitted = fitSummarizationRequest(promptText, model.contextWindow, maxTokens);
+	let fitted = fitSummarizationRequest(promptText, model.contextWindow, maxTokens);
 
-	const response = await completeSummarization(
-		model,
-		buildSummarizationContext(fitted.promptText),
-		createSummarizationOptions(model, fitted.maxTokens, apiKey, headers, env, signal, thinkingLevel, sessionId),
-		streamFn,
-		retry,
-		callbacks,
-	);
+	for (let attempt = 1; ; attempt++) {
+		const response = await completeSummarization(
+			model,
+			buildSummarizationContext(fitted.promptText),
+			createSummarizationOptions(model, fitted.maxTokens, apiKey, headers, env, signal, thinkingLevel, sessionId),
+			streamFn,
+			retry,
+			callbacks,
+		);
 
-	if (response.content.some((block) => block.type === "toolCall")) {
-		throw new Error("Turn prefix summarization attempted to call a tool");
+		if (response.content.some((block) => block.type === "toolCall")) {
+			throw new Error("Turn prefix summarization attempted to call a tool");
+		}
+
+		try {
+			return { text: summaryText(response, "Turn prefix summarization"), usage: response.usage };
+		} catch (error) {
+			if (attempt >= SUMMARIZATION_ATTEMPTS || signal?.aborted || !couldFitInSmaller(response)) throw error;
+			fitted = halveSummarizationRequest(fitted);
+		}
 	}
-
-	return {
-		text: summaryText(response, "Turn prefix summarization"),
-		usage: response.usage,
-	};
 }
