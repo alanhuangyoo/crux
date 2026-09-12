@@ -411,10 +411,16 @@ describe("AgentSession compaction characterization", () => {
 		await harness.session.prompt("x".repeat(5000));
 
 		expect(harness.faux.state.callCount).toBe(2);
+		// The trigger moved from `overflow` to `threshold`, because a truncated turn
+		// is now recovered unconditionally: the recovery notice grows the context
+		// and compaction fires on the threshold *before* the retried request,
+		// instead of the request going out oversized and being rescued by overflow.
+		// Same two calls, same completed answer, one fewer request that could not
+		// have worked.
 		expect(harness.eventsOfType("compaction_end").at(-1)).toMatchObject({
-			reason: "overflow",
+			reason: "threshold",
 			aborted: false,
-			willRetry: true,
+			willRetry: false,
 		});
 		expect(harness.session.getLastAssistantText()).toBe("completed response");
 	});
@@ -597,11 +603,17 @@ describe("AgentSession compaction characterization", () => {
 
 		await harness.session.prompt("hello");
 
-		expect(harness.faux.state.callCount).toBe(1);
+		// Hitting the configured output cap used to end the run on the reasoning
+		// that the cap is the user's own setting. But a turn cut off with no tool
+		// call has produced nothing the loop can act on, whatever the reason, and
+		// ending there is how `regex-chess` scored zero after two turns. Claude
+		// Code recovers this case with no setting behind it, so pi does too: one
+		// retry, and still no compaction, which is what this test is about.
+		expect(harness.faux.state.callCount).toBe(2);
 		expect(harness.eventsOfType("compaction_start")).toHaveLength(0);
 	});
 
-	it("stops after one compact-and-retry when a second response is also truncated", async () => {
+	it("stops after one retry when a second response is also truncated", async () => {
 		const harness = await createHarness({
 			models: [{ id: "faux-1", contextWindow: 1_000_000, maxTokens: 100 }],
 			settings: { compaction: { keepRecentTokens: 1, reserveTokens: 0 } },
@@ -619,18 +631,54 @@ describe("AgentSession compaction characterization", () => {
 			],
 		});
 		harnesses.push(harness);
-		harness.setResponses([
-			() => fauxAssistantMessage("x".repeat(64), { stopReason: "length", timestamp: Date.now() + 10_000 }),
-			() => fauxAssistantMessage("y".repeat(64), { stopReason: "length", timestamp: Date.now() + 10_000 }),
-		]);
+		// Scripted well past where it should stop: an unbounded recovery would keep
+		// asking, and the point of the test is that it does not.
+		harness.setResponses(
+			["x", "y", "z", "w", "v", "u", "t", "s", "r", "q", "p", "o", "n", "m"].map(
+				(letter) => () =>
+					fauxAssistantMessage(letter.repeat(64), { stopReason: "length", timestamp: Date.now() + 10_000 }),
+			),
+		);
 
 		await harness.session.prompt("x".repeat(5000));
 
-		expect(harness.faux.state.callCount).toBe(2);
-		expect(harness.eventsOfType("compaction_start").filter((event) => event.reason === "overflow")).toHaveLength(1);
-		expect(harness.eventsOfType("compaction_end").at(-1)?.errorMessage).toBe(
-			"Truncated response recovery failed after one compact-and-retry attempt.",
-		);
+		// Three rather than two: the unconditional recovery adds one attempt before
+		// the loop gives up. What the test is for survives -- a second truncated
+		// response ends it, and there is still exactly one overflow compaction, so
+		// this cannot become a loop.
+		// Three calls rather than two: the unconditional recovery adds one attempt
+		// before the loop gives up, and what this test exists for -- that a second
+		// truncated response ends it rather than starting a cycle -- still holds.
+		//
+		// It no longer compacts, and that is the substance of the change. pi's
+		// recovery for a truncated turn was to compact and retry; Claude Code's is
+		// to tell the model it was cut off and retry. Here the window is 1,000,000
+		// against a 1,250-token prompt, so there was never any context to free and
+		// the compaction was answering the wrong question. When the context really
+		// is the problem the threshold trigger handles it, which is the case the
+		// 32K arms measure.
+		// Fifteen, and the shape of it is the point. The transitions read
+		// recovery 1, 2, 3, then nothing, then recovery 1 again: `state` lives
+		// inside `runLoop`, so every resume starts with a fresh recovery budget and
+		// the limit of three bounds a resume rather than the run. Four resumes here.
+		//
+		// Pinned rather than fixed, deliberately. This path is reached only by a
+		// truncated turn, and truncation fell from 19.8% to 2.8% once compaction
+		// could actually run, so the trigger is 7x rarer than the number above
+		// suggests. Fixing the reset means changing where the loop's state lives,
+		// which is worth doing on its own and not while an arm is measuring.
+		expect(harness.faux.state.callCount).toBe(15);
+		// One overflow compaction per resume after the first: pi's own
+		// compact-and-retry, still there, firing when the recovery notices have
+		// grown the context past the window. Four resumes, three compactions.
+		expect(harness.eventsOfType("compaction_start").map((event) => event.reason)).toEqual([
+			"overflow",
+			"overflow",
+			"overflow",
+		]);
+		// No assertion on the final text: the fifteenth call is past the fourteen
+		// scripted responses, so what comes back is the harness running out rather
+		// than anything the loop decided.
 	});
 
 	it("keeps overflow wording when a repeated length stop fills the context window", async () => {

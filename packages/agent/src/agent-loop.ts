@@ -154,6 +154,9 @@ const CONTEXT_SAFETY_MARGIN_TOKENS = 512;
 
 export const MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3;
 
+/** Consecutive budget notices a truncated round may buy without any tool call. */
+export const MAX_TRUNCATION_NOTICES = 3;
+
 /** What the model is told once the raised ceiling has also been used up. */
 /**
  * Claude Code's own recovery text, ported from its source rather than
@@ -231,6 +234,8 @@ interface LoopState {
 	readonly toolCallsMade: number;
 	/** `toolCallsMade` when the last completion notice was sent. */
 	readonly toolCallsAtLastNotice: number;
+	/** Consecutive notices bought by truncation alone, bounded by MAX_TRUNCATION_NOTICES. */
+	readonly truncationNotices: number;
 }
 
 const INITIAL_LOOP_STATE: LoopState = {
@@ -241,6 +246,7 @@ const INITIAL_LOOP_STATE: LoopState = {
 	completionNotices: 0,
 	toolCallsMade: 0,
 	toolCallsAtLastNotice: -1,
+	truncationNotices: 0,
 };
 
 /**
@@ -593,13 +599,23 @@ async function runLoop(
 			// the same. Claude Code, on the same model, ends 1 of 24 failures
 			// under ten tool calls; pi ends a third of them there.
 			const cutOff = lastCompletedTurn?.message.stopReason === "length";
-			const lastNoticeWasSpent =
-				state.toolCallsAtLastNotice < 0 || state.toolCallsMade > state.toolCallsAtLastNotice || cutOff;
-			if (used >= 0 && used < share && state.completionNotices < cap && lastNoticeWasSpent) {
+			const bought = state.toolCallsAtLastNotice < 0 || state.toolCallsMade > state.toolCallsAtLastNotice;
+			// A truncated round bought the next notice, but not forever. `|| cutOff`
+			// on its own removed the brake for exactly the case that repeats: a run
+			// that keeps truncating satisfies it every time, so it collected all 40
+			// notices and spent 40 model calls producing nothing. On the failing
+			// trials that is what it looks like -- 93 turns against 55 tool calls,
+			// so something near 40 turns that never acted.
+			//
+			// Truncation therefore re-arms the notice at most MAX_TRUNCATION_NOTICES
+			// times in a row, and a round that does call a tool clears the count.
+			const truncationBudget = cutOff && state.truncationNotices < MAX_TRUNCATION_NOTICES;
+			if (used >= 0 && used < share && state.completionNotices < cap && (bought || truncationBudget)) {
 				state = {
 					...state,
 					completionNotices: state.completionNotices + 1,
 					toolCallsAtLastNotice: state.toolCallsMade,
+					truncationNotices: bought ? 0 : state.truncationNotices + 1,
 				};
 				pendingTransition = { reason: "budget_notice", attempt: state.completionNotices, shareUsed: used };
 				pendingMessages = [
