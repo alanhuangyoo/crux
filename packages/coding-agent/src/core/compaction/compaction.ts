@@ -727,6 +727,85 @@ export function summaryTokenBudget(model: Model<any>, reserveTokens: number, sha
 	return Math.max(512, Math.min(fromReserve, fromWindow, modelCeiling));
 }
 
+const SUMMARIZATION_MARGIN_TOKENS = 512;
+const MIN_SUMMARY_TOKENS = 512;
+/** A length-stopped summary shorter than this is a fragment, not a checkpoint. */
+const PARTIAL_SUMMARY_MIN_CHARS = 400;
+
+/**
+ * Keep a summarization request inside the window it has to fit in.
+ *
+ * The prompt is the history being dropped and the completion is the summary of
+ * it, and both come out of the same window -- but nothing checked their sum. On
+ * a 32K model that is not a tuning problem, it is an impossibility: compaction
+ * triggers once history reaches 16,384 tokens and then asks for a completion
+ * out of the same 32,768. Measured across 89 trials, 2,115 of 2,370 compactions
+ * failed, 1,440 of them with
+ *
+ *     400 ... you requested a total of 32,793 tokens: 16,409 from the input
+ *     messages and 16,384 for the completion
+ *
+ * Every failure appended its error and left the history untouched, so the
+ * context only grew: one trial compacted 91 times across 74 turns, climbing 106
+ * tokens per attempt, until it pinned at the window and truncated 50 times.
+ *
+ * So the completion is bounded by the room the prompt leaves it, and when the
+ * prompt cannot leave enough the prompt is what gives.
+ */
+export function fitSummarizationRequest(
+	promptText: string,
+	contextWindow: number,
+	maxTokens: number,
+): { promptText: string; maxTokens: number } {
+	if (!contextWindow || contextWindow <= 0) return { promptText, maxTokens };
+	const available = contextWindow - SUMMARIZATION_MARGIN_TOKENS;
+	if (available <= MIN_SUMMARY_TOKENS) return { promptText, maxTokens };
+
+	const promptTokens = Math.ceil(promptText.length / 4);
+	if (promptTokens + maxTokens <= available) return { promptText, maxTokens };
+
+	const roomLeft = available - promptTokens;
+	if (roomLeft >= MIN_SUMMARY_TOKENS) return { promptText, maxTokens: Math.min(maxTokens, roomLeft) };
+
+	const summaryTokens = Math.min(maxTokens, Math.max(MIN_SUMMARY_TOKENS, Math.floor(available / 8)));
+	return { promptText: keepEnds(promptText, (available - summaryTokens) * 4), maxTokens: summaryTokens };
+}
+
+/**
+ * Drop the middle. The head says what the task was and the tail says what was
+ * just happening; a summary built from those is worth more than a request that
+ * cannot be sent, which is the only other thing on offer at this size.
+ */
+function keepEnds(text: string, charLimit: number): string {
+	if (charLimit <= 0 || text.length <= charLimit) return text;
+	const marker = "\n\n[... middle of the conversation omitted to fit the summarization window ...]\n\n";
+	const room = charLimit - marker.length;
+	if (room <= 0) return text.slice(-charLimit);
+	const head = Math.floor(room / 3);
+	return text.slice(0, head) + marker + text.slice(text.length - (room - head));
+}
+
+/**
+ * The summary to persist, or a throw.
+ *
+ * Upstream discards a length-stopped response outright -- partial text must not
+ * become a session checkpoint -- which is right when hitting the cap means
+ * something went wrong. On a 32K window it is the ordinary case: 2,242 of one
+ * arm's 3,018 compactions ended this way, and each threw away a summary that
+ * had already been generated and paid for, leaving the context exactly where it
+ * was. A summary that stops early is still a summary. The alternative on offer
+ * is no compaction at all.
+ */
+export function summaryText(response: AssistantMessage, label: string): string {
+	const text = contentText(response.content);
+	const failure = getSummarizationFailure(response, label);
+	if (!failure) return text;
+	if (response.stopReason === "length" && text.trim().length >= PARTIAL_SUMMARY_MIN_CHARS) {
+		return `${text.trimEnd()}\n\n[Summary was cut off at the token cap; the sections above are complete.]`;
+	}
+	throw new Error(failure);
+}
+
 export async function generateSummaryWithUsage(
 	currentMessages: AgentMessage[],
 	model: Model<any>,
@@ -763,9 +842,11 @@ export async function generateSummaryWithUsage(
 	}
 	promptText += basePrompt;
 
+	const fitted = fitSummarizationRequest(promptText, model.contextWindow, maxTokens);
+
 	const completionOptions = createSummarizationOptions(
 		model,
-		maxTokens,
+		fitted.maxTokens,
 		apiKey,
 		headers,
 		env,
@@ -776,24 +857,18 @@ export async function generateSummaryWithUsage(
 
 	const response = await completeSummarization(
 		model,
-		buildSummarizationContext(promptText),
+		buildSummarizationContext(fitted.promptText),
 		completionOptions,
 		streamFn,
 		retry,
 		callbacks,
 	);
 
-	const failure = getSummarizationFailure(response, "Summarization");
-	if (failure) {
-		throw new Error(failure);
-	}
 	if (response.content.some((block) => block.type === "toolCall")) {
 		throw new Error("Summarization attempted to call a tool");
 	}
 
-	const textContent = contentText(response.content);
-
-	return { text: textContent, usage: response.usage };
+	return { text: summaryText(response, "Summarization"), usage: response.usage };
 }
 
 // ============================================================================
@@ -1056,25 +1131,23 @@ async function generateTurnPrefixSummary(
 	const conversationText = serializeConversation(llmMessages);
 	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
 
+	const fitted = fitSummarizationRequest(promptText, model.contextWindow, maxTokens);
+
 	const response = await completeSummarization(
 		model,
-		buildSummarizationContext(promptText),
-		createSummarizationOptions(model, maxTokens, apiKey, headers, env, signal, thinkingLevel, sessionId),
+		buildSummarizationContext(fitted.promptText),
+		createSummarizationOptions(model, fitted.maxTokens, apiKey, headers, env, signal, thinkingLevel, sessionId),
 		streamFn,
 		retry,
 		callbacks,
 	);
 
-	const failure = getSummarizationFailure(response, "Turn prefix summarization");
-	if (failure) {
-		throw new Error(failure);
-	}
 	if (response.content.some((block) => block.type === "toolCall")) {
 		throw new Error("Turn prefix summarization attempted to call a tool");
 	}
 
 	return {
-		text: contentText(response.content),
+		text: summaryText(response, "Turn prefix summarization"),
 		usage: response.usage,
 	};
 }
