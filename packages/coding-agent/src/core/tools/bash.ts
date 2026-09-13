@@ -136,10 +136,22 @@ export function createLocalShellOperations(shellName: string, resolveShellConfig
 			};
 
 			try {
-				timeoutHandle = setTimeout(() => {
-					timedOut = true;
-					if (child.pid) killProcessTree(child.pid);
-				}, timeoutMs);
+				// The timeout ends the *wait*, not just the process.
+				//
+				// Killing `child.pid` is not enough, and on the case that found this
+				// it did nothing at all: `nohup python3 ocr5.py > log 2>&1 &` leaves a
+				// descendant that outlives the shell, so by the time the timeout fires
+				// the pid is already gone and the surviving process keeps the inherited
+				// pipe alive. `waitForChildProcess` was still pending, so the line that
+				// checks `timedOut` was never reached -- a trial sat silent for 318
+				// minutes on a tool call that had asked for 120 seconds.
+				const raced = new Promise<"timeout">((resolve) => {
+					timeoutHandle = setTimeout(() => {
+						timedOut = true;
+						if (child.pid) killProcessTree(child.pid);
+						resolve("timeout");
+					}, timeoutMs);
+				});
 				// Stream stdout and stderr.
 				child.stdout?.on("data", onData);
 				child.stderr?.on("data", onData);
@@ -150,14 +162,18 @@ export function createLocalShellOperations(shellName: string, resolveShellConfig
 				}
 				// Handle shell spawn errors and wait for the process to terminate without hanging
 				// on inherited stdio handles held by detached descendants.
-				const exitCode = await waitForChildProcess(child);
+				const waited = waitForChildProcess(child);
+				// The race can leave this pending for good; a rejection arriving later
+				// must not surface as an unhandled one.
+				waited.catch(() => {});
+				const outcome = await Promise.race([waited, raced]);
 				if (signal?.aborted) {
 					throw new Error("aborted");
 				}
-				if (timedOut) {
+				if (outcome === "timeout" || timedOut) {
 					throw new Error(`timeout:${timeoutSeconds}`);
 				}
-				return { exitCode };
+				return { exitCode: outcome };
 			} finally {
 				if (child.pid) untrackDetachedChildPid(child.pid);
 				if (timeoutHandle) clearTimeout(timeoutHandle);

@@ -15,6 +15,22 @@ import crossSpawn from "cross-spawn";
 
 const EXIT_STDIO_GRACE_MS = 100;
 
+/**
+ * The most the post-exit grace may be extended by output still arriving.
+ *
+ * The grace exists so a tail of output is not truncated, and it re-arms on every
+ * chunk. A detached descendant that keeps writing to the inherited pipe therefore
+ * re-arms it forever: `nohup python3 ocr5.py > log 2>&1 &` left a trial silent
+ * for **318 minutes** after a tool call that had asked for a 120-second timeout,
+ * because the tool's timeout only kills `child.pid` -- long gone -- while the
+ * wait it was supposed to end is still pending.
+ *
+ * So the grace is bounded in total, not per chunk. Two seconds is far more than
+ * the tail of a command that has already exited, and it turns "forever" into
+ * "one turn late".
+ */
+const EXIT_STDIO_TOTAL_GRACE_MS = 2_000;
+
 export function spawnProcess(
 	command: string,
 	args: string[],
@@ -52,6 +68,7 @@ export function waitForChildProcess(child: ChildProcess): Promise<number | null>
 		let exited = false;
 		let exitCode: number | null = null;
 		let postExitTimer: NodeJS.Timeout | undefined;
+		let exitedAt: number | undefined;
 		let stdoutEnded = child.stdout === null;
 		let stderrEnded = child.stderr === null;
 
@@ -87,7 +104,9 @@ export function waitForChildProcess(child: ChildProcess): Promise<number | null>
 
 		const armIdleTimer = () => {
 			if (postExitTimer) clearTimeout(postExitTimer);
-			postExitTimer = setTimeout(() => finalize(exitCode), EXIT_STDIO_GRACE_MS);
+			const spent = exitedAt === undefined ? 0 : Date.now() - exitedAt;
+			const left = Math.max(0, EXIT_STDIO_TOTAL_GRACE_MS - spent);
+			postExitTimer = setTimeout(() => finalize(exitCode), Math.min(EXIT_STDIO_GRACE_MS, left));
 		};
 
 		const onData = () => {
@@ -115,6 +134,7 @@ export function waitForChildProcess(child: ChildProcess): Promise<number | null>
 
 		const onExit = (code: number | null) => {
 			exited = true;
+			exitedAt = Date.now();
 			exitCode = code;
 			maybeFinalizeAfterExit();
 			if (!settled) {
