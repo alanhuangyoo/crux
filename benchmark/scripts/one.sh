@@ -24,6 +24,8 @@
 #
 # Usage: one.sh <name> <bundle> [extra --ak args...]
 set -euo pipefail
+# SECTIONS overrides which prompt sections are appended; see benchmark/src/crux/prompts.py
+export SECTIONS="${SECTIONS:-doing_full,cc_tools}"
 NAME="$1"; BUNDLE="$2"; shift 2
 export PATH=$HOME/.local/bin:$PATH
 export PYTHONPATH=/scratch/crux-next-src:/root/.local/share/uv/tools/harbor/lib/python3.13/site-packages
@@ -39,7 +41,7 @@ run() {
     --agent crux.pi_agent:CruxPiAgent --model openai/Qwen3.8-Flash-Next-FP8 \
     --n-attempts 1 --n-concurrent 16 --jobs-dir "/scratch/$1" --env docker --yes \
     --ak variant=default --ak model_api=openai-completions \
-    --ak bundle="$2" --ak sections=doing_full,cc_tools \
+    --ak bundle="$2" --ak sections="${SECTIONS:-doing_full,cc_tools}" \
     --ak pi_env=PI_TIME_BUDGET_SEC=7200,PI_STOP_BUDGET_SHARE=0.8,PI_MAX_OUTPUT_TOKENS=16384,PI_ESCALATE_SPENT_CEILING=1 \
     --agent-timeout-multiplier 8.0 --env-file /scratch/crux/.env "${@:3}" \
     --exclude-task-name terminal-bench/exam-pdf-eval \
@@ -49,5 +51,5 @@ run() {
 }
 
 rm -rf "/scratch/${NAME}"
-setsid nohup bash -c "$(declare -f run); run ${NAME} ${BUNDLE} $*" > "/scratch/${NAME}.log" 2>&1 </dev/null &
+setsid nohup bash -c "export SECTIONS=$SECTIONS; $(declare -f run); run ${NAME} ${BUNDLE} $*" > "/scratch/${NAME}.log" 2>&1 </dev/null &
 echo "arm ${NAME} (${BUNDLE##*/}) pid=$!"
