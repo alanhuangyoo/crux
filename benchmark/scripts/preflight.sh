@@ -37,12 +37,31 @@ tc=$(curl -s -m 90 "$BASE/chat/completions" -H 'Content-Type: application/json' 
 [ "${tc:-0}" -ge 1 ] && say "server returns native tool_calls" "ok" || { say "server returns native tool_calls" "FAIL - needs --tool-call-parser"; fail=1; }
 
 echo "== completion budget vs window =="
-mx=$(grep -oP '(?<=PI_MAX_OUTPUT_TOKENS=)[0-9]+' /tmp/confirm.sh 2>/dev/null | head -1)
+# Read the launcher that is actually about to run, newest first. This read
+# `/tmp/confirm.sh` unconditionally -- a leftover from another round -- so for a
+# day it answered "ok" about a script nobody was running, which is the same
+# shape of hole this whole file exists to close. Pass the launcher explicitly to
+# be sure: preflight.sh <launcher>
+LAUNCHER="${1:-}"
+if [ -z "$LAUNCHER" ]; then
+  LAUNCHER=$(ls -t /tmp/one.sh /tmp/ab.sh /tmp/budget-probe.sh 2>/dev/null | head -1)
+fi
+mx=$(grep -oP '(?<=PI_MAX_OUTPUT_TOKENS=)[0-9]+' "$LAUNCHER" 2>/dev/null | head -1)
+say "launcher being checked" "${LAUNCHER:-NONE FOUND}"
 if [ -n "$win" ] && [ -n "$mx" ]; then
-  [ "$mx" -le $((win / 2)) ] && say "PI_MAX_OUTPUT_TOKENS=$mx vs window $win" "ok" \
-    || { say "PI_MAX_OUTPUT_TOKENS=$mx vs window $win" "FAIL - leaves under half for input"; fail=1; }
+  # pi_agent derives the model's own ceiling as min(32768, window // 4), and the
+  # starting cap has to sit below it or the truncation-recovery escalation has
+  # nowhere to go -- a silent no-op that cost a full round once.
+  ceil=$(( win / 4 )); [ "$ceil" -gt 32768 ] && ceil=32768
+  if [ "$mx" -ge "$ceil" ]; then
+    say "PI_MAX_OUTPUT_TOKENS=$mx vs model ceiling $ceil" "FAIL - escalation cannot fire"; fail=1
+  elif [ "$mx" -gt $((win / 2)) ]; then
+    say "PI_MAX_OUTPUT_TOKENS=$mx vs window $win" "FAIL - leaves under half for input"; fail=1
+  else
+    say "PI_MAX_OUTPUT_TOKENS=$mx vs window $win, ceiling $ceil" "ok"
+  fi
 else
-  say "PI_MAX_OUTPUT_TOKENS set" "FAIL - unset, pi will ask for its default"; fail=1
+  say "PI_MAX_OUTPUT_TOKENS set" "FAIL - unset or launcher unreadable"; fail=1
 fi
 
 echo "== arm settings =="

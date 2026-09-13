@@ -18,6 +18,11 @@ NAME="$1"; A="$2"; B="$3"; shift 3
 export PATH=$HOME/.local/bin:$PATH
 export PYTHONPATH=/scratch/crux-next-src:/root/.local/share/uv/tools/harbor/lib/python3.13/site-packages
 
+# PI_MAX_OUTPUT_TOKENS must stay *below* the model's own maxTokens, which
+# pi_agent derives as min(32768, window // 4) -- 32768 at the 262144 this endpoint
+# now serves. 16384 leaves the escalation a step to take. Setting the two equal is
+# a silent no-op: the truncation recovery it exists for can never raise anything,
+# which cost a full round once already.
 run() {
   cd /scratch/crux
   harbor run --dataset terminal-bench/terminal-bench-2-1 \
@@ -25,7 +30,7 @@ run() {
     --n-attempts 1 --n-concurrent 8 --jobs-dir "/scratch/$1" --env docker --yes \
     --ak variant=default --ak model_api=openai-completions \
     --ak bundle="$2" --ak sections=doing_full,cc_tools \
-    --ak pi_env=PI_TIME_BUDGET_SEC=7200,PI_STOP_BUDGET_SHARE=0.8,PI_MAX_OUTPUT_TOKENS=8192,PI_ESCALATE_SPENT_CEILING=1 \
+    --ak pi_env=PI_TIME_BUDGET_SEC=7200,PI_STOP_BUDGET_SHARE=0.8,PI_MAX_OUTPUT_TOKENS=16384,PI_ESCALATE_SPENT_CEILING=1 \
     --agent-timeout-multiplier 8.0 --env-file /scratch/crux/.env "${@:3}" \
     --exclude-task-name terminal-bench/exam-pdf-eval \
     --exclude-task-name terminal-bench/fp8-rmsnorm-gemm \

@@ -521,7 +521,16 @@ class CruxPiAgent(Pi):
                     # Read from the server rather than configured, because a
                     # number typed here is a number that goes stale.
                     model["contextWindow"] = window
-                    model.setdefault("maxTokens", min(16384, window // 2))
+                    # A quarter of the window, capped at 32K.
+                    #
+                    # `min(16384, window // 2)` was written when the window was
+                    # 32768, where half of it was the only sane answer. Served at
+                    # the model's own 262144 the 16384 is what binds, and it binds
+                    # on the wrong thing: output truncation measured 4.3% of turns
+                    # at the larger window, and every truncated turn costs a
+                    # recovery cycle. A quarter still leaves three quarters of the
+                    # window for the history that produced the answer.
+                    model.setdefault("maxTokens", min(32768, max(4096, window // 4)))
                 compat = model.setdefault("compat", {})
                 compat.setdefault("supportsDeveloperRole", False)
                 # This server does not need the model's own reasoning sent back
