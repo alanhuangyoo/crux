@@ -15,19 +15,34 @@ with the changes below applied.
 
 ## Where it stands
 
-One self-hosted Qwen3.8-27B, 89 Terminal-Bench 2.1 tasks, 8x agent budget, arms
-run concurrently so throughput is shared. Every row is pass@1 over whole runs.
+One self-hosted model, the 89 Terminal-Bench 2.1 tasks that run without a GPU
+inside the container, 8x agent budget, pass@1 over whole runs.
+
+**Qwen3.8-Flash-Next-FP8, served at the 262,144-token window the weights
+declare:**
+
+| | pass@1 |
+|---|---:|
+| **crux** | **0.773** |
+| crux, same code at a 32,768 window | 0.678 |
+| crux, before the compaction and hang fixes | 0.591 |
+
+Paired against the 32K run on the 86 tasks both scored: 12-4 on the sixteen they
+disagree about, sign test z=+2.00.
+
+**Qwen3.8-27B, 32,768 window** -- the earlier regime, kept because the
+cross-scaffold comparison was made there and has not been repeated:
 
 | | pass@1 |
 |---|---:|
 | Claude Code, same model | 0.730 |
 | crux-terminus, this project's earlier Terminus-based scaffold | 0.719 |
-| **crux (this fork)** | **0.588** |
+| crux | 0.588 |
 | pi, unmodified | 0.539 |
 
-The gap to Claude Code is scaffold, not the model: it solves those tasks with
-the same weights behind it. Closing it is the point of the project, and
-`benchmark/docs/` is the record of what has and has not moved it.
+The two tables are not comparable: different weights, different window,
+different engine load. Numbers measured in one regime are not carried into the
+other, which is why the old one is still here rather than overwritten.
 
 ## What is changed, and why each change is there
 
@@ -43,10 +58,18 @@ out, and each is attached to the measurement that motivated it.
 | A bash command the model did not bound is still bounded | Claude Code's tiered shell policy | 85.7% of 6,100 bash calls carried no timeout; 13 of 401 trials ended on a tool call that never finished |
 | Stopping is questioned while the budget is unspent | Terminus's completion confirmation | pi's failed trials had spent a median 24% of their budget when they stopped; Claude Code's had spent 95% |
 | A killed run is resumed, not scored zero | — | A cgroup OOM kill takes every process in the group, so a task that exhausts memory ends pi's run and merely ends Terminus's command |
+| A summarization request that fits the window it lives in | — | Compaction sends the history as input and asks for the summary as output, both out of one window, and nothing checked their sum: 2,115 of 2,370 compactions failed, each appending its error and removing nothing, so one trial compacted 91 times across 74 turns and climbed 106 tokens per attempt |
+| A rejected request halves and goes again | — | Characters per token is a property of the text, measured from 3.99 on prose to 1.95 on what `write-compressor` accumulates, so no constant fits; a rejection is information |
+| A summary cut off at the cap is kept | — | Discarding it is right on a 200K window and disables compaction on a 32K one, where it is the ordinary outcome |
+| A connected stream that stops sending is failed | — | The SDK's timeout covers getting a response, not keeping one: 25 timed-out trials had been silent for a median 112 of their 121 minutes, and `install-windows-3.11` held its container for eight hours after 48 seconds of work |
+| A command with no timeout still has one | Claude Code's default | Ten minutes rather than their two, because these tasks build things; a `grep -rl ... /` over the whole filesystem otherwise takes the trial with it |
+| A backgrounded process cannot hold a finished command open | — | The post-exit grace re-armed on every chunk, so a detached descendant writing to the inherited pipe re-armed it forever |
 
-The seven loop and tool changes, measured against a matched control on the same
+The first seven, measured on Qwen3.8-27B against a matched control on the same
 tasks in the same window: **0.588 against 0.500, 23-9 on paired tasks, sign test
-p=0.020**, replicated by a second concurrent arm at 0.584.
+p=0.020**, replicated by a second concurrent arm at 0.584. The last six were
+measured on Flash-Next and are the 0.591 to 0.678 step in the table above; the
+window that follows it is not theirs.
 
 ## Layout
 
@@ -55,7 +78,7 @@ packages/          pi, forked -- agent core, model layer, TUI, coding agent CLI
 benchmark/         the rig that measures it
   src/crux/        the harbor agent, prompt sections, endpoint tooling
   docs/            what was measured, and what it ruled out
-  tests/           452 tests, including one per harness bug found the hard way
+  tests/           464 tests, including one per harness bug found the hard way
 ```
 
 ## Running the benchmark
@@ -78,7 +101,15 @@ same two arms were re-run in the same window. 89 tasks at the measured 15.5%
 flip rate need an 11-point swing to reach p<0.05 on their own, so an 8-point
 effect is established by replication rather than by one reading.
 
-Seventeen candidate explanations for the gap have been measured and rejected,
+Two of the largest gains were not code. The endpoint was served with
+`--context-length 32768` against weights declaring 262,144, and the KV pool held
+4.6M tokens all along; and eight concurrent trials left the engine running one
+to two requests at a time, because a trial spends most of its life in bash
+rather than waiting on the model. Both were numbers that were correct where they
+were chosen and were then read as properties of the box. The first cost a day of
+fixing its consequences, the second four hours per iteration.
+
+Twenty-two candidate explanations for the gap have been measured and rejected,
 several of them designs that were already written. `benchmark/docs/` keeps them,
 because the rejected ones are most of the information.
 
