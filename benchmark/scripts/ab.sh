@@ -14,6 +14,8 @@
 #
 # Usage: ab.sh <name> <bundle-A> <bundle-B> [extra --ak args...]
 set -euo pipefail
+# MODEL is the name the endpoint serves; override for a different deployment.
+export MODEL="${MODEL:-Qwen3.8-27B-FP8}"
 NAME="$1"; A="$2"; B="$3"; shift 3
 export PATH=$HOME/.local/bin:$PATH
 export PYTHONPATH=/scratch/crux-next-src:/root/.local/share/uv/tools/harbor/lib/python3.13/site-packages
@@ -26,7 +28,7 @@ export PYTHONPATH=/scratch/crux-next-src:/root/.local/share/uv/tools/harbor/lib/
 run() {
   cd /scratch/crux
   harbor run --dataset terminal-bench/terminal-bench-2-1 \
-    --agent crux.pi_agent:CruxPiAgent --model openai/Qwen3.8-Flash-Next-FP8 \
+    --agent crux.pi_agent:CruxPiAgent --model "openai/${MODEL:-Qwen3.8-27B-FP8}" \
     --n-attempts 1 --n-concurrent 8 --jobs-dir "/scratch/$1" --env docker --yes \
     --ak variant=default --ak model_api=openai-completions \
     --ak bundle="$2" --ak sections=doing_full,cc_tools \

@@ -3,13 +3,13 @@
 Everything below is built, verified and staged. The only thing missing is the
 model endpoint, which is stopped.
 
-## Restarting the endpoint (h20-43, cards 0-3)
+## Restarting the endpoint (gpu-host, cards 0-3)
 
     python -m sglang.launch_server \
-      --model-path /mnt/cpfs/users/xiaohuang/models/Qwen3.8-27B-FP8 \
+      --model-path /shared/users/<user>/models/Qwen3.8-27B-FP8 \
       --served-model-name qwen3.8-27b --host 0.0.0.0 --port 30000
 
-from `/mnt/cpfs/users/xiaohuang/envs/sglang-rel/bin/python`. Check for other
+from `/shared/users/<user>/envs/sglang-rel/bin/python`. Check for other
 users' jobs on the cards in the same command that starts it, not before it.
 
 ## 1. Validate the Claude Code recovery port  (nothing has tested it)

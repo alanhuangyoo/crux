@@ -36,7 +36,12 @@ inside the container, 8× agent budget, pass@1 over whole runs.
 | **crux** — 262,144-token window | **0.773** &nbsp;<sub>(0.793 on a second run)</sub> |
 | crux — same code, 32,768-token window | 0.678 |
 | crux — before the compaction and liveness fixes | 0.591 |
+| Claude Code, same model | 0.730 |
 | pi, unmodified | 0.539 |
+
+The Claude Code row was measured in an earlier round at the 32,768 window and
+has not been re-run since, so the comparison with the top row mixes a scaffold
+difference with a deployment one.
 
 Paired against the 32K run on the 86 tasks both scored: **12–4** on the sixteen
 they disagree about, sign test z = +2.00.

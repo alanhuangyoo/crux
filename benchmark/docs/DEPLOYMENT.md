@@ -5,7 +5,7 @@
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 python -m sglang.launch_server \
-  --model-path /mnt/cpfs/users/xiaohuang/models/Qwen3.8-27B-FP8 \
+  --model-path /shared/users/<user>/models/Qwen3.8-27B-FP8 \
   --served-model-name qwen3.8-27b \
   --tp 4 \
   --context-length 262144 \
@@ -43,25 +43,6 @@ MODEL=openai/qwen3.8-27b N_CONCURRENT=8 ./scripts/run.sh
 | 投机解码(MTP / ReplaySSM / DSpark) | 五种配置全为负,最好的仍慢 20% |
 | TP2 + DP2 | 掉 34% |
 | torch.compile | OOM(inductor 编译期显存与 KV 池冲突) |
-| Qwen3.8-Flash-Next | 见下 |
-
-## 为什么不是 Flash-Next
-
-它在纸面上正合适:176B 总参数只激活 6B,省算力费显存,而这张卡恰好算力弱显存足。
-实际连踩五道坎,前四道都解决了,第五道没有:
-
-| 障碍 | 结果 |
-|---|---|
-| 发布版引擎无此架构(sglang 0.5.18 / vLLM 0.28 均无 `Qwen4Exp`) | 用官方 `qwen4-main` 分支解决 |
-| 131 个权重分片中 39 个残缺 | 逐字节比对 manifest 后修复 |
-| FP8 专家维度 640 不能被量化块 128 整除,任何 TP 都切不开 | `--disable-shared-experts-fusion` 绕开 |
-| 后台进程被 ssh 会话回收 | systemd 前台托管 |
-| **EP 模式下 NCCL 集合通信超时**(加载 11 分钟后被杀) | **未解决** |
-
-官方 cookbook 自己标的是 `sglang_version: "qwen4-main @ e17062a1d"` 和 "day-0 preview"
-—— 上游还在分支上开发。拿它刷榜,环境风险大于它可能带来的速度收益,而且跑通之后
-还得重新验证精度与 agent 兼容性。等进正式发布版再评估。
-
 
 ## Agent:crux-terminus
 
@@ -137,10 +118,6 @@ crux-terminus 继承 Terminus,只改三处:
 vLLM 慢 5-12% 但 KV 池是 SGLang 的两倍,是「极多用户、可容忍稍慢」场景的备选。
 
 ## 待补
-
-Flash-Next(176B 总参数 / 6B 激活,GDN + QSA 混合 MoE)。它与稠密模型的取舍方向
-相反 —— 省算力、费显存 —— 正好对上这张卡的强弱项,所以上面关于投机解码的结论
-未必适用,需要重测而非套用。
 
 ### 权重完整性
 

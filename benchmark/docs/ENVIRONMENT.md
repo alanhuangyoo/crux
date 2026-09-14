@@ -64,19 +64,19 @@ ssh dev 'cd ~/crux && ./scripts/smoke.sh'
 
 dev 上已安装：`uv 0.12.5`、`harbor 0.22.0`。
 
-## h20-43 的容器出网
+## gpu-host 的容器出网
 
 H20 子网到 Fedora 的镜像管理服务完全不通，而 jump 主机完全通得上：
 
 ```
 mirrors.fedoraproject.org/metalink 可达率
-  h20-43   0/10      h20-44  0/6      h20-45  0/6
+  gpu-host   0/10      gpu-host  0/6      gpu-host  0/6
   jump    10/10      B300-1  6/6      B300-7  6/6
 ```
 
 这不是我们能忽略的：任务 `retro-console-soc` 的镜像基于 `fedora:42`，构建时
 `dnf install` 直接失败，整个 trial 记为 error —— 而 error 按 **reward 0** 计且
-不允许剔除。在 12 任务的交叉验证里，dev 拿到 12/12 而 h20-43 只有 11/12，
+不允许剔除。在 12 任务的交叉验证里，dev 拿到 12/12 而 gpu-host 只有 11/12，
 差的就是这一个。
 
 **解法**：只把 `.fedoraproject.org` 的流量经 jump 转发，其余保持直连——
@@ -118,7 +118,7 @@ support GPU allocation.
 
 errored trial 按 **reward 0** 计且不允许剔除，所以**当前分数上限是 70/74 = 94.6%**。
 
-这不是疏忽，是权衡的结果。h20-43 的 8 张卡正被训练任务占满（h20-44/45 同样），
+这不是疏忽，是权衡的结果。gpu-host 的 8 张卡正被训练任务占满（gpu-host/45 同样），
 装上 nvidia-container-toolkit 并让评测任务申请 GPU，会直接和训练抢卡。
 在训练让出卡之前，宁可让这 4 个任务记 0 分。
 
@@ -161,7 +161,7 @@ overlayfs 叠在 btrfs 上会破坏写入内容，apt 下载的 InRelease 签名
 「分数低是不是环境有问题」只有一个直接的答法：跑 oracle。它执行任务自带的
 参考解，不调模型，所以满分意味着容器、判分、数据都是好的，不满分就是环境
 坏了。此前那次 oracle 全绿是在旧机器、旧数据集（74 任务）上做的，
-**TB 2.1 加 h20-45 从没验过**。
+**TB 2.1 加 gpu-host 从没验过**。
 
 25 个任务，**22 个满分，2 个失败**。逐个查完根因，两个都不归咎于本部署：
 

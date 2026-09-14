@@ -24,6 +24,8 @@
 #
 # Usage: one.sh <name> <bundle> [extra --ak args...]
 set -euo pipefail
+# MODEL is the name the endpoint serves; override for a different deployment.
+export MODEL="${MODEL:-Qwen3.8-27B-FP8}"
 # SECTIONS overrides which prompt sections are appended; see benchmark/src/crux/prompts.py
 export SECTIONS="${SECTIONS:-doing_full,cc_tools}"
 NAME="$1"; BUNDLE="$2"; shift 2
@@ -38,7 +40,7 @@ export PYTHONPATH=/scratch/crux-next-src:/root/.local/share/uv/tools/harbor/lib/
 run() {
   cd /scratch/crux
   harbor run --dataset terminal-bench/terminal-bench-2-1 \
-    --agent crux.pi_agent:CruxPiAgent --model openai/Qwen3.8-Flash-Next-FP8 \
+    --agent crux.pi_agent:CruxPiAgent --model "openai/${MODEL:-Qwen3.8-27B-FP8}" \
     --n-attempts 1 --n-concurrent 16 --jobs-dir "/scratch/$1" --env docker --yes \
     --ak variant=default --ak model_api=openai-completions \
     --ak bundle="$2" --ak sections="${SECTIONS:-doing_full,cc_tools}" \

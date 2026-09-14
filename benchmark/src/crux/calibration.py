@@ -49,7 +49,7 @@ CALIBRATION_MAX_OUTPUT_TOKENS = 32768
 # 35 was measured on the previous node (h20-w06, cards 4-7): 587 tok/s across
 # 8-way concurrency there, 320 at 54 containers.
 #
-# Re-measured on the current node (h20-43, cards 0-3) under 29 live containers:
+# Re-measured on the current node (gpu-host, cards 0-3) under 29 live containers:
 #
 #     idle, single stream                340 tok/s
 #     29 containers, single stream        84 tok/s
@@ -173,7 +173,7 @@ CONSTANTS: tuple[Constant, ...] = (
     Constant("llm_timeout", f"a {CALIBRATION_BUDGET_SEC:.0f}s agent budget", _timeout),
     Constant("max_tokens", f"the {CALIBRATION_MODEL} deployment", _output_cap),
     Constant("stall caps", "terminal-bench at 8x", _stall_caps),
-    Constant("concurrency", f"{CALIBRATION_CONTAINERS} containers on h20-43", _throughput),
+    Constant("concurrency", f"{CALIBRATION_CONTAINERS} containers on gpu-host", _throughput),
 )
 
 
