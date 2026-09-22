@@ -8,6 +8,11 @@ export interface OutputAccumulatorOptions {
 	maxLines?: number;
 	maxBytes?: number;
 	tempFilePrefix?: string;
+	/**
+	 * Share of the line and byte budgets spent on the output's first lines when
+	 * it is truncated, for snapshots that ask for them. 0 keeps only the tail.
+	 */
+	headShare?: number;
 }
 
 export interface OutputSnapshot {
@@ -54,11 +59,23 @@ export class OutputAccumulator {
 	private tempFilePath: string | undefined;
 	private tempFileStream: WriteStream | undefined;
 
+	private readonly headMaxLines: number;
+	private readonly headMaxBytes: number;
+	private headText = "";
+	private headBytes = 0;
+	private headLines = 0;
+	private headPending = "";
+	private headClosed: boolean;
+
 	constructor(options: OutputAccumulatorOptions = {}) {
 		this.maxLines = options.maxLines ?? DEFAULT_MAX_LINES;
 		this.maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
 		this.maxRollingBytes = Math.max(this.maxBytes * 2, 1);
 		this.tempFilePrefix = options.tempFilePrefix ?? "pi-output";
+		const headShare = Math.min(Math.max(options.headShare ?? 0, 0), 0.5);
+		this.headMaxLines = Math.floor(this.maxLines * headShare);
+		this.headMaxBytes = Math.floor(this.maxBytes * headShare);
+		this.headClosed = this.headMaxLines === 0 || this.headMaxBytes === 0;
 	}
 
 	append(data: Buffer): void {
@@ -88,24 +105,14 @@ export class OutputAccumulator {
 		}
 	}
 
-	snapshot(options: { persistIfTruncated?: boolean } = {}): OutputSnapshot {
-		const tailTruncation = truncateTail(this.getSnapshotText(), {
-			maxLines: this.maxLines,
-			maxBytes: this.maxBytes,
-		});
+	/**
+	 * `withHead` keeps the output's first lines ahead of the tail when it is
+	 * truncated, out of the same budget. It is for the result the model reads;
+	 * a live view wants only the latest lines.
+	 */
+	snapshot(options: { persistIfTruncated?: boolean; withHead?: boolean } = {}): OutputSnapshot {
 		const truncated = this.totalLines > this.maxLines || this.totalDecodedBytes > this.maxBytes;
-		const truncatedBy = truncated
-			? (tailTruncation.truncatedBy ?? (this.totalDecodedBytes > this.maxBytes ? "bytes" : "lines"))
-			: null;
-		const truncation: TruncationResult = {
-			...tailTruncation,
-			truncated,
-			truncatedBy,
-			totalLines: this.totalLines,
-			totalBytes: this.totalDecodedBytes,
-			maxLines: this.maxLines,
-			maxBytes: this.maxBytes,
-		};
+		const truncation = (truncated && options.withHead && this.headAndTail()) || this.tailOnly(truncated);
 
 		if (options.persistIfTruncated && truncation.truncated) {
 			this.ensureTempFile();
@@ -115,6 +122,49 @@ export class OutputAccumulator {
 			content: truncation.content,
 			truncation,
 			fullOutputPath: this.tempFilePath,
+		};
+	}
+
+	private tailOnly(
+		truncated: boolean,
+		budget = { maxLines: this.maxLines, maxBytes: this.maxBytes },
+	): TruncationResult {
+		const tailTruncation = truncateTail(this.getSnapshotText(), budget);
+		const truncatedBy = truncated
+			? (tailTruncation.truncatedBy ?? (this.totalDecodedBytes > this.maxBytes ? "bytes" : "lines"))
+			: null;
+		return {
+			...tailTruncation,
+			truncated,
+			truncatedBy,
+			totalLines: this.totalLines,
+			totalBytes: this.totalDecodedBytes,
+			maxLines: this.maxLines,
+			maxBytes: this.maxBytes,
+		};
+	}
+
+	/**
+	 * The output's first lines, a marker for what was left out, then the tail --
+	 * or undefined when that would not show anything the tail alone does not.
+	 */
+	private headAndTail(): TruncationResult | undefined {
+		if (this.headLines === 0) return undefined;
+		const tail = this.tailOnly(true, {
+			maxLines: this.maxLines - this.headLines,
+			maxBytes: this.maxBytes - this.headBytes,
+		});
+		// A single line too long for the budget has no first lines to keep.
+		if (tail.lastLinePartial) return undefined;
+		const tailStart = this.totalLines - tail.outputLines + 1;
+		const omitted = tailStart - this.headLines - 1;
+		if (omitted <= 0) return undefined;
+		return {
+			...tail,
+			content: `${this.headText}\n[... ${omitted} ${omitted === 1 ? "line" : "lines"} omitted ...]\n\n${tail.content}`,
+			outputLines: this.headLines + tail.outputLines,
+			outputBytes: this.headBytes + tail.outputBytes,
+			headLines: this.headLines,
 		};
 	}
 
@@ -150,6 +200,10 @@ export class OutputAccumulator {
 			return;
 		}
 
+		if (!this.headClosed) {
+			this.captureHead(text);
+		}
+
 		const bytes = byteLength(text);
 		this.totalDecodedBytes += bytes;
 		this.tailText += text;
@@ -174,6 +228,33 @@ export class OutputAccumulator {
 			this.hasOpenLine = tail.length > 0;
 		}
 		this.totalLines = this.completedLines + (this.hasOpenLine ? 1 : 0);
+	}
+
+	/** Keeps whole lines from the start of the output until the head budget is spent. */
+	private captureHead(text: string): void {
+		this.headPending += text;
+		let newline = this.headPending.indexOf("\n");
+		while (newline !== -1) {
+			const line = this.headPending.slice(0, newline + 1);
+			const bytes = byteLength(line);
+			if (this.headLines + 1 > this.headMaxLines || this.headBytes + bytes > this.headMaxBytes) {
+				this.closeHead();
+				return;
+			}
+			this.headText += line;
+			this.headBytes += bytes;
+			this.headLines++;
+			this.headPending = this.headPending.slice(newline + 1);
+			newline = this.headPending.indexOf("\n");
+		}
+		if (byteLength(this.headPending) > this.headMaxBytes - this.headBytes) {
+			this.closeHead();
+		}
+	}
+
+	private closeHead(): void {
+		this.headClosed = true;
+		this.headPending = "";
 	}
 
 	private trimTail(): void {

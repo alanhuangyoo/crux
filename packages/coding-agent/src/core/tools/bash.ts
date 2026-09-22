@@ -42,6 +42,22 @@ const MAX_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000;
  */
 export const DEFAULT_BASH_TIMEOUT_SECONDS = 600;
 
+/**
+ * Share of the output budget kept from the start when a command's output is
+ * truncated; the rest stays with the tail.
+ *
+ * pi kept only the last 2,000 lines, which drops exactly what a long build or
+ * test run prints first -- the first compiler error, the top of a traceback,
+ * the head of a listing. The agents this was compared against both keep it:
+ * Claude Code reads the first 30,000 bytes and persists the rest, Codex cuts
+ * the middle and keeps both ends. Over 356 Terminal-Bench 2.1 trials, 71
+ * outputs were truncated -- in 23% of the failed trials against 6% of the
+ * solved -- and 20 of those 71 were followed by the model going back for the
+ * part it lost, with `| head` or by opening the full output. A fifth keeps the
+ * tail as the main view, since the end of a run is usually its verdict.
+ */
+export const BASH_OUTPUT_HEAD_SHARE = 0.2;
+
 export function resolveTimeoutMs(timeout: number | undefined): number {
 	if (timeout === undefined) return DEFAULT_BASH_TIMEOUT_SECONDS * 1000;
 	if (!Number.isFinite(timeout) || timeout <= 0) {
@@ -270,7 +286,7 @@ export function createShellToolDefinition(
 	return {
 		name: config.name,
 		label: config.label,
-		description: `Execute a ${config.shellName} command in the current working directory. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
+		description: `Execute a ${config.shellName} command in the current working directory. Returns stdout and stderr. Output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first), keeping the first lines and the last. If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
 		promptSnippet: config.promptSnippet,
 		promptGuidelines: exposeSessionEnvironment && config.promptGuidelines ? [...config.promptGuidelines] : undefined,
 		parameters: bashSchema,
@@ -290,7 +306,10 @@ export function createShellToolDefinition(
 				exposeSessionEnvironment,
 				ctx,
 			);
-			const output = new OutputAccumulator({ tempFilePrefix: config.tempFilePrefix });
+			const output = new OutputAccumulator({
+				tempFilePrefix: config.tempFilePrefix,
+				headShare: BASH_OUTPUT_HEAD_SHARE,
+			});
 			let acceptingOutput = true;
 			let updateTimer: NodeJS.Timeout | undefined;
 			let updateDirty = false;
@@ -347,7 +366,7 @@ export function createShellToolDefinition(
 				output.finish();
 				clearUpdateTimer();
 				emitOutputUpdate();
-				const snapshot = output.snapshot({ persistIfTruncated: true });
+				const snapshot = output.snapshot({ persistIfTruncated: true, withHead: true });
 				await output.closeTempFile();
 				return snapshot;
 			};
@@ -358,15 +377,17 @@ export function createShellToolDefinition(
 				let details: BashToolDetails | undefined;
 				if (truncation.truncated) {
 					details = { truncation, fullOutputPath: snapshot.fullOutputPath };
-					const startLine = truncation.totalLines - truncation.outputLines + 1;
+					const headLines = truncation.headLines ?? 0;
+					const startLine = truncation.totalLines - (truncation.outputLines - headLines) + 1;
 					const endLine = truncation.totalLines;
+					const shown = headLines > 0 ? `1-${headLines} and ${startLine}-${endLine}` : `${startLine}-${endLine}`;
 					if (truncation.lastLinePartial) {
 						const lastLineSize = formatSize(output.getLastLineBytes());
 						text += `\n\n[Showing last ${formatSize(truncation.outputBytes)} of line ${endLine} (line is ${lastLineSize}). Full output: ${snapshot.fullOutputPath}]`;
 					} else if (truncation.truncatedBy === "lines") {
-						text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${snapshot.fullOutputPath}]`;
+						text += `\n\n[Showing lines ${shown} of ${truncation.totalLines}. Full output: ${snapshot.fullOutputPath}]`;
 					} else {
-						text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${snapshot.fullOutputPath}]`;
+						text += `\n\n[Showing lines ${shown} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${snapshot.fullOutputPath}]`;
 					}
 				}
 				return { text, details };

@@ -25,6 +25,8 @@ export interface TruncationResult {
 	totalBytes: number;
 	/** Number of complete lines in the truncated output */
 	outputLines: number;
+	/** Of `outputLines`, how many are the output's first lines, kept ahead of the tail. */
+	headLines?: number;
 	/** Number of bytes in the truncated output */
 	outputBytes: number;
 	/** Whether the last line was partially truncated (only for tail truncation edge case) */
