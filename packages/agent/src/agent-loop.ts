@@ -178,8 +178,8 @@ export const CARRIED_REASONING_MAX_CHARS = 8000;
 const CARRIED_REASONING_CHARS_PER_TOKEN = 2.5;
 
 /**
- * The end of the reasoning a turn was cut off in, when reasoning is all it
- * produced -- so the recovery can hand it back.
+ * The end of a turn's reasoning, when reasoning is all it produced -- so the
+ * recovery can hand it back.
  *
  * "Pick up mid-thought" assumes the thought is still there. On Claude it is:
  * thinking has its own `budget_tokens` below `max_tokens`, so a cut lands in
@@ -198,13 +198,16 @@ const CARRIED_REASONING_CHARS_PER_TOKEN = 2.5;
  * with 29-83% of their budget unspent. The reasoning is not a loop worth
  * cutting: 92-99% of its lines are distinct.
  *
+ * The same drop happens without a cut. A turn can also *stop* inside its
+ * reasoning -- `stopReason: "stop"`, no text, no tool call -- and it is dropped
+ * the same way; see `EMPTY_ANSWER_NOTICE` for how often.
+ *
  * The end is quoted, not the start: the start is the plan the model will
  * rebuild in a sentence, the end is the work it cannot. Bounded to a sixteenth
  * of the window so that on a small deployment a few recoveries cannot crowd
  * out the conversation they are recovering.
  */
-export function cutOffReasoning(message: AssistantMessage, contextWindow?: number): string | undefined {
-	if (message.stopReason !== "length") return undefined;
+export function strandedReasoning(message: AssistantMessage, contextWindow?: number): string | undefined {
 	const parts: string[] = [];
 	for (const block of message.content) {
 		if (block.type === "toolCall") return undefined;
@@ -225,11 +228,43 @@ export function cutOffReasoning(message: AssistantMessage, contextWindow?: numbe
 	return `...${tail}`;
 }
 
-/** A recovery notice with the cut-off reasoning quoted ahead of it, when there is any. */
+/** Whether a turn said nothing and did nothing: no text, no tool call. */
+export function isEmptyAnswer(message: AssistantMessage): boolean {
+	return !message.content.some(
+		(block) => block.type === "toolCall" || (block.type === "text" && block.text.trim().length > 0),
+	);
+}
+
+export const MAX_EMPTY_ANSWER_RECOVERIES = 2;
+
+/**
+ * What the model is told when a turn stopped with neither an answer nor a tool
+ * call.
+ *
+ * The loop reads "no tool call" as "done", and that is right for a turn that
+ * says it is done. This one said nothing: it stopped inside its reasoning, on
+ * `stopReason: "stop"`, mid-derivation. Over 356 Terminal-Bench 2.1 trials on a
+ * 27B reasoning model there were 28 such turns in 14 trials, with a median of
+ * 6,135 characters of reasoning each, all of it dropped from the next request.
+ * Three runs ended on one -- `gpt2-codegolf` at minutes 1, 2 and 24, its
+ * deliverable never written -- and the notice they got instead asked whether
+ * the work had been verified.
+ *
+ * hermes-agent reads the same shape as a stall, not a completion, and nudges
+ * before it gives up; so does this, twice in a row at most. The model is left
+ * a way out in words, because an empty turn can also mean it thought it was
+ * finished.
+ */
+const EMPTY_ANSWER_NOTICE =
+	"Your last turn ended inside your reasoning, with no answer and no tool call, so nothing was done and " +
+	"nothing was said. Continue from where the reasoning stopped and make the next concrete move. If the task " +
+	"is already finished, say so in words.";
+
+/** A recovery notice with the stranded reasoning quoted ahead of it, when there is any. */
 function withCarriedReasoning(notice: string, reasoning: string | undefined): string {
 	if (!reasoning) return notice;
 	return (
-		"Your reasoning is not kept between turns, and this cut came before it reached any text or tool call, " +
+		"Your reasoning is not kept between turns, and this turn ended before it reached any text or tool call, " +
 		"so here is where it stopped, quoted from its end:\n\n" +
 		`<previous_reasoning>\n${reasoning}\n</previous_reasoning>\n\n` +
 		notice
@@ -301,6 +336,8 @@ interface LoopState {
 	readonly toolCallsAtLastNotice: number;
 	/** Consecutive notices bought by truncation alone, bounded by MAX_TRUNCATION_NOTICES. */
 	readonly truncationNotices: number;
+	/** Consecutive empty answers nudged, bounded by MAX_EMPTY_ANSWER_RECOVERIES. */
+	readonly emptyAnswerRecoveries: number;
 }
 
 const INITIAL_LOOP_STATE: LoopState = {
@@ -312,6 +349,7 @@ const INITIAL_LOOP_STATE: LoopState = {
 	toolCallsMade: 0,
 	toolCallsAtLastNotice: -1,
 	truncationNotices: 0,
+	emptyAnswerRecoveries: 0,
 };
 
 /**
@@ -577,10 +615,23 @@ async function runLoop(
 					state = { ...state, outputLimitRecoveries: state.outputLimitRecoveries + 1 };
 					recovery = withCarriedReasoning(
 						OUTPUT_LIMIT_RECOVERY_NOTICE,
-						cutOffReasoning(message, config.model.contextWindow),
+						strandedReasoning(message, config.model.contextWindow),
 					);
 					transition = { reason: "output_limit_recovery", attempt: state.outputLimitRecoveries };
 				}
+			}
+			// Stopped, not cut off, inside its reasoning: a stall rather than an
+			// answer. Only with reasoning to hand back -- a turn with nothing at all
+			// is not the measured shape (27 of 28 had reasoning), and an extension
+			// that blanks a message must still end the run the way it did.
+			const stranded =
+				message.stopReason === "stop" && state.emptyAnswerRecoveries < MAX_EMPTY_ANSWER_RECOVERIES
+					? strandedReasoning(message, config.model.contextWindow)
+					: undefined;
+			if (stranded !== undefined) {
+				state = { ...state, emptyAnswerRecoveries: state.emptyAnswerRecoveries + 1 };
+				recovery = withCarriedReasoning(EMPTY_ANSWER_NOTICE, stranded);
+				transition = { reason: "empty_answer_recovery", attempt: state.emptyAnswerRecoveries };
 			}
 			if (toolCalls.length > 0) {
 				// A "length" stop means the output was cut off by the token limit, so
@@ -602,7 +653,13 @@ async function runLoop(
 			if (!transition && toolCalls.length > 0 && hasMoreToolCalls) {
 				transition = { reason: "tool_calls", count: toolCalls.length };
 			}
-			state = { ...state, turnCount: state.turnCount + 1, toolCallsMade: state.toolCallsMade + toolCalls.length };
+			state = {
+				...state,
+				turnCount: state.turnCount + 1,
+				toolCallsMade: state.toolCallsMade + toolCalls.length,
+				// Consecutive: any turn that said or did something clears it.
+				emptyAnswerRecoveries: isEmptyAnswer(message) ? state.emptyAnswerRecoveries : 0,
+			};
 			await emit({ type: "turn_end", message, toolResults, transition });
 
 			lastCompletedTurn = {
@@ -694,8 +751,8 @@ async function runLoop(
 								type: "text",
 								text: withCarriedReasoning(
 									budgetNotice(elapsed, budgetMs, state.turnCount, cutOff),
-									cutOff && lastCompletedTurn
-										? cutOffReasoning(lastCompletedTurn.message, config.model.contextWindow)
+									lastCompletedTurn
+										? strandedReasoning(lastCompletedTurn.message, config.model.contextWindow)
 										: undefined,
 								),
 							},

@@ -12,8 +12,10 @@ import {
 	agentLoop,
 	agentLoopContinue,
 	CARRIED_REASONING_MAX_CHARS,
-	cutOffReasoning,
+	isEmptyAnswer,
+	MAX_EMPTY_ANSWER_RECOVERIES,
 	MAX_OUTPUT_TOKENS_RECOVERY_LIMIT,
+	strandedReasoning,
 } from "../src/agent-loop.ts";
 import { setDefaultStreamFn } from "../src/index.ts";
 import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool } from "../src/types.ts";
@@ -1817,17 +1819,25 @@ describe("a turn that died thinking gets its reasoning back", () => {
 	});
 });
 
-describe("cutOffReasoning", () => {
+describe("strandedReasoning", () => {
 	const died = (content: any[]) => createAssistantMessage(content, "length");
 
-	it("is empty unless the turn stopped on length", () => {
+	it("quotes a turn that stopped inside its reasoning as well as one cut off there", () => {
 		const m = createAssistantMessage([{ type: "thinking", thinking: "x" }]);
-		expect(cutOffReasoning(m)).toBeUndefined();
+		expect(strandedReasoning(m)).toBe("x");
+	});
+
+	it("is empty when the turn said something, which the conversation keeps", () => {
+		const m = createAssistantMessage([
+			{ type: "thinking", thinking: "x" },
+			{ type: "text", text: "done" },
+		]);
+		expect(strandedReasoning(m)).toBeUndefined();
 	});
 
 	it("is empty when a tool call was reached", () => {
 		expect(
-			cutOffReasoning(
+			strandedReasoning(
 				died([
 					{ type: "thinking", thinking: "x" },
 					{ type: "toolCall", id: "c", name: "t", arguments: {} },
@@ -1837,29 +1847,124 @@ describe("cutOffReasoning", () => {
 	});
 
 	it("never quotes redacted reasoning", () => {
-		expect(cutOffReasoning(died([{ type: "thinking", thinking: "opaque", redacted: true }]))).toBeUndefined();
+		expect(strandedReasoning(died([{ type: "thinking", thinking: "opaque", redacted: true }]))).toBeUndefined();
 	});
 
 	it("returns short reasoning whole", () => {
-		expect(cutOffReasoning(died([{ type: "thinking", thinking: "  all of it  " }]))).toBe("all of it");
+		expect(strandedReasoning(died([{ type: "thinking", thinking: "  all of it  " }]))).toBe("all of it");
 	});
 
 	it("keeps the end, bounded by the default and by a sixteenth of the window", () => {
 		const long = `${"a".repeat(30_000)}END`;
-		const unbounded = cutOffReasoning(died([{ type: "thinking", thinking: long }]))!;
+		const unbounded = strandedReasoning(died([{ type: "thinking", thinking: long }]))!;
 		expect(unbounded.endsWith("END")).toBe(true);
 		expect(unbounded.length).toBeLessThanOrEqual(CARRIED_REASONING_MAX_CHARS + 3);
 		// 8192 / 16 tokens at 2.5 characters each.
-		const small = cutOffReasoning(died([{ type: "thinking", thinking: long }]), 8192)!;
+		const small = strandedReasoning(died([{ type: "thinking", thinking: long }]), 8192)!;
 		expect(small.length).toBeLessThanOrEqual(1280 + 3);
 		expect(small.endsWith("END")).toBe(true);
 	});
 
 	it("opens on a line boundary when one is near", () => {
 		const long = `${"x".repeat(20_000)}\n${"y".repeat(100)}\nsecond line\nlast`;
-		const quoted = cutOffReasoning(died([{ type: "thinking", thinking: long }]), 128)!;
+		const quoted = strandedReasoning(died([{ type: "thinking", thinking: long }]), 128)!;
 		// 128 / 16 * 2.5 = 20 characters: "\nsecond line\nlast" fits, so it opens there.
 		expect(quoted).toBe("...second line\nlast");
+	});
+});
+
+describe("an empty answer is a stall, not a completion", () => {
+	// The loop reads "no tool call" as done. A turn that stopped inside its
+	// reasoning -- stopReason "stop", no text, no tool call -- said nothing, and
+	// its reasoning is dropped from the next request. gpt2-codegolf ended on one
+	// at minute 1, 2 and 24 with its deliverable never written.
+
+	const stalled = (thinking = "vocab = 256 bytes + 50000 merges, so the table is") =>
+		createAssistantMessage([{ type: "thinking", thinking }]);
+	const answered = () => createAssistantMessage([{ type: "text", text: "done" }]);
+	const acted = () =>
+		createAssistantMessage([{ type: "toolCall", id: "c1", name: "nope", arguments: {} } as any], "toolUse");
+
+	function runWith(replies: AssistantMessage[]) {
+		let call = 0;
+		const seen: any[] = [];
+		const streamFn = (_model: unknown, ctx: any) => {
+			seen.push(ctx);
+			const stream = new MockAssistantStream();
+			const message = replies[Math.min(call, replies.length - 1)]!;
+			call++;
+			queueMicrotask(() => stream.push({ type: "done", reason: "stop", message }));
+			return stream;
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [] };
+		const config: AgentLoopConfig = { model: createModel(), convertToLlm: identityConverter };
+		const stream = agentLoop([createUserMessage("go")], context, config, undefined, streamFn as any);
+		return { stream, seen, calls: () => call };
+	}
+
+	async function drain(stream: ReturnType<typeof agentLoop>) {
+		const events: AgentEvent[] = [];
+		for await (const event of stream) events.push(event);
+		return events;
+	}
+
+	const lastUserText = (ctx: any) => {
+		const users = ctx.messages.filter((m: any) => m.role === "user");
+		return JSON.stringify(users[users.length - 1].content);
+	};
+
+	it("asks it to go on, with the reasoning it can no longer see", async () => {
+		const h = runWith([stalled(), answered()]);
+		await drain(h.stream);
+		expect(h.calls()).toBe(2);
+		const retry = lastUserText(h.seen[1]);
+		expect(retry).toContain("ended inside your reasoning");
+		expect(retry).toContain("50000 merges");
+		// A way out in words, for a model that thought it was finished.
+		expect(retry).toContain("say so in words");
+	});
+
+	it("gives up after a bounded number in a row", async () => {
+		const h = runWith([stalled()]);
+		await drain(h.stream);
+		expect(h.calls()).toBe(1 + MAX_EMPTY_ANSWER_RECOVERIES);
+	});
+
+	it("leaves a real answer alone", async () => {
+		const h = runWith([answered()]);
+		await drain(h.stream);
+		expect(h.calls()).toBe(1);
+	});
+
+	it("leaves a turn with nothing at all alone, as an extension that blanks one expects", async () => {
+		const h = runWith([createAssistantMessage([])]);
+		await drain(h.stream);
+		expect(h.calls()).toBe(1);
+	});
+
+	it("counts in a row: a turn that acts clears the count", async () => {
+		// stall, act, then stalls until the limit.
+		const h = runWith([stalled(), acted(), stalled()]);
+		await drain(h.stream);
+		expect(h.calls()).toBe(2 + 1 + MAX_EMPTY_ANSWER_RECOVERIES);
+	});
+
+	it("records why the loop went on", async () => {
+		const h = runWith([stalled(), answered()]);
+		const events = await drain(h.stream);
+		const reasons = events
+			.filter((e) => e.type === "turn_end")
+			.map((e: any) => e.transition?.reason)
+			.filter(Boolean);
+		expect(reasons).toContain("empty_answer_recovery");
+	});
+
+	it("is only a turn with no text and no tool call", () => {
+		expect(isEmptyAnswer(stalled())).toBe(true);
+		expect(isEmptyAnswer(createAssistantMessage([]))).toBe(true);
+		expect(isEmptyAnswer(createAssistantMessage([{ type: "text", text: "  " }]))).toBe(true);
+		expect(isEmptyAnswer(answered())).toBe(false);
+		expect(isEmptyAnswer(acted())).toBe(false);
 	});
 });
 

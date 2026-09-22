@@ -507,6 +507,8 @@ export type TurnTransition =
 	| { reason: "output_limit_escalate"; maxTokens: number }
 	/** Truncated again with the ceiling already raised; telling the model. */
 	| { reason: "output_limit_recovery"; attempt: number }
+	/** Stopped with neither an answer nor a tool call; asking it to go on. */
+	| { reason: "empty_answer_recovery"; attempt: number }
 	/** Follow-up messages arrived after the agent would have stopped. */
 	| { reason: "follow_up"; count: number }
 	/** The agent stopped with budget left; it is being asked to reconsider. */
