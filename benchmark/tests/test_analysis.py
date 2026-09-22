@@ -23,6 +23,7 @@ def write_trial(
     breakdown=None,
     steps=10,
     cost=0.1,
+    verifier_stdout=None,
 ):
     d = root / name
     (d / "verifier").mkdir(parents=True)
@@ -48,6 +49,8 @@ def write_trial(
         (d / "verifier" / "breakdown.json").write_text(
             json.dumps({"checks": breakdown})
         )
+    if verifier_stdout is not None:
+        (d / "verifier" / "test-stdout.txt").write_text(verifier_stdout)
     return d
 
 
@@ -673,3 +676,60 @@ def test_same_scaffold_carries_no_such_warning():
     a = Job(path=Path("/tmp/a"), trials=[Trial(task="x", reward=1.0, agent="crux")])
     b = Job(path=Path("/tmp/b"), trials=[Trial(task="x", reward=0.0, agent="crux")])
     assert compare(a, b)["cross_agent"] is False
+
+
+UV_OUTAGE = """failed to download https://github.com/astral-sh/uv/releases/download/0.9.5/uv-x86_64-unknown-linux-gnu.tar.gz
+this may be a standard network error
+/tests/test.sh: line 10: /root/.local/bin/env: No such file or directory
+/tests/test.sh: line 19: uvx: command not found
+"""
+
+STALE_APT = """E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/n/nghttp2/libnghttp2-14.deb  404  Not Found
+/tests/test.sh: line 8: curl: command not found
+/tests/test.sh: line 19: uvx: command not found
+"""
+
+
+def test_a_verifier_that_never_started_its_tests_is_environmental(tmp_path):
+    """14 of 356 zeros were the verifier's runner failing to install.
+
+    Harbor records no exception for it, so the zero looked like any other --
+    and one arm that ran through a GitHub outage read as a 7-point regression.
+    """
+    write_trial(tmp_path, "sparql__a", reward=0.0, verifier_stdout=UV_OUTAGE)
+    write_trial(tmp_path, "qemu__b", reward=0.0, verifier_stdout=STALE_APT)
+    job = load_job(tmp_path)
+    assert job.by_category()["environment"] == 2
+    # Still a zero on the leaderboard; only the attribution changes.
+    assert job.score == 0.0
+
+
+def test_a_zero_whose_tests_reported_is_still_the_agents(tmp_path):
+    # The deliverable's own output can say "command not found"; with results
+    # on disk the tests ran, and the zero is about the work.
+    write_trial(
+        tmp_path, "alpha__x", reward=0.0, exit_reason="completed", ctrf=(0, 3),
+        verifier_stdout="curl: command not found\n",
+    )
+    assert load_job(tmp_path).trials[0].category == "false_completion"
+
+
+def test_a_harness_that_writes_only_a_reward_is_not_excused(tmp_path):
+    # No result file is not enough on its own: some tasks score with their own
+    # harness. Without the runner failing, an unexplained zero stays the agent's.
+    write_trial(tmp_path, "alpha__x", reward=0.0, exit_reason="completed",
+                verifier_stdout="score: 0.41 below threshold\n")
+    write_trial(tmp_path, "beta__y", reward=0.0, exit_reason="completed")
+    job = load_job(tmp_path)
+    assert "environment" not in job.by_category()
+
+
+def test_a_broken_verifier_is_not_a_regression_in_a_paired_diff(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    write_trial(a, "sparql__1", reward=1.0, exit_reason="completed", ctrf=(3, 3))
+    write_trial(b, "sparql__2", reward=0.0, verifier_stdout=UV_OUTAGE)
+    r = compare(load_job(a), load_job(b))
+    assert r["lost"] == []
+    assert r["broke_setup"] == ["sparql"]

@@ -97,6 +97,8 @@ class Trial:
     variant: str | None = None
     agent: str | None = None
     """Which scaffold produced the trial. Process metrics do not cross it."""
+    verifier_ran: bool = True
+    """False when the verifier's own test runner never started -- see `_verifier_ran`."""
 
     @property
     def solved(self) -> bool:
@@ -111,6 +113,11 @@ class Trial:
         # with the solved list printed beside them.
         if self.solved:
             return "solved"
+        # The verifier never ran its tests, so the zero says nothing about
+        # what the agent left behind. Harbor records no exception for this --
+        # the reward is an ordinary 0.0 -- so nothing below would catch it.
+        if not self.verifier_ran:
+            return "environment"
         # An exception with no agent activity at all: the trial never got to
         # the agent, whatever the exception is called. This is how pi's
         # baseline gets a fair reading -- 16 of its 89 trials died in
@@ -283,6 +290,44 @@ def _completion(trial_dir: Path) -> tuple[float | None, str | None]:
     return None, None
 
 
+# What a verifier prints when the test runner it was about to use never arrived.
+_VERIFIER_NEVER_RAN = (
+    "failed to download https://github.com/astral-sh/uv",
+    "uvx: command not found",
+    "uv: command not found",
+    "pytest: command not found",
+    "curl: command not found",
+)
+
+
+def _verifier_ran(trial_dir: Path) -> bool:
+    """Whether the verifier's tests started at all.
+
+    A task's `test.sh` installs its own runner -- curl, then uv, then
+    `uvx pytest` -- from the network, at verification time, after the agent
+    has finished. When that install fails the tests never start, `reward.txt`
+    says 0, and harbor records no exception. Over 356 trials of four arms
+    this was 14 zeros: `qemu-startup` and `qemu-alpine-ssh` in every arm
+    (the image's package index is stale, `apt-get install curl` returns 404),
+    and six more in the one arm that ran through a GitHub outage, where
+    `uv`'s download failed. That arm read 0.697 against 0.775 and looked like
+    a regression; over the trials whose tests ran it was 0.765.
+
+    Both conditions are required. No result file alone is not enough -- a
+    task with its own scoring harness may write only `reward.txt` -- and the
+    runner's absence alone is not either, when some tests did report.
+    """
+    verifier = trial_dir / "verifier"
+    if (verifier / "ctrf.json").exists() or (verifier / "breakdown.json").exists():
+        return True
+    try:
+        output = (verifier / "test-stdout.txt").read_text(errors="ignore")
+    except OSError:
+        # No evidence either way; an unexplained zero stays the agent's.
+        return True
+    return not any(sign in output for sign in _VERIFIER_NEVER_RAN)
+
+
 def load_trial(trial_dir: Path) -> Trial | None:
     result = _read_json(trial_dir / "result.json")
     if result is None:
@@ -326,6 +371,7 @@ def load_trial(trial_dir: Path) -> Trial | None:
             trial.cost_usd = final.get("total_cost_usd") or 0.0
 
     trial.completion, trial.completion_source = _completion(trial_dir)
+    trial.verifier_ran = _verifier_ran(trial_dir)
     return trial
 
 
