@@ -8,7 +8,13 @@ import {
 } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
-import { agentLoop, agentLoopContinue, MAX_OUTPUT_TOKENS_RECOVERY_LIMIT } from "../src/agent-loop.ts";
+import {
+	agentLoop,
+	agentLoopContinue,
+	CARRIED_REASONING_MAX_CHARS,
+	cutOffReasoning,
+	MAX_OUTPUT_TOKENS_RECOVERY_LIMIT,
+} from "../src/agent-loop.ts";
 import { setDefaultStreamFn } from "../src/index.ts";
 import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool } from "../src/types.ts";
 
@@ -1714,6 +1720,146 @@ describe("a turn cut off at the output token limit", () => {
 		const events = await drain(h.stream);
 		expect(JSON.stringify(events)).toContain("output token limit");
 		expect(h.seenMaxTokens[1]).toBeUndefined();
+	});
+});
+
+describe("a turn that died thinking gets its reasoning back", () => {
+	// "Pick up mid-thought" assumes the thought survives. Where reasoning and
+	// answer share one max_tokens, the cut lands inside the reasoning and
+	// nothing keeps it: the message has no text and no tool call, so it is
+	// dropped when the request is built. Measured over 356 trials, the retry
+	// re-derives the same plan from scratch and 43% of the time dies the same way.
+
+	const reasoning = `HEAD-PLAN: read the disassembly first\n${"working line\n".repeat(2000)}TAIL-RESULT kv=1.513`;
+	const died = (text = reasoning) => createAssistantMessage([{ type: "thinking", thinking: text }], "length");
+	const answered = () => createAssistantMessage([{ type: "text", text: "done" }]);
+
+	function runWith(replies: AssistantMessage[], configPatch: Partial<AgentLoopConfig> = {}) {
+		let call = 0;
+		const seen: any[] = [];
+		const streamFn = (_model: unknown, ctx: any) => {
+			seen.push(ctx);
+			const stream = new MockAssistantStream();
+			const message = replies[Math.min(call, replies.length - 1)]!;
+			call++;
+			queueMicrotask(() => stream.push({ type: "done", reason: "stop", message }));
+			return stream;
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [] };
+		// Asking for the ceiling already skips the silent escalation, which
+		// resends the same request and so has nothing to carry.
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			maxTokens: createModel().maxTokens,
+			...configPatch,
+		};
+		const stream = agentLoop([createUserMessage("go")], context, config, undefined, streamFn as any);
+		return { stream, seen, calls: () => call };
+	}
+
+	async function drain(stream: ReturnType<typeof agentLoop>) {
+		for await (const _ of stream) {
+		}
+	}
+
+	const lastUserText = (ctx: any) => {
+		const users = ctx.messages.filter((m: any) => m.role === "user");
+		return JSON.stringify(users[users.length - 1].content);
+	};
+
+	it("quotes the end of the reasoning into the retry the model receives", async () => {
+		const h = runWith([died(), answered()]);
+		await drain(h.stream);
+		expect(h.calls()).toBe(2);
+		const retry = lastUserText(h.seen[1]);
+		expect(retry).toContain("<previous_reasoning>");
+		expect(retry).toContain("TAIL-RESULT kv=1.513");
+		// The start is the plan, which the model rebuilds in a sentence.
+		expect(retry).not.toContain("HEAD-PLAN");
+		// Claude Code's own recovery text still closes it, now with something to resume.
+		expect(retry).toContain("Pick up mid-thought");
+	});
+
+	it("quotes nothing when the turn reached visible text, which the conversation keeps", async () => {
+		const withText = createAssistantMessage(
+			[
+				{ type: "thinking", thinking: reasoning },
+				{ type: "text", text: "partial answer" },
+			],
+			"length",
+		);
+		const h = runWith([withText, answered()]);
+		await drain(h.stream);
+		const retry = lastUserText(h.seen[1]);
+		expect(retry).toContain("Output token limit hit");
+		expect(retry).not.toContain("<previous_reasoning>");
+	});
+
+	it("carries it through the budget notice as well, which has the same promise", async () => {
+		const budget = 60 * 60_000;
+		const h = runWith([died()], {
+			timeBudgetMs: budget,
+			deadline: Date.now() + budget * 0.9,
+			stopBudgetShare: 0.8,
+			maxCompletionNotices: 1,
+		});
+		await drain(h.stream);
+		const last = lastUserText(h.seen[h.seen.length - 1]);
+		expect(last).toContain("% of your budget");
+		expect(last).toContain("TAIL-RESULT kv=1.513");
+	});
+
+	it("leaves an ordinary stop alone", async () => {
+		const h = runWith([answered()]);
+		await drain(h.stream);
+		expect(h.calls()).toBe(1);
+	});
+});
+
+describe("cutOffReasoning", () => {
+	const died = (content: any[]) => createAssistantMessage(content, "length");
+
+	it("is empty unless the turn stopped on length", () => {
+		const m = createAssistantMessage([{ type: "thinking", thinking: "x" }]);
+		expect(cutOffReasoning(m)).toBeUndefined();
+	});
+
+	it("is empty when a tool call was reached", () => {
+		expect(
+			cutOffReasoning(
+				died([
+					{ type: "thinking", thinking: "x" },
+					{ type: "toolCall", id: "c", name: "t", arguments: {} },
+				]),
+			),
+		).toBeUndefined();
+	});
+
+	it("never quotes redacted reasoning", () => {
+		expect(cutOffReasoning(died([{ type: "thinking", thinking: "opaque", redacted: true }]))).toBeUndefined();
+	});
+
+	it("returns short reasoning whole", () => {
+		expect(cutOffReasoning(died([{ type: "thinking", thinking: "  all of it  " }]))).toBe("all of it");
+	});
+
+	it("keeps the end, bounded by the default and by a sixteenth of the window", () => {
+		const long = `${"a".repeat(30_000)}END`;
+		const unbounded = cutOffReasoning(died([{ type: "thinking", thinking: long }]))!;
+		expect(unbounded.endsWith("END")).toBe(true);
+		expect(unbounded.length).toBeLessThanOrEqual(CARRIED_REASONING_MAX_CHARS + 3);
+		// 8192 / 16 tokens at 2.5 characters each.
+		const small = cutOffReasoning(died([{ type: "thinking", thinking: long }]), 8192)!;
+		expect(small.length).toBeLessThanOrEqual(1280 + 3);
+		expect(small.endsWith("END")).toBe(true);
+	});
+
+	it("opens on a line boundary when one is near", () => {
+		const long = `${"x".repeat(20_000)}\n${"y".repeat(100)}\nsecond line\nlast`;
+		const quoted = cutOffReasoning(died([{ type: "thinking", thinking: long }]), 128)!;
+		// 128 / 16 * 2.5 = 20 characters: "\nsecond line\nlast" fits, so it opens there.
+		expect(quoted).toBe("...second line\nlast");
 	});
 });
 

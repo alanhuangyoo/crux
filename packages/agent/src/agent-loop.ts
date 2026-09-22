@@ -171,6 +171,71 @@ const OUTPUT_LIMIT_RECOVERY_NOTICE =
 	"Output token limit hit. Resume directly -- no apology, no recap of what you were doing. " +
 	"Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces.";
 
+/** Most of a cut-off reasoning block that is quoted back, in characters. */
+export const CARRIED_REASONING_MAX_CHARS = 8000;
+
+/** For bounding the quote by the window; measured 1.95-3.99 on real trial text. */
+const CARRIED_REASONING_CHARS_PER_TOKEN = 2.5;
+
+/**
+ * The end of the reasoning a turn was cut off in, when reasoning is all it
+ * produced -- so the recovery can hand it back.
+ *
+ * "Pick up mid-thought" assumes the thought is still there. On Claude it is:
+ * thinking has its own `budget_tokens` below `max_tokens`, so a cut lands in
+ * visible text, and visible text stays in the conversation. On a server where
+ * reasoning and answer share one `max_tokens` the cut lands inside the
+ * reasoning, and nothing keeps it -- a message with no text and no tool call
+ * is dropped when the request is built, and chat templates strip reasoning
+ * before the last user message anyway. The model is told to resume a thought
+ * it can no longer see.
+ *
+ * Measured over 356 Terminal-Bench 2.1 trials on a 27B reasoning model: 292
+ * turns ended this way, in 60 trials, and 43% of them were followed by another.
+ * The next one opens by re-deriving the same plan -- "Let me stop dumping huge
+ * outputs. I have enough info" twice, near verbatim -- while the one before
+ * ended mid-calculation holding the numbers it needed. Nine trials ended on it
+ * with 29-83% of their budget unspent. The reasoning is not a loop worth
+ * cutting: 92-99% of its lines are distinct.
+ *
+ * The end is quoted, not the start: the start is the plan the model will
+ * rebuild in a sentence, the end is the work it cannot. Bounded to a sixteenth
+ * of the window so that on a small deployment a few recoveries cannot crowd
+ * out the conversation they are recovering.
+ */
+export function cutOffReasoning(message: AssistantMessage, contextWindow?: number): string | undefined {
+	if (message.stopReason !== "length") return undefined;
+	const parts: string[] = [];
+	for (const block of message.content) {
+		if (block.type === "toolCall") return undefined;
+		if (block.type === "text" && block.text.trim()) return undefined;
+		if (block.type === "thinking" && !block.redacted && block.thinking.trim()) parts.push(block.thinking);
+	}
+	const reasoning = parts.join("\n").trim();
+	if (!reasoning) return undefined;
+	let max = CARRIED_REASONING_MAX_CHARS;
+	if (contextWindow && contextWindow > 0) {
+		max = Math.min(max, Math.floor((contextWindow / 16) * CARRIED_REASONING_CHARS_PER_TOKEN));
+	}
+	if (reasoning.length <= max) return reasoning;
+	let tail = reasoning.slice(-max);
+	// Open on a line boundary when one is near, not mid-word.
+	const newline = tail.indexOf("\n");
+	if (newline >= 0 && newline < max / 5) tail = tail.slice(newline + 1);
+	return `...${tail}`;
+}
+
+/** A recovery notice with the cut-off reasoning quoted ahead of it, when there is any. */
+function withCarriedReasoning(notice: string, reasoning: string | undefined): string {
+	if (!reasoning) return notice;
+	return (
+		"Your reasoning is not kept between turns, and this cut came before it reached any text or tool call, " +
+		"so here is where it stopped, quoted from its end:\n\n" +
+		`<previous_reasoning>\n${reasoning}\n</previous_reasoning>\n\n` +
+		notice
+	);
+}
+
 /**
  * The escalated ceiling for a retry, or undefined when there is no more room.
  *
@@ -510,7 +575,10 @@ async function runLoop(
 					config = { ...config, maxTokens: ceiling };
 				} else if (state.outputLimitRecoveries < MAX_OUTPUT_TOKENS_RECOVERY_LIMIT) {
 					state = { ...state, outputLimitRecoveries: state.outputLimitRecoveries + 1 };
-					recovery = OUTPUT_LIMIT_RECOVERY_NOTICE;
+					recovery = withCarriedReasoning(
+						OUTPUT_LIMIT_RECOVERY_NOTICE,
+						cutOffReasoning(message, config.model.contextWindow),
+					);
 					transition = { reason: "output_limit_recovery", attempt: state.outputLimitRecoveries };
 				}
 			}
@@ -621,7 +689,17 @@ async function runLoop(
 				pendingMessages = [
 					{
 						role: "user",
-						content: [{ type: "text", text: budgetNotice(elapsed, budgetMs, state.turnCount, cutOff) }],
+						content: [
+							{
+								type: "text",
+								text: withCarriedReasoning(
+									budgetNotice(elapsed, budgetMs, state.turnCount, cutOff),
+									cutOff && lastCompletedTurn
+										? cutOffReasoning(lastCompletedTurn.message, config.model.contextWindow)
+										: undefined,
+								),
+							},
+						],
 						timestamp: Date.now(),
 					},
 				];
