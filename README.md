@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Terminal--Bench_2.1-0.773_pass@1-2ea44f" alt="pass@1 0.773">
-  <img src="https://img.shields.io/badge/tests-4%2C339_passing-2ea44f" alt="4339 tests">
+  <img src="https://img.shields.io/badge/tests-4%2C388_passing-2ea44f" alt="4388 tests">
   <img src="https://img.shields.io/badge/base-pi_(Earendil_Works)-blue" alt="forked from pi">
   <img src="https://img.shields.io/badge/model-self--hosted_Qwen3.8--27B-8a2be2" alt="self-hosted model">
 </p>
@@ -73,6 +73,12 @@ The second also cut a full run from six hours to two.
 Each change is attached to the measurement that motivated it. None was reasoned
 out in the abstract.
 
+Rows marked † came after the last full run: each was checked against that run's
+356 trajectories and has a test that fails without it, but none has been
+measured end to end yet. `benchmark/docs/reference-comparison.md` has the
+reference agent each one came from, and the designs the same trajectories ruled
+out.
+
 ### Context and compaction
 
 | Change | The measurement |
@@ -81,6 +87,7 @@ out in the abstract.
 | A rejected request halves and goes again | Characters per token is a property of the text — 3.99 on prose, 1.95 on compressed output — so no constant fits; a rejection is information |
 | A summary cut off at the cap is kept | Discarding it is right on a 200K window and disables compaction on a 32K one, where it is the ordinary outcome |
 | A keep budget spent by a trailing tool result still cuts | A cut point is never a tool result, so one large trailing result left the search with nowhere to cut and the compaction kept everything |
+| A task run as one turn gets the full summary † | One task is one conversational turn, so every cut split it and took the short turn-prefix path: 4 of 9 compactions kept **2,302–4,443 characters of ~250,000 tokens**, against 7,113–13,193 through the full prompt |
 
 ### Liveness
 
@@ -96,6 +103,9 @@ out in the abstract.
 |---|---|
 | A turn that answers nothing is not the agent finishing | `regex-chess` spent its whole output budget on thinking, stopped on `length`, and the run was recorded as settled having taken no action |
 | Two-phase recovery for a truncated turn | Raise the ceiling and retry silently first; tell the model only if it truncates again |
+| A turn cut off while thinking gets its reasoning back † | Reasoning is not replayed, so "pick up mid-thought" pointed at nothing: **292 turns in 60 trials** ended thinking at the limit, 43% followed by another that re-derived the same plan |
+| A turn that stops inside its reasoning is a stall, not an answer † | 28 such turns in 14 trials; three runs ended on one, `gpt2-codegolf` at minutes 1, 2 and 24 with its deliverable never written |
+| A tool call cut at the limit earns the raised ceiling too † | **All 42 cut tool calls** stopped at the initial 16K with the model's own 32K unused; 15 took two or more turns to get through |
 | A deadline the loop can see | Six of twenty-four failed trials ended cut off with work in flight, while the median solve used a fraction of its budget |
 | Stopping is questioned while the budget is unspent | Failed trials had spent a median 24% of their budget when they stopped; Claude Code's had spent 95% |
 | A truncated round cannot buy every budget notice | Treating truncation as "earned another notice" removed the only brake for the case that repeats, and a truncating run collected all forty |
@@ -107,6 +117,13 @@ out in the abstract.
 |---|---|
 | A default ceiling on one response | Claude Code's p99 output is 4,911 tokens against an 8K cap; the gap is what matters, not the cap |
 | A failed edit shows the file, not a rule | "The old text must match exactly" left nowhere to go; edits failed 43 times in 528 calls against 156 reads |
+| A truncated command keeps its first lines as well as its last † | A tail drops the first compiler error; 20 of 71 truncations were followed by the model going back for the part it lost |
+
+### The prompt
+
+| Change | The measurement |
+|---|---|
+| The model is told its reasoning is not kept † | Beside a tool call the visible text had a **median length of 0 characters**; the reasoning, dropped from every later request, a median of 1,016–1,349 |
 
 ## Method
 
@@ -120,8 +137,15 @@ Before a mechanism is tuned, it is counted. Compaction had its reserve and
 keep-depth settings tuned for days before anyone asked how often it succeeded;
 the answer was 14%.
 
+A zero is only the agent's when the verifier ran. 14 of the last four arms'
+zeros were the verifier's own test runner failing to install — two tasks can
+never score in this environment, and one arm read as a regression at p = 0.057
+through a GitHub outage, p = 0.73 once those were excluded. Each trial's time
+budget follows harbor's limit for that task, which runs from 80 to 1,600
+minutes, rather than one number for all of them.
+
 `benchmark/docs/` keeps the candidate explanations that were measured and
-rejected, which is most of them — twenty-four so far, several of them designs
+rejected, which is most of them — thirty-four so far, several of them designs
 that had already been written.
 
 ## Layout
@@ -132,7 +156,7 @@ benchmark/         the harness
   src/crux/        the harbor agent, prompt sections, endpoint tooling
   scripts/         preflight, paired comparison, mechanism health checks
   docs/            what was measured, including what it ruled out
-  tests/           464 tests
+  tests/           482 tests
 ```
 
 ## Running the benchmark
