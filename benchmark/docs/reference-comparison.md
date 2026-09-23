@@ -74,7 +74,8 @@ No scaffold mechanism separates them. The one variable that does is a
 consequence rather than a cause: a notice is only sent when the agent stops
 with most of its budget left, and a run that has solved the task stops early.
 Every failed run that stopped without one had spent at least 82.8% of its
-budget, most of them 94–140%, and all twenty were long tasks run out of time --
-train-fasttext four times, schemelike-metacircular-eval three, on limits of
-240 minutes and more. What is left inside a task is which way a technical
-judgement went on that run, and the time it was given to go the other way.
+budget, most of them 94–140%. Sixteen of the twenty were on tasks whose harbor
+limit is 240 minutes or more -- train-fasttext four times,
+schemelike-metacircular-eval three -- and the other four on 120-minute tasks.
+What is left inside a task is which way a technical judgement went on that run,
+and the time it was given to go the other way.
