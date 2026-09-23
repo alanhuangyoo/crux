@@ -26,6 +26,7 @@ import os
 import re
 import shlex
 import tempfile
+import tomllib
 import urllib.request
 from pathlib import Path
 
@@ -182,6 +183,67 @@ _REMOTE_BUNDLE = "/tmp/pi-nvm.tar.gz"
 # The submit section directs the model through `crux submit`, a tool that only
 # exists inside crux's own image, so it is off by default here.
 _DEFAULT_SECTIONS = ("scoring", "harness")
+
+# How long before harbor's kill pi's own clock runs out. pi winds down on its
+# deadline, and it starts a few seconds after harbor's clock does.
+_DEADLINE_MARGIN_SEC = 60
+
+
+def _harbor_agent_limit_sec(task_dir: Path, trial_dir: Path) -> float | None:
+    """The agent timeout harbor will enforce on this trial, computed its way.
+
+    Mirrors `Trial._compute_agent_timeout_sec`: the override if one is set, else
+    the task's `[agent] timeout_sec`, capped by `max_timeout_sec`, times the
+    agent timeout multiplier -- which falls back to `timeout_multiplier`, since
+    the trial's config.json leaves out anything left at its default. None when
+    any piece cannot be read, so the configured budget stands.
+    """
+    try:
+        task = tomllib.loads((task_dir / "task.toml").read_text())
+        config = json.loads((trial_dir / "config.json").read_text())
+    except (OSError, ValueError):
+        return None
+    agent = config.get("agent") or {}
+    base = agent.get("override_timeout_sec") or (task.get("agent") or {}).get("timeout_sec")
+    if not base:
+        return None
+    cap = agent.get("max_timeout_sec")
+    multiplier = config.get("agent_timeout_multiplier")
+    if multiplier is None:
+        multiplier = config.get("timeout_multiplier", 1.0)
+    return min(float(base), float(cap) if cap else float("inf")) * float(multiplier)
+
+
+def _time_budget(configured: str | None, limit_sec: float | None) -> str | None:
+    """`PI_TIME_BUDGET_SEC` for one trial, given harbor's limit on it.
+
+    A fixed 7200 was the budget on every task, and harbor's limit is not:
+    over Terminal-Bench 2.1 at an 8x multiplier it is 80 or 100 minutes on two
+    tasks, 120 on 48, and 160 to 1,600 on the other 39. So on two tasks pi was
+    killed before its own deadline arrived -- no warning, no wind-down -- on 48
+    its deadline and the kill were the same instant, and on 39 it stopped
+    itself with harbor's time still on the table: 19 failed trials over four
+    arms ran into the 120-minute budget on tasks that allowed 160 to 960
+    (train-fasttext four times, at 480).
+
+    A number is now capped at the limit, less a margin, which only ever
+    shortens it -- arms run before and after stay comparable. `task` takes the
+    whole limit instead. That lengthens a run as well as a trial, since a job
+    lasts as long as its longest task, so it is a setting rather than the
+    default.
+    """
+    if limit_sec is None:
+        return None if configured == "task" else configured
+    ceiling = max(1, int(limit_sec) - _DEADLINE_MARGIN_SEC)
+    if configured == "task":
+        return str(ceiling)
+    try:
+        seconds = float(configured) if configured is not None else 0.0
+    except ValueError:
+        return configured
+    if seconds <= 0:
+        return configured
+    return str(min(int(seconds), ceiling))
 
 
 class CruxPiAgent(Pi):
@@ -378,6 +440,30 @@ class CruxPiAgent(Pi):
             return
         logger.info("pi installed from bundle: %s", out.strip().splitlines()[-1:] or "?")
 
+    def _pace_to_harbor(self, environment: BaseEnvironment) -> None:
+        """Fit pi's time budget to the limit harbor enforces on this trial.
+
+        harbor hands the limit only to its own oracle agent, so it is worked
+        out here from the task's task.toml -- the environment directory's
+        parent -- and the trial's config.json. See `_time_budget`.
+        """
+        configured = self._pi_env.get("PI_TIME_BUDGET_SEC")
+        if configured is None:
+            return
+        env_dir = getattr(environment, "environment_dir", None)
+        limit = (
+            _harbor_agent_limit_sec(Path(env_dir).parent, Path(self.logs_dir).parent)
+            if env_dir is not None
+            else None
+        )
+        budget = _time_budget(configured, limit)
+        if budget is None:
+            logger.warning("time budget %r needs harbor's limit and it could not be read; running without one", configured)
+            self._pi_env = {k: v for k, v in self._pi_env.items() if k != "PI_TIME_BUDGET_SEC"}
+            return
+        self._pi_env = {**self._pi_env, "PI_TIME_BUDGET_SEC": budget}
+        logger.info("time budget: configured %s, harbor limit %s, using %s", configured, limit, budget)
+
     async def _deliver_pi_env(self, environment: BaseEnvironment) -> None:
         """Put pi's own settings where its run command will read them.
 
@@ -430,6 +516,7 @@ class CruxPiAgent(Pi):
         one. That keeps it plumbing: the difference between an answer that was
         never given and one that was given to the wrong channel.
         """
+        self._pace_to_harbor(environment)
         await self._deliver_pi_env(environment)
         await super().run(instruction, environment, context)
         path = _answer_path(instruction)
