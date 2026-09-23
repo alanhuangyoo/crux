@@ -47,10 +47,13 @@ when they were written. Every one of them has a unit test that fails without it.
   launchers' default: four hours where harbor allows it, unchanged on the 48
   tasks whose limit is 120 minutes. It lengthens a full run to about four hours,
   and the next run needs a control on the same setting.
-- **The completion notice's statistics** were measured at 32K: "6–33%" for
-  solved trials, "24–95%" for failed. On this corpus they are 1–66% and 5–100%
-  (p10–p90). The notice fires on most trials, so its wording is a behaviour
-  change and belongs in an A/B, not an edit.
+- **The completion notice's statistics.** It quoted "6–33%" for solved trials
+  and "24–95%" for failed: the spread of three agents' medians, in units of a
+  budget that has since doubled on long tasks. On this corpus the p10–p90 are
+  1–66% and 5–100%. It now quotes no share but the run's own, and keeps the
+  claim that does not move with the budget -- 44 of 83 failures stopped on their
+  own with over a fifth of it left. The notice fires on most trials, so the
+  next run's control has to carry the same wording.
 
 ## Within a task: what separates the run that solved it from the one that did not
 

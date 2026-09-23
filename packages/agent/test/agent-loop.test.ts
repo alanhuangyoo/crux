@@ -2072,6 +2072,24 @@ describe("stopping early, with the budget still on the table", () => {
 		expect(text).toContain("54m is left");
 	});
 
+	it("quotes no share but the run's own, since every other one moves with the budget", async () => {
+		// It used to tell the model "6-33%" and "24-95%": three agents' medians in
+		// units of a budget that has since doubled on long tasks.
+		const { stream } = run({ ...early, maxCompletionNotices: 1 }, [
+			createAssistantMessage([{ type: "text", text: "done" }]),
+		]);
+		const events = await drain(stream);
+		const notice = events.find(
+			(e) =>
+				e.type === "message_end" &&
+				(e as any).message?.role === "user" &&
+				JSON.stringify((e as any).message).includes("of your budget"),
+		);
+		const text = JSON.stringify((notice as any).message.content);
+		expect(text.match(/\d+%/g)).toEqual(["10%"]);
+		expect(text).toContain("about half of the runs that failed");
+	});
+
 	it("says nothing once most of the budget is gone", async () => {
 		// Past the threshold the question has no answer worth the turn it costs.
 		const { h, stream } = run({ timeBudgetMs: budget, deadline: Date.now() + budget * 0.05, stopBudgetShare: 0.8 }, [

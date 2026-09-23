@@ -97,6 +97,14 @@ function humanDuration(ms: number): string {
  * yes, so what this adds is the one thing the agent cannot see: how much of its
  * run is left. The threshold is self-limiting -- each round it buys costs time,
  * so the share climbs and the notices stop.
+ *
+ * What the model is told carries no share of its own. It used to quote "6-33%"
+ * for solved trials and "24-95%" for failed ones -- the spread of the three
+ * agents' medians in the table above, read out as one measurement, and in units
+ * of a budget that has since changed: at 14400 seconds on a long task every
+ * share halves. The claim kept is the one that does not move with the budget,
+ * re-measured on four arms at the 262,144 window: 44 of 83 failures stopped on
+ * their own with over a fifth of the budget left.
  */
 function budgetNotice(elapsedMs: number, budgetMs: number, steps: number, cutOff = false): string {
 	const remaining = Math.max(0, budgetMs - elapsedMs);
@@ -113,9 +121,8 @@ function budgetNotice(elapsedMs: number, budgetMs: number, steps: number, cutOff
 	return (
 		`You have been working ${humanDuration(elapsedMs)} over ${steps} steps, which is ${pct}% of your ` +
 		`budget. About ${humanDuration(remaining)} is left.\n\n` +
-		"Measured on this benchmark: trials that solved the task had spent 6-33% of their budget when they " +
-		"stopped; trials that failed had spent 24-95%, and most of the failures were not out of time -- they " +
-		"stopped early, on a check the agent had written for itself and then passed.\n\n" +
+		"Measured on this benchmark: about half of the runs that failed were not out of time -- they stopped " +
+		"on their own with time left, on a check the agent had written for itself and then passed.\n\n" +
 		"If time is what you have left, the cheapest thing you can do with it is one pass you have not done: " +
 		"re-read the task's own words, list what will be run against your work, and check the deliverable " +
 		"against that list rather than against the checks you already wrote. If you have genuinely finished " +
