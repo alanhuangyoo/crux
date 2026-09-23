@@ -43,8 +43,10 @@ when they were written. Every one of them has a unit test that fails without it.
 - **Yielding long commands back to the model**, as Codex does after at most 30
   seconds. It would free the 60 ten-minute waits, and turn the 161 long commands
   that finish into polling loops for a model that thinks before every turn.
-- **Longer budgets for long tasks.** `PI_TIME_BUDGET_SEC=14400` gives every task
-  up to four hours within harbor's limit; it lengthens a full run too.
+- **Longer budgets for long tasks.** `PI_TIME_BUDGET_SEC=14400` is now the
+  launchers' default: four hours where harbor allows it, unchanged on the 48
+  tasks whose limit is 120 minutes. It lengthens a full run to about four hours,
+  and the next run needs a control on the same setting.
 - **The completion notice's statistics** were measured at 32K: "6–33%" for
   solved trials, "24–95%" for failed. On this corpus they are 1–66% and 5–100%
   (p10–p90). The notice fires on most trials, so its wording is a behaviour

@@ -44,7 +44,7 @@ run() {
     --n-attempts 1 --n-concurrent 16 --jobs-dir "/scratch/$1" --env docker --yes \
     --ak variant=default --ak model_api=openai-completions \
     --ak bundle="$2" --ak sections="${SECTIONS:-doing_full,cc_tools,notes}" \
-    --ak pi_env=PI_TIME_BUDGET_SEC=7200,PI_STOP_BUDGET_SHARE=0.8,PI_MAX_OUTPUT_TOKENS=16384,PI_ESCALATE_SPENT_CEILING=1 \
+    --ak pi_env=PI_TIME_BUDGET_SEC=14400,PI_STOP_BUDGET_SHARE=0.8,PI_MAX_OUTPUT_TOKENS=16384,PI_ESCALATE_SPENT_CEILING=1 \
     --agent-timeout-multiplier 8.0 --env-file /scratch/crux/.env "${@:3}" \
     --exclude-task-name terminal-bench/exam-pdf-eval \
     --exclude-task-name terminal-bench/fp8-rmsnorm-gemm \

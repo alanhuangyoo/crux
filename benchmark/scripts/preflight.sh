@@ -14,9 +14,27 @@ set -uo pipefail
 fail=0
 say() { printf '  %-44s %s\n' "$1" "$2"; }
 
+# The launcher that is actually about to run: every check below reads this one
+# file. Two of them still read `/tmp/confirm.sh` after the output-token check
+# had been moved off it, so the model name and the arm settings came from
+# whichever round last wrote that file. Pass it explicitly: preflight.sh <launcher>
+LAUNCHER="${1:-}"
+if [ -z "$LAUNCHER" ]; then
+  LAUNCHER=$(ls -t /tmp/one.sh /tmp/ab.sh /tmp/budget-probe.sh 2>/dev/null | head -1)
+fi
+
 echo "== endpoint =="
 BASE=$(grep -oP '(?<=^OPENAI_BASE_URL=).*' /scratch/crux/.env 2>/dev/null)
-MODEL=$(grep -oP '(?<=--model openai/)[^ ]*' /tmp/confirm.sh 2>/dev/null | head -1)
+# The name the launcher will ask for: MODEL from the environment, as one.sh
+# exports it; else the launcher's own default (`${MODEL:-...}`); else a literal
+# `--model openai/<name>`. A plain match on `--model openai/` reads one.sh's
+# `"${MODEL:-...` as the name.
+MODEL="${MODEL:-$(grep -oP '(?<=MODEL:-)[^}"]+' "$LAUNCHER" 2>/dev/null | head -1)}"
+[ -n "$MODEL" ] || MODEL=$(grep -oP '(?<=--model openai/)[^ "$]+' "$LAUNCHER" 2>/dev/null | head -1)
+# Removed first: when the endpoint is down, curl writes nothing, and the file
+# a previous run left behind answered for it -- a dead endpoint reported the
+# model list it had served days before.
+rm -f /tmp/pf-models.json
 code=$(curl -s -o /tmp/pf-models.json -w '%{http_code}' -m 15 "$BASE/models")
 [ "$code" = "200" ] && say "reachable at $BASE" "ok" || { say "reachable at $BASE" "FAIL ($code)"; fail=1; }
 
@@ -27,7 +45,16 @@ except Exception: raise SystemExit
 for e in j.get('data') or []:
     if e.get('id')=='$MODEL': print(e.get('max_model_len') or '')
 " 2>/dev/null)
-[ -n "$win" ] && say "context window ($MODEL)" "$win" || { say "context window ($MODEL)" "UNKNOWN - model name mismatch?"; fail=1; }
+if [ -n "$win" ]; then
+  say "context window ($MODEL)" "$win"
+else
+  served=$(python3 -c "
+import json
+try: print(' '.join(e.get('id','') for e in json.load(open('/tmp/pf-models.json')).get('data') or []))
+except Exception: pass
+" 2>/dev/null)
+  say "context window ($MODEL)" "UNKNOWN - endpoint serves: ${served:-nothing readable}"; fail=1
+fi
 
 # The failure that cost the most: the model emits tool calls, the server does
 # not parse them, and pi sees text. Nine trials took zero actions.
@@ -37,15 +64,11 @@ tc=$(curl -s -m 90 "$BASE/chat/completions" -H 'Content-Type: application/json' 
 [ "${tc:-0}" -ge 1 ] && say "server returns native tool_calls" "ok" || { say "server returns native tool_calls" "FAIL - needs --tool-call-parser"; fail=1; }
 
 echo "== completion budget vs window =="
-# Read the launcher that is actually about to run, newest first. This read
+# (The launcher was resolved at the top.) This read
 # `/tmp/confirm.sh` unconditionally -- a leftover from another round -- so for a
 # day it answered "ok" about a script nobody was running, which is the same
 # shape of hole this whole file exists to close. Pass the launcher explicitly to
 # be sure: preflight.sh <launcher>
-LAUNCHER="${1:-}"
-if [ -z "$LAUNCHER" ]; then
-  LAUNCHER=$(ls -t /tmp/one.sh /tmp/ab.sh /tmp/budget-probe.sh 2>/dev/null | head -1)
-fi
 mx=$(grep -oP '(?<=PI_MAX_OUTPUT_TOKENS=)[0-9]+' "$LAUNCHER" 2>/dev/null | head -1)
 say "launcher being checked" "${LAUNCHER:-NONE FOUND}"
 if [ -n "$win" ] && [ -n "$mx" ]; then
@@ -60,13 +83,16 @@ if [ -n "$win" ] && [ -n "$mx" ]; then
   else
     say "PI_MAX_OUTPUT_TOKENS=$mx vs window $win, ceiling $ceil" "ok"
   fi
-else
+elif [ -z "$mx" ]; then
   say "PI_MAX_OUTPUT_TOKENS set" "FAIL - unset or launcher unreadable"; fail=1
+else
+  say "PI_MAX_OUTPUT_TOKENS=$mx" "UNCHECKED - window unknown (see endpoint)"; fail=1
 fi
 
 echo "== arm settings =="
 for k in PI_TIME_BUDGET_SEC PI_STOP_BUDGET_SHARE; do
-  grep -q "$k=" /tmp/confirm.sh && say "$k" "ok" || { say "$k" "MISSING"; fail=1; }
+  v=$(grep -oP "(?<=$k=)[^,\\ ]+" "$LAUNCHER" 2>/dev/null | head -1)
+  [ -n "$v" ] && say "$k" "$v" || { say "$k" "MISSING"; fail=1; }
 done
 
 echo "== the code that will actually run =="
