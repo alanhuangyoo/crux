@@ -49,3 +49,32 @@ when they were written. Every one of them has a unit test that fails without it.
   solved trials, "24–95%" for failed. On this corpus they are 1–66% and 5–100%
   (p10–p90). The notice fires on most trials, so its wording is a behaviour
   change and belongs in an A/B, not an edit.
+
+## Within a task: what separates the run that solved it from the one that did not
+
+Comparing solved against failed across tasks mixes the scaffold with the task:
+hard tasks time out more, truncate more and run longer whatever the agent does.
+The cleaner comparison is inside one task. 32 tasks were solved in some of the
+four arms and failed in others, under the same configuration. For each, the
+failed runs' mean minus the solved runs' mean, and a sign test over the 32:
+
+| Metric | failed > solved | failed < solved | p |
+|---|---:|---:|---:|
+| completion notices received | 6 | 26 | **0.001** |
+| minutes used | 21 | 11 | 0.110 |
+| reasoning per turn | 21 | 11 | 0.110 |
+| share of tool-call turns with a note | 11 | 20 | 0.150 |
+| edit failures | 8 | 4 | 0.388 |
+| turns cut off while thinking | 3 | 6 | 0.508 |
+| bash timeouts | 13 | 10 | 0.678 |
+| tool errors | 17 | 14 | 0.720 |
+| truncated command outputs | 6 | 5 | 1.000 |
+
+No scaffold mechanism separates them. The one variable that does is a
+consequence rather than a cause: a notice is only sent when the agent stops
+with most of its budget left, and a run that has solved the task stops early.
+Every failed run that stopped without one had spent at least 82.8% of its
+budget, most of them 94–140%, and all twenty were long tasks run out of time --
+train-fasttext four times, schemelike-metacircular-eval three, on limits of
+240 minutes and more. What is left inside a task is which way a technical
+judgement went on that run, and the time it was given to go the other way.
