@@ -304,6 +304,19 @@ function escalatedMaxTokens(config: AgentLoopConfig, inputTokens?: number): numb
 }
 
 /**
+ * The raised ceiling a turn cut off at its output limit earns, or undefined.
+ *
+ * Once per run, only when the setting asks for it, and only for a turn that
+ * spent the whole ceiling -- one cut short below it is pi's own case, handled a
+ * layer up. The same terms whether or not the turn reached a tool call.
+ */
+function ceilingAfterCut(message: AssistantMessage, config: AgentLoopConfig, state: LoopState): number | undefined {
+	if (state.escalated || config.escalateOnSpentCeiling !== true) return undefined;
+	if ((message.usage?.output ?? 0) < (config.maxTokens ?? 0)) return undefined;
+	return escalatedMaxTokens(config, message.usage?.input);
+}
+
+/**
  * The loop's recovery state, carried as one value rather than as loose flags.
  *
  * Claude Code's query loop threads a `State` object through every iteration and
@@ -602,10 +615,7 @@ async function runLoop(
 				// ceiling changes what the model is asked for, and pi has a
 				// characterization test pinning the old behaviour. The recovery
 				// half does not, per the comment above.
-				const spentTheCeiling =
-					config.escalateOnSpentCeiling === true && (message.usage?.output ?? 0) >= (config.maxTokens ?? 0);
-				const ceiling =
-					state.escalated || !spentTheCeiling ? undefined : escalatedMaxTokens(config, message.usage?.input);
+				const ceiling = ceilingAfterCut(message, config, state);
 				if (ceiling !== undefined) {
 					state = { ...state, escalated: true };
 					retrySilently = true;
@@ -637,9 +647,28 @@ async function runLoop(
 				// A "length" stop means the output was cut off by the token limit, so
 				// every tool call in the message may carry truncated arguments. Fail
 				// them all instead of executing potentially borked calls.
+				//
+				// The ceiling is raised here too, on the same terms as a turn cut off
+				// with no tool call. Claude Code escalates whatever the cut response
+				// held, and hermes-agent retries a truncated tool call with a boosted
+				// max_tokens; pi raised it only when there was no call. Measured over
+				// 356 Terminal-Bench 2.1 trials: 42 tool calls were cut, all 42 at the
+				// initial 16K in runs that had never raised it, with the model's own
+				// 32K unused -- and 15 of them took two or more turns, up to 32, to
+				// get the same tool through.
+				let raised = false;
+				if (message.stopReason === "length") {
+					const ceiling = ceilingAfterCut(message, config, state);
+					if (ceiling !== undefined) {
+						state = { ...state, escalated: true };
+						transition = { reason: "output_limit_escalate", maxTokens: ceiling };
+						config = { ...config, maxTokens: ceiling };
+						raised = true;
+					}
+				}
 				const executedToolBatch =
 					message.stopReason === "length"
-						? await failToolCallsFromTruncatedMessage(toolCalls, emit)
+						? await failToolCallsFromTruncatedMessage(toolCalls, emit, raised)
 						: await executeToolCalls(currentContext, message, config, signal, emit);
 				toolResults.push(...executedToolBatch.messages);
 				hasMoreToolCalls = !executedToolBatch.terminate;
@@ -878,8 +907,15 @@ async function streamAssistantResponse(
 async function failToolCallsFromTruncatedMessage(
 	toolCalls: AgentToolCall[],
 	emit: AgentEventSink,
+	raised = false,
 ): Promise<ExecutedToolCallBatch> {
 	const messages: ToolResultMessage[] = [];
+	// With room made, the call can come back whole. Without it, the same call
+	// hits the same limit, so the only way through is Claude Code's advice:
+	// smaller pieces.
+	const next = raised
+		? "The limit has been raised for your next response: re-issue the tool call with complete arguments."
+		: "Re-issue the tool call with complete arguments, and if it is too large for one response, split it: write the file in parts, or make several smaller edits.";
 	for (const toolCall of toolCalls) {
 		await emit({
 			type: "tool_execution_start",
@@ -890,7 +926,7 @@ async function failToolCallsFromTruncatedMessage(
 		const finalized: FinalizedToolCallOutcome = {
 			toolCall,
 			result: createErrorToolResult(
-				`Tool call "${toolCall.name}" was not executed: the response hit the output token limit, so its arguments may be truncated. Re-issue the tool call with complete arguments.`,
+				`Tool call "${toolCall.name}" was not executed: the response hit the output token limit, so its arguments may be truncated. ${next}`,
 			),
 			isError: true,
 		};

@@ -1711,17 +1711,64 @@ describe("a turn cut off at the output token limit", () => {
 		expect(h.calls()).toBe(1);
 	});
 
-	it("does not touch a truncated turn that did call tools", async () => {
-		// That path already exists: the calls are failed with a notice telling
-		// the model to reissue them with complete arguments.
-		const withCall = createAssistantMessage(
-			[{ type: "toolCall", id: "c1", name: "nope", arguments: {} } as any],
-			"length",
-		);
-		const h = runWith([withCall, answered()]);
-		const events = await drain(h.stream);
-		expect(JSON.stringify(events)).toContain("output token limit");
-		expect(h.seenMaxTokens[1]).toBeUndefined();
+	describe("a truncated turn that did call tools", () => {
+		// Its calls are still failed, never run: the arguments may be cut. What
+		// changed is the ceiling. Claude Code escalates whatever the cut response
+		// held and hermes-agent retries a truncated call with a boosted
+		// max_tokens; pi raised it only when there was no call. Measured: 42 tool
+		// calls cut over 356 trials, all 42 at the initial 16K, never raised.
+		const cutCall = () => {
+			const m = createAssistantMessage(
+				[{ type: "toolCall", id: "c1", name: "write", arguments: { path: "/app/big.c" } } as any],
+				"length",
+			);
+			m.usage.output = createModel().maxTokens;
+			return m;
+		};
+		const results = (events: AgentEvent[]) => JSON.stringify(events.filter((e) => e.type === "tool_execution_end"));
+
+		it("raises the ceiling for the reissue, as the no-call path does", async () => {
+			const h = runWith([cutCall(), answered()], { maxTokens: 1024 });
+			await drain(h.stream);
+			expect(h.seenMaxTokens[0]).toBe(1024);
+			expect(h.seenMaxTokens[1]).toBe(createModel().maxTokens);
+		});
+
+		it("still does not run the cut call, and says room was made", async () => {
+			const h = runWith([cutCall(), answered()], { maxTokens: 1024 });
+			const events = await drain(h.stream);
+			const text = results(events);
+			expect(text).toContain("was not executed");
+			expect(text).toContain("The limit has been raised");
+		});
+
+		it("says to split it when there is no more room to make", async () => {
+			// Already at the model's own ceiling: the same call would hit the same limit.
+			const h = runWith([cutCall(), answered()], { maxTokens: createModel().maxTokens });
+			const events = await drain(h.stream);
+			const text = results(events);
+			expect(text).toContain("was not executed");
+			expect(text).toContain("split it");
+			expect(h.seenMaxTokens[1]).toBe(createModel().maxTokens);
+		});
+
+		it("leaves the ceiling alone with the setting off", async () => {
+			const h = runWith([cutCall(), answered()], { maxTokens: 1024, escalateOnSpentCeiling: false });
+			await drain(h.stream);
+			expect(h.seenMaxTokens[1]).toBe(1024);
+		});
+
+		it("raises it once per run, whichever kind of cut spends it", async () => {
+			const cutThinking = () => {
+				const m = createAssistantMessage([{ type: "thinking", thinking: "x" }], "length");
+				m.usage.output = 1024;
+				return m;
+			};
+			const h = runWith([cutThinking(), cutCall(), answered()], { maxTokens: 1024 });
+			await drain(h.stream);
+			// Raised on the first cut; the second, now at the model's ceiling, is not raised again.
+			expect(h.seenMaxTokens).toEqual([1024, createModel().maxTokens, createModel().maxTokens]);
+		});
 	});
 });
 
