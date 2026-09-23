@@ -1123,7 +1123,22 @@ export async function compact(
 	let summary: string;
 	let summaryUsage: Usage;
 
-	if (isSplitTurn && turnPrefixMessages.length > 0) {
+	// A split turn with no history before it is the whole session so far -- one
+	// request and everything done about it -- and it gets the full summary.
+	//
+	// The turn-prefix path is for a turn too large to keep inside a longer
+	// conversation: a short three-part prompt at half the budget, beside a full
+	// summary of the turns before it. An agent run on one task has no turns
+	// before it, so every compaction lands here, and "No prior history" was the
+	// whole of the history section. Measured over 356 Terminal-Bench 2.1 trials:
+	// 4 of 9 compactions took this path and kept 2,302-4,443 characters of
+	// ~250,000 tokens of work; the 5 that cut at a turn boundary kept
+	// 7,113-13,193 through the full prompt. Claude Code and Codex summarize the
+	// history with one full prompt and do not distinguish the case. The full
+	// path also carries a previous summary forward, which this one never took.
+	const prefixIsTheHistory = isSplitTurn && turnPrefixMessages.length > 0 && messagesToSummarize.length === 0;
+
+	if (isSplitTurn && turnPrefixMessages.length > 0 && !prefixIsTheHistory) {
 		let historyText = "No prior history.";
 		let historyUsage: Usage | undefined;
 		if (messagesToSummarize.length > 0) {
@@ -1166,7 +1181,7 @@ export async function compact(
 	} else {
 		// Just generate history summary
 		const result = await generateSummaryWithUsage(
-			messagesToSummarize,
+			prefixIsTheHistory ? turnPrefixMessages : messagesToSummarize,
 			model,
 			settings.reserveTokens,
 			apiKey,

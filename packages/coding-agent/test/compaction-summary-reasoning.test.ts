@@ -128,7 +128,13 @@ describe("generateSummary reasoning options", () => {
 		});
 	});
 
-	it("preserves the standalone split-turn summary prompt", async () => {
+	// A split turn with nothing before it is the whole session so far: an agent
+	// run on one task, where every compaction cuts inside the single turn. It
+	// used to get the short prefix prompt at half the budget beside "No prior
+	// history" -- 4 of 9 compactions over 356 Terminal-Bench trials, keeping
+	// 2,302-4,443 characters of ~250,000 tokens, against 7,113-13,193 through
+	// the full prompt. It now gets the full one.
+	it("summarizes a split turn with no history before it in full", async () => {
 		const preparation: CompactionPreparation = {
 			firstKeptEntryId: "entry-keep",
 			messagesToSummarize: [],
@@ -139,12 +145,52 @@ describe("generateSummary reasoning options", () => {
 			settings: { enabled: true, reserveTokens: 2000, keepRecentTokens: 20 },
 		};
 
-		await compact(preparation, createModel(false), "test-key");
+		const result = await compact(preparation, createModel(false), "test-key");
 
+		expect(completeSimpleMock).toHaveBeenCalledTimes(1);
 		const requestContext = completeSimpleMock.mock.calls[0][1] as Context;
 		const prompt = JSON.stringify(requestContext.messages);
-		expect(prompt).toContain("This is the PREFIX of a turn that was too large to keep");
+		expect(prompt).toContain("Create a structured context checkpoint summary");
+		expect(prompt).not.toContain("This is the PREFIX of a turn that was too large to keep");
 		expect(prompt).toContain("<conversation>");
+		expect(result.summary).not.toContain("No prior history");
+	});
+
+	it("carries a previous summary forward when the prefix is the whole history", async () => {
+		const preparation: CompactionPreparation = {
+			firstKeptEntryId: "entry-keep",
+			messagesToSummarize: [],
+			turnPrefixMessages: messages,
+			isSplitTurn: true,
+			tokensBefore: 100,
+			previousSummary: "## Goal\nEarlier work: kv = 1.513",
+			fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+			settings: { enabled: true, reserveTokens: 2000, keepRecentTokens: 20 },
+		};
+
+		await compact(preparation, createModel(false), "test-key");
+
+		const prompt = JSON.stringify((completeSimpleMock.mock.calls[0][1] as Context).messages);
+		expect(prompt).toContain("<previous-summary>");
+		expect(prompt).toContain("kv = 1.513");
+	});
+
+	it("keeps the prefix prompt for a split turn inside a longer conversation", async () => {
+		const preparation: CompactionPreparation = {
+			firstKeptEntryId: "entry-keep",
+			messagesToSummarize: messages,
+			turnPrefixMessages: messages,
+			isSplitTurn: true,
+			tokensBefore: 100,
+			fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+			settings: { enabled: true, reserveTokens: 2000, keepRecentTokens: 20 },
+		};
+
+		const result = await compact(preparation, createModel(false), "test-key");
+
+		const prompts = completeSimpleMock.mock.calls.map((call) => JSON.stringify((call[1] as Context).messages));
+		expect(prompts.some((p) => p.includes("This is the PREFIX of a turn that was too large to keep"))).toBe(true);
+		expect(result.summary).toContain("Turn Context (split turn)");
 	});
 
 	it("rejects tool calls from conversation summaries", async () => {
@@ -156,10 +202,13 @@ describe("generateSummary reasoning options", () => {
 	});
 
 	it("rejects tool calls from split-turn summaries", async () => {
+		// The prefix-only path: a split turn with history before it. (With none,
+		// the prefix goes through the full summary, which rejects them too.)
+		completeSimpleMock.mockResolvedValueOnce(mockSummaryResponse);
 		completeSimpleMock.mockResolvedValueOnce(mockToolCallResponse);
 		const preparation: CompactionPreparation = {
 			firstKeptEntryId: "entry-keep",
-			messagesToSummarize: [],
+			messagesToSummarize: messages,
 			turnPrefixMessages: messages,
 			isSplitTurn: true,
 			tokensBefore: 100,
