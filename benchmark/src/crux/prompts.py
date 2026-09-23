@@ -747,6 +747,37 @@ commands, git.
 """
 
 
+# What the model sees of its own past turns, said plainly.
+#
+# This harness sets `replaysReasoning: false` (see pi_agent.py): a turn's
+# reasoning is not sent back, so the next turn sees the tool calls, their
+# results, and the visible text -- nothing of why. Measured over 25,871
+# tool-call turns in 356 Terminal-Bench 2.1 trials, the visible text beside a
+# tool call has a median length of 0 characters; about three turns in four
+# carry under 40. The reasoning beside them runs to a median of 1,000-1,350
+# characters, and all of it is gone on the next request. The model does not
+# know this: a turn that says "I have the full disassembly reconstructed in my
+# head" is followed by one that reconstructs it again.
+#
+# Both reference agents ask for a line of visible text around tool calls, for
+# the user's benefit: Codex's "brief preamble ... no more than 1-2 sentences
+# ... connect the dots with what's been done so far", Claude Code's short
+# updates "when you find something load-bearing". Here the reader that
+# matters is the model's next turn. The rare notes it already writes are the
+# right kind -- "Two issues: initialization explores only one mode, so the
+# bimodal case slips through undetected."
+NOTES_SECTION = """\
+# Keep your notes where you can see them
+
+Your reasoning is not shown to you again. On the next turn you see your tool
+calls, their results, and any text you wrote -- not what you were thinking. So
+when a step teaches you something you will need later (what a file really
+contains, which approach failed and why, a value you just worked out, what is
+left to do), put it in a line or two of plain text beside the tool call. Keep it
+short: a note to yourself, not a report. Skip it for a trivial read.
+"""
+
+
 PROMPT_SECTIONS = {
     "scoring": TERMINUS_SCORING_SECTION,
     "harness": TERMINUS_HARNESS_SECTION,
@@ -756,8 +787,9 @@ PROMPT_SECTIONS = {
     "doing": CC_DOING_TASKS_SECTION,
     "doing_full": CC_DOING_FULL_SECTION,
     "cc_tools": CC_TOOLS_SECTION,
+    "notes": NOTES_SECTION,
 }
-_SECTION_ORDER = ("scoring", "harness", "submit", "finish", "doing", "doing_full", "cc_tools")
+_SECTION_ORDER = ("scoring", "harness", "submit", "finish", "doing", "doing_full", "cc_tools", "notes")
 
 
 def build_sections(names) -> str:

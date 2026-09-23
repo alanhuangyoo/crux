@@ -74,7 +74,7 @@ exec harbor run --dataset terminal-bench/terminal-bench-2-1 \
   --env docker --yes \
   --ak variant=default --ak model_api=openai-completions \
   --ak bundle=/scratch/crux/pi-nvm-budget.tar.gz \
-  --ak sections=doing_full,cc_tools \
+  --ak sections=doing_full,cc_tools,notes \
   "$@" \
   --agent-timeout-multiplier 8.0 --env-file /scratch/crux/.env \
   "${ARGS[@]}"

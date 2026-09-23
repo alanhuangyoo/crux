@@ -34,7 +34,7 @@ run() {
     --agent crux.pi_agent:CruxPiAgent --model "openai/${MODEL:-Qwen3.8-27B-FP8}" \
     --n-attempts 1 --n-concurrent 8 --jobs-dir "/scratch/$1" --env docker --yes \
     --ak variant=default --ak model_api=openai-completions \
-    --ak bundle="$2" --ak sections=doing_full,cc_tools \
+    --ak bundle="$2" --ak sections=doing_full,cc_tools,notes \
     --ak pi_env=PI_TIME_BUDGET_SEC=14400,PI_STOP_BUDGET_SHARE=0.8,PI_MAX_OUTPUT_TOKENS=16384,PI_ESCALATE_SPENT_CEILING=1 \
     --agent-timeout-multiplier 16.0 --env-file /scratch/crux/.env "${@:3}"
 }

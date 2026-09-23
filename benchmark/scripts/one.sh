@@ -27,7 +27,7 @@ set -euo pipefail
 # MODEL is the name the endpoint serves; override for a different deployment.
 export MODEL="${MODEL:-Qwen3.8-27B-FP8}"
 # SECTIONS overrides which prompt sections are appended; see benchmark/src/crux/prompts.py
-export SECTIONS="${SECTIONS:-doing_full,cc_tools}"
+export SECTIONS="${SECTIONS:-doing_full,cc_tools,notes}"
 NAME="$1"; BUNDLE="$2"; shift 2
 export PATH=$HOME/.local/bin:$PATH
 export PYTHONPATH=/scratch/crux-next-src:/root/.local/share/uv/tools/harbor/lib/python3.13/site-packages
@@ -43,7 +43,7 @@ run() {
     --agent crux.pi_agent:CruxPiAgent --model "openai/${MODEL:-Qwen3.8-27B-FP8}" \
     --n-attempts 1 --n-concurrent 16 --jobs-dir "/scratch/$1" --env docker --yes \
     --ak variant=default --ak model_api=openai-completions \
-    --ak bundle="$2" --ak sections="${SECTIONS:-doing_full,cc_tools}" \
+    --ak bundle="$2" --ak sections="${SECTIONS:-doing_full,cc_tools,notes}" \
     --ak pi_env=PI_TIME_BUDGET_SEC=7200,PI_STOP_BUDGET_SHARE=0.8,PI_MAX_OUTPUT_TOKENS=16384,PI_ESCALATE_SPENT_CEILING=1 \
     --agent-timeout-multiplier 8.0 --env-file /scratch/crux/.env "${@:3}" \
     --exclude-task-name terminal-bench/exam-pdf-eval \

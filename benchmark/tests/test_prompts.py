@@ -291,3 +291,47 @@ def test_the_tools_directive_targets_the_measured_bash_share():
     assert "package installs" in body      # what the shell is still for
     for absent in ("Glob", "Grep", "MCP", "deferred"):
         assert absent not in body, absent
+
+
+def test_the_notes_section_is_reachable_and_comes_last():
+    from crux.prompts import build_sections
+
+    block = build_sections(["notes", "doing_full", "cc_tools"])
+    assert block.rstrip().endswith("Skip it for a trivial read.")
+    assert block.index("# Using your tools") < block.index("# Keep your notes where you can see them")
+
+
+def test_the_notes_section_says_what_the_model_cannot_see():
+    from crux.prompts import PROMPT_SECTIONS
+
+    body = PROMPT_SECTIONS["notes"]
+    # The premise, stated as a fact rather than a style preference.
+    assert "reasoning is not shown to you again" in body
+    # And kept short: Codex asks for 1-2 sentences, and the tokens are per turn.
+    assert "a line or two" in body
+    assert len(body.split()) < 120
+
+
+def test_the_notes_premise_matches_what_this_harness_does():
+    """The section is only true while the harness withholds reasoning.
+
+    pi_agent.py sets `replaysReasoning: false`. If that ever changes, the
+    section starts telling the model something false, so the two are pinned
+    together here.
+    """
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parent.parent / "src" / "crux" / "pi_agent.py").read_text()
+    assert 'compat.setdefault("replaysReasoning", False)' in source
+
+
+def test_every_launcher_carries_the_same_sections():
+    from pathlib import Path
+    import re
+
+    scripts = Path(__file__).resolve().parent.parent / "scripts"
+    found = set()
+    for name in ("one.sh", "ab.sh", "budget-probe.sh", "targeted.sh"):
+        text = (scripts / name).read_text()
+        found.update(re.findall(r"sections=\"?\$?\{?(?:SECTIONS:-)?([a-z_,]+)", text))
+    assert found == {"doing_full,cc_tools,notes"}
