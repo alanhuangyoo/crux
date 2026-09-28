@@ -768,6 +768,68 @@ const MIN_SUMMARY_TOKENS = 512;
  */
 const CHARS_PER_TOKEN = 2.5;
 
+/**
+ * The session's first request, kept word for word through every compaction.
+ *
+ * A summary is the model's account of the conversation, and its "Goal" section
+ * is a paraphrase of what was asked -- rewritten again on each later compaction
+ * by the update prompt. The references keep the user's own words instead:
+ * Codex carries user messages into the compacted history verbatim within 20,000
+ * tokens, hermes-agent inserts a bounded snapshot of the real user turn after
+ * the summary is generated, and Claude Code's summary prompt asks for every user
+ * message. For an agent run on one task, the first request is the task, and its
+ * exact wording -- the path, the format, "must not" -- is what the verifier
+ * holds it to.
+ *
+ * Only the first: a benchmark loop's notices also arrive as user messages, and
+ * keeping the newest ones first, as Codex does, would spend the budget on them
+ * and drop the task. It is re-read from the session each time, never from the
+ * previous summary, so no update pass can paraphrase it.
+ */
+export const ORIGINAL_REQUEST_HEADING = "## Original request (verbatim)";
+const ORIGINAL_REQUEST_END = "<!-- end of original request -->";
+/** Codex's bound on user text kept through a compaction. */
+const ORIGINAL_REQUEST_MAX_TOKENS = 20_000;
+
+function userMessageText(message: AgentMessage): string | undefined {
+	if (message.role !== "user") return undefined;
+	const content = (message as { content?: unknown }).content;
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return undefined;
+	const text = content
+		.filter((block): block is { type: "text"; text: string } => block?.type === "text")
+		.map((block) => block.text)
+		.join("\n");
+	return text || undefined;
+}
+
+/** The first user message on the path and where it sits, if there is one. */
+function findOriginalRequest(entries: SessionEntry[]): { index: number; text: string } | undefined {
+	for (let i = 0; i < entries.length; i++) {
+		for (const message of sessionEntryToContextMessages(entries[i])) {
+			const text = userMessageText(message);
+			if (text?.trim()) return { index: i, text };
+		}
+	}
+	return undefined;
+}
+
+/** A summary with the original request ahead of it, bounded by Codex's budget and the window. */
+export function withOriginalRequest(summary: string, request: string, contextWindow?: number): string {
+	let maxTokens = ORIGINAL_REQUEST_MAX_TOKENS;
+	if (contextWindow && contextWindow > 0) maxTokens = Math.min(maxTokens, Math.floor(contextWindow / 16));
+	const maxChars = Math.floor(maxTokens * CHARS_PER_TOKEN);
+	const kept = request.length <= maxChars ? request : `${request.slice(0, maxChars)}\n[... request truncated ...]`;
+	return `${ORIGINAL_REQUEST_HEADING}\n\n${kept}\n\n${ORIGINAL_REQUEST_END}\n\n${summary}`;
+}
+
+/** The summary without the verbatim request, so an update pass never sees it to rewrite. */
+export function stripOriginalRequest(summary: string): string {
+	if (!summary.startsWith(ORIGINAL_REQUEST_HEADING)) return summary;
+	const end = summary.indexOf(ORIGINAL_REQUEST_END);
+	return end === -1 ? summary : summary.slice(end + ORIGINAL_REQUEST_END.length).trimStart();
+}
+
 function estimatePromptTokens(text: string): number {
 	return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
@@ -982,6 +1044,8 @@ export interface CompactionPreparation {
 	previousSummary?: string;
 	/** File operations extracted from messagesToSummarize */
 	fileOps: FileOperations;
+	/** The session's first request, when it is being compacted away; kept verbatim. */
+	originalRequest?: string;
 	/** Compaction settions from settings.jsonl	*/
 	settings: CompactionSettings;
 }
@@ -1006,7 +1070,7 @@ export function prepareCompaction(
 	let boundaryStart = 0;
 	if (prevCompactionIndex >= 0) {
 		const prevCompaction = pathEntries[prevCompactionIndex] as CompactionEntry;
-		previousSummary = prevCompaction.summary;
+		previousSummary = stripOriginalRequest(prevCompaction.summary);
 		const firstKeptEntryIndex = pathEntries.findIndex((entry) => entry.id === prevCompaction.firstKeptEntryId);
 		boundaryStart = firstKeptEntryIndex >= 0 ? firstKeptEntryIndex : prevCompactionIndex + 1;
 	}
@@ -1055,6 +1119,12 @@ export function prepareCompaction(
 		}
 	}
 
+	// Only when the cut takes it: a request still in the kept messages is already
+	// there word for word.
+	const firstRequest = findOriginalRequest(pathEntries);
+	const originalRequest =
+		firstRequest && firstRequest.index < cutPoint.firstKeptEntryIndex ? firstRequest.text : undefined;
+
 	return {
 		firstKeptEntryId,
 		messagesToSummarize,
@@ -1064,6 +1134,7 @@ export function prepareCompaction(
 		previousSummary,
 		fileOps,
 		settings,
+		originalRequest,
 	};
 }
 
@@ -1198,6 +1269,10 @@ export async function compact(
 		);
 		summary = result.text;
 		summaryUsage = result.usage;
+	}
+
+	if (preparation.originalRequest) {
+		summary = withOriginalRequest(summary, preparation.originalRequest, model.contextWindow);
 	}
 
 	// Compute file lists and append to summary

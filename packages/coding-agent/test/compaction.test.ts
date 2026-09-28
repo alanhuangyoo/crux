@@ -13,9 +13,12 @@ import {
 	findCutPoint,
 	fitCompactionToWindow,
 	getLastAssistantUsage,
+	ORIGINAL_REQUEST_HEADING,
 	prepareCompaction,
 	shouldCompact,
+	stripOriginalRequest,
 	summaryTokenBudget,
+	withOriginalRequest,
 } from "../src/core/compaction/index.ts";
 import {
 	buildSessionContext,
@@ -504,6 +507,68 @@ describe("prepareCompaction with previous compaction", () => {
 		expect(summarizedText).toContain("user msg 3 - kept by compaction1");
 		expect(summarizedText).not.toContain("First summary");
 		expect(preparation!.previousSummary).toBe("First summary");
+	});
+});
+
+describe("the session's first request survives compaction word for word", () => {
+	// A summary's Goal is a paraphrase, rewritten on every later compaction.
+	// Codex keeps user text verbatim through compaction, hermes-agent inserts a
+	// snapshot of the real user turn, Claude Code's prompt asks for every user
+	// message. For one task, the first request is the task.
+	const task = "Write the flag to /app/out.txt, exactly one line, and do not modify /app/text.gcode.";
+	const settings: CompactionSettings = { ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 100 };
+
+	function session(extra: SessionEntry[] = []) {
+		const u1 = createMessageEntry(createUserMessage(task));
+		const a1 = createMessageEntry(
+			createAssistantMessage("parsing the gcode ".repeat(40), createMockUsage(4000, 800)),
+		);
+		const u2 = createMessageEntry(createUserMessage("You have been working 20m, which is 17% of your budget."));
+		const a2 = createMessageEntry(
+			createAssistantMessage("rendering the top layer ".repeat(40), createMockUsage(6000, 900)),
+		);
+		const a3 = createMessageEntry(
+			createAssistantMessage("checking the output ".repeat(40), createMockUsage(8000, 900)),
+		);
+		return [u1, a1, u2, a2, ...extra, a3];
+	}
+
+	it("is carried when the cut takes it", () => {
+		const preparation = prepareCompaction(session(), settings);
+		expect(preparation?.originalRequest).toBe(task);
+	});
+
+	it("is the first request, not the newest user message", () => {
+		// A loop's notices arrive as user messages too.
+		const preparation = prepareCompaction(session(), settings);
+		expect(preparation?.originalRequest).not.toContain("of your budget");
+	});
+
+	it("is re-read from the session on a later compaction, and the old copy is not fed to the update", () => {
+		const entries = session();
+		const earlier = createCompactionEntry(
+			withOriginalRequest("## Goal\nrender the text", "a paraphrase that drifted"),
+			entries[3].id,
+		);
+		const later = createMessageEntry(createAssistantMessage("more work ".repeat(60), createMockUsage(9000, 900)));
+		const preparation = prepareCompaction([...entries, earlier, later], settings);
+		expect(preparation?.originalRequest).toBe(task);
+		expect(preparation?.previousSummary).toBe("## Goal\nrender the text");
+		expect(preparation?.previousSummary).not.toContain(ORIGINAL_REQUEST_HEADING);
+	});
+
+	it("goes ahead of the summary, bounded, and comes back off intact", () => {
+		const summary = withOriginalRequest("## Goal\nx", task, 262144);
+		expect(summary.startsWith(`${ORIGINAL_REQUEST_HEADING}\n\n${task}`)).toBe(true);
+		expect(stripOriginalRequest(summary)).toBe("## Goal\nx");
+		// 8192 / 16 tokens at 2.5 characters each.
+		const long = withOriginalRequest("## Goal\nx", "a".repeat(10_000), 8192);
+		expect(long).toContain("[... request truncated ...]");
+		expect(long.length).toBeLessThan(1280 + 200);
+	});
+
+	it("leaves a summary with no copy alone", () => {
+		expect(stripOriginalRequest("## Goal\nx")).toBe("## Goal\nx");
 	});
 });
 

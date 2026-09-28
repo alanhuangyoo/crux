@@ -156,6 +156,31 @@ describe("generateSummary reasoning options", () => {
 		expect(result.summary).not.toContain("No prior history");
 	});
 
+	it("leads the stored summary with the original request, word for word", async () => {
+		const preparation: CompactionPreparation = {
+			firstKeptEntryId: "entry-keep",
+			messagesToSummarize: messages,
+			turnPrefixMessages: [],
+			isSplitTurn: false,
+			tokensBefore: 100,
+			originalRequest: "Write the flag to /app/out.txt, exactly one line.",
+			fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+			settings: { enabled: true, reserveTokens: 2000, keepRecentTokens: 20 },
+		};
+
+		const result = await compact(preparation, createModel(false), "test-key");
+
+		expect(
+			result.summary.startsWith(
+				"## Original request (verbatim)\n\nWrite the flag to /app/out.txt, exactly one line.",
+			),
+		).toBe(true);
+		expect(result.summary).toContain("Test summary");
+		// The summarizer is not handed the copy to paraphrase.
+		const prompt = JSON.stringify((completeSimpleMock.mock.calls[0][1] as Context).messages);
+		expect(prompt).not.toContain("## Original request (verbatim)");
+	});
+
 	it("carries a previous summary forward when the prefix is the whole history", async () => {
 		const preparation: CompactionPreparation = {
 			firstKeptEntryId: "entry-keep",

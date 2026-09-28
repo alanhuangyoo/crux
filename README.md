@@ -88,6 +88,7 @@ out.
 | A summary cut off at the cap is kept | Discarding it is right on a 200K window and disables compaction on a 32K one, where it is the ordinary outcome |
 | A keep budget spent by a trailing tool result still cuts | A cut point is never a tool result, so one large trailing result left the search with nowhere to cut and the compaction kept everything |
 | A task run as one turn gets the full summary † | One task is one conversational turn, so every cut split it and took the short turn-prefix path: 4 of 9 compactions kept **2,302–4,443 characters of ~250,000 tokens**, against 7,113–13,193 through the full prompt |
+| The task's own words survive compaction † | A summary's Goal is a paraphrase, rewritten at every compaction; Codex keeps user text verbatim within 20,000 tokens and hermes-agent inserts the real user turn after the summary. The first request now travels word for word. The 9 compactions so far kept every path and number, so this is for runs that compact more than once |
 
 ### Liveness
 
