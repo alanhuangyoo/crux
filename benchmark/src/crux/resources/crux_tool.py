@@ -243,12 +243,10 @@ def cmd_write(args):
 
 # ---- todo ------------------------------------------------------------------
 #
-# Ported from the plan/todo tools in Claude Code and Codex, and aimed at the
-# failure this project measured: across 70 tasks the agent declared completion
-# 28 times and was right 3 times. It was not lying — it had done most of the
-# work and lost track of the rest, and scoring is per-task all-or-nothing, so
-# the requirement it forgot cost the whole task. A list it writes down and has
-# to check off turns "I think I'm done" into something checkable.
+# Modelled on the plan/todo tools in Claude Code and Codex. Scoring is per-task
+# all-or-nothing, so a requirement the agent loses track of costs the whole
+# task; a list it writes down and has to check off turns "I think I'm done" into
+# something checkable.
 
 TODO_PATH = os.environ.get("CRUX_TODO_PATH", "/tmp/.crux-todo.json")
 
@@ -285,26 +283,14 @@ def _print_todo(items):
 def _report_green_at_bind(verify, number):
     """Run a check the moment it is bound, and say if it passes already.
 
-    A check written before the work is red when it is written and green when
-    the work is done, and that transition is the only part of it worth
-    anything. Across 87 scored trials the first check gets bound at 75-87% of
-    the way through a run -- after the last edit -- and 88% of trials never see
-    a bound check fail even once, including the ones that solved the task. A
-    checklist written afterwards describes what was built, and a description
+    A check written before the work is red when it is written and green when the
+    work is done, and that transition is what makes it worth anything. A check
+    bound after the last edit only describes what was built, and a description
     cannot fail.
 
-    Two of the tasks lost to claude-code show what that costs. On
-    sanitize-git-repo the agent bound `grep -rq '<your-aws-access-key-id>' .`
-    -- a case-sensitive search for the placeholder it had just substituted in
-    -- and the grader ran the same idea lowercased, over text the agent had not
-    looked at, for a token it had never heard of. It submitted after four
-    minutes of a two-hour budget. On cancel-async-tasks it bound its own
-    test_a.py and sigint_test.py; the grader asserted a count of two under
-    concurrency, which none of those scripts exercised.
-
-    This does not refuse anything. It states one fact the agent cannot
-    otherwise see -- that this check has never been observed to fail -- and
-    leaves the judgement where it was.
+    This refuses nothing. It states the one fact the agent cannot otherwise see,
+    that this check has never been observed to fail, and leaves the judgement
+    with the agent.
     """
     if not verify:
         return
@@ -361,16 +347,14 @@ def _breakable_targets(command, cwd):
 def _falsifies(command, cwd, target):
     """Whether the check notices `target` being wrong.
 
-    The whole mechanism, and the reason it needs no judgement: a check that
-    passes against a deliberately corrupted deliverable is not testing the
-    deliverable. Measured on this benchmark, 88% of trials never see a bound
-    check fail even once -- including the ones that solved the task -- so
-    "it passed" has been carrying no information.
+    A check that still passes against a deliberately corrupted deliverable is not
+    testing the deliverable, and deciding that needs no judgement about whether
+    the work is right.
 
     The file is restored from a byte-for-byte copy in a finally block, and the
-    copy is made before anything is written. If the restore fails the caller is
-    told loudly, because a silently corrupted deliverable is far worse than an
-    unverified check.
+    copy is made before anything is written. A failed restore is reported loudly,
+    because a silently corrupted deliverable is far worse than an unverified
+    check.
     """
     backup = target + ".crux-falsify-backup"
     try:
@@ -402,15 +386,8 @@ def _falsifies(command, cwd, target):
 def cmd_falsify(args):
     """Check that each bound check can fail, by breaking what it tests.
 
-    A check written after the work describes the work, and a description
-    cannot fail. Across 87 scored trials the first check is bound at 75-87% of
-    the way through a run -- after the last edit -- and 88% of trials never see
-    one go red. `crux submit` printed "all N item(s) verified" on 95% of runs
-    that scored and 100% of runs that did not: as evidence, worth nothing.
-
-    This asks the one question that settles it without any judgement about
-    whether the work is right. Empty the file a check names, run the check, put
-    the file back. A check that still passes was not testing that file.
+    Empty the file a check names, run the check, put the file back. A check that
+    still passes was not testing that file.
 
     Read-only in effect: every file is restored from a copy taken first, and a
     failure to restore is reported loudly rather than swallowed.
@@ -669,25 +646,15 @@ def _scan_for_invocations(root):
 def cmd_tests(args):
     """Print how this repository runs its own tests.
 
-    The failures this exists for do not come from skipping verification. On a
-    finished SWE-bench Verified run, 88 of 89 trials ran the repo's suite --
-    a median of 7 times when they solved and 10 when they failed -- and for 11
-    of the 16 failures the module holding the broken test was one the agent had
-    run. `django__django-16263` ran a 1243-test sweep, saw `Ran 1243 tests OK`,
-    and was still failed by the grader on a module inside that sweep.
-
-    What differed was the invocation. The grader ran
+    Running the right tests with the wrong invocation is a common way to pass
+    locally and fail the grader: a different settings module or parallelism
+    policy makes the same tests not the same tests. Django's grader, for
+    example, runs
 
         ./tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1 <modules>
 
-    and of the eight django failures, none passed `--parallel` and two passed
-    `--settings`. A different settings module and a different isolation policy
-    make the same tests not the same tests.
-
-    That is worth a command because it is the one thing in this loop the agent
-    does not have to judge. Whether its work is right is a judgement it has
-    been measured getting wrong; how this repository runs its tests is a fact
-    written down in the repository.
+    Whether the work is right is a judgement; how this repository runs its tests
+    is a fact written down in the repository, so it is worth a command.
     """
     root = _repo_root(args.path or ".")
     mine = _ecosystems(root)
@@ -760,29 +727,9 @@ def cmd_submit(args):
         )
         sys.exit(1)
 
-    # Off unless asked for, but the case for it is no longer the one it was
-    # built on. That case was a cross-arm step count -- crux said to stop
-    # earlier than the arm that solved the same task -- and the finished runs
-    # disproved it: on the full 89 it stops LATER on nine of the ten tasks it
-    # loses. Steps were the wrong unit.
-    #
-    # Wall-clock is the right one, and it says something the step count could
-    # not. Fraction of the agent's own budget used, by outcome:
-    #
-    #                       solved      failed     ran to the wall
-    #     TB 2.1 baseline    12.4%       54.9%        10 of 27
-    #     TB 2.1 fixed       16.3%       33.1%         3 of 17
-    #     SWE-bench           5.1%       10.1%         0 of 3
-    #
-    # Most failures are not timeouts. They are voluntary stops with two thirds
-    # of the budget unspent, and on SWE-bench with nine tenths of it. The agent
-    # quits early, and it quits on a green light it wrote itself: `crux submit`
-    # printed "all N item(s) verified" on 95% of the runs that scored and on
-    # 100% of the runs that did not.
-    #
-    # So this gate is asking for something the run can afford. That is a reason
-    # to measure it, still not a reason to leave it in the default path while
-    # something else is being measured through it.
+    # Off by default. Most failed runs are voluntary stops with much of the budget
+    # unspent, made on a green light the agent wrote itself, so the gate asks for
+    # more coverage only when the run can afford it.
     if os.environ.get("CRUX_SUBMIT_GATE", "0") not in ("1", "true", "yes"):
         print(f"all {len(items)} item(s) verified")
         print(SUBMIT_SENTINEL)
@@ -799,11 +746,9 @@ def cmd_submit(args):
         seen_at, gate_fired = len(items), False
 
     if args.confirm and gate_fired and len(items) <= seen_at:
-        # Without this the flag is the escape hatch the first version had. The
-        # measured failure was not that the agent argues with the gate: it
-        # enumerated the task's requirements correctly at the step before it
-        # quit, then bound none of them. So what closes the gate is a bound
-        # check, and `--confirm` alone is not one.
+        # `--confirm` alone does not close the gate: the agent can enumerate the
+        # requirements correctly and still bind none of them. Closing it takes a new
+        # bound check.
         print(
             f"not submitting: still {len(items)} check(s), the same as when the "
             "last submit asked for more.\n"
@@ -816,27 +761,10 @@ def cmd_submit(args):
         sys.exit(1)
 
     if not args.confirm:
-        # Every check passing is where this agent stops, and stopping there is
-        # what it loses on. Measured against claude-code on the same model and
-        # the same tasks: of six tasks it lost, five were ones where it used
-        # FEWER steps -- qemu-startup ended at 48 steps with "crux submit
-        # already confirmed all 3 bound checks. The task is complete", while the
-        # arm that solved it ran 123.
-        #
-        # A first version of this gate listed generic categories -- empty input,
-        # exit codes, tolerances -- and let the agent through if none applied.
-        # The trajectory shows exactly what that bought: "The nudge to add more
-        # checks lists generic categories ... none of which this task actually
-        # specifies", then `--confirm`, with one check bound, and a fail. A
-        # generic checklist earns a generic dismissal, and the dismissal was
-        # correct on its own terms.
-        #
-        # So the gate asks about the task's own words instead, and is closed by
-        # binding a check rather than by reading a list. `--confirm` is refused
-        # until the checklist has grown, because the measured gap is not that
-        # the agent reasons badly about coverage -- at the step before it quit
-        # it enumerated the requirements correctly -- but that it enumerates
-        # them and does not bind them.
+        # Every check passing is where the agent tends to stop early. A gate that
+        # listed generic categories (empty input, exit codes, tolerances) was dismissed
+        # as generically as it asked, so this one asks about the task's own words and
+        # is closed by binding a check rather than by reading a list.
         if not gate_fired:
             try:
                 marker.write_text(str(len(items)), encoding="utf-8")

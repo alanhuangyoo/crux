@@ -1,9 +1,7 @@
-"""Check the things that have actually broken, in the order they break.
+"""Environment checks, ordered by where a run breaks first.
 
-Every entry here is a fault that happened on this project and cost hours,
-because each one reported itself somewhere other than where it was. That is the
-pattern worth building against: the message you get is almost never the message
-you need.
+Most setup faults report themselves somewhere other than where they are, so
+each check here maps a misleading symptom to its actual cause:
 
     what it said                          what was wrong
     ----------------------------------------------------------------------
@@ -237,13 +235,9 @@ def _check_model(rep: Report, env: dict[str, str]) -> None:
             if status == WARN else "")
 
 
-# The prompt the sampling probe uses. It has to have more than one good answer,
-# or the probe reports a determinism it never tested: the first version asked
-# the model to name a command for listing files, got `ls` four times out of
-# four, and called the endpoint deterministic -- on the very deployment whose
-# measured behaviour is three different answers in five. A check with one
-# overwhelming right answer cannot fail, which is the fault this project found
-# in the agent's own checklists, reproduced in its own tooling.
+# The prompt the sampling probe uses. It needs more than one good answer: a
+# prompt with one overwhelming right answer returns the same text at any
+# temperature and would report a determinism it never tested.
 _SAMPLING_PROBE = (
     "Write one short bash command that lists python files modified today. "
     "Output only the command."
@@ -256,16 +250,9 @@ _SAMPLING_DRAWS = 5
 def _check_sampling(rep: Report, env: dict[str, str]) -> None:
     """Whether anything sets a sampling temperature, and what that costs.
 
-    Nothing did, for the whole life of this project. Terminus passes a
-    temperature only when one is explicitly configured and crux never
-    configured one, so every number it produced was sampled at the server
-    default -- the maximum-variance setting -- and nothing anywhere said so.
-
-    What that bought, measured: 60% of SWE-bench failures solve on a plain
-    re-run with nothing changed, 15-16% of tasks flip between two runs of one
-    configuration, and an 89-task run resolves about ±8 points. It is also why
-    two separate gates looked effective and neither survived attribution: in a
-    system this noisy, anything selected on failure looks better re-run.
+    Terminus passes a temperature only when one is explicitly configured, so
+    without one every call samples at the server default, usually the
+    maximum-variance setting, and run-to-run noise grows accordingly.
 
     Probed rather than read off a config, because the default lives on the
     server and the client cannot see it.
@@ -335,9 +322,8 @@ def _check_local_tools(rep: Report) -> None:
 def _check_agent_tools(rep: Report) -> None:
     """The two helpers the prompt tells the model to run.
 
-    An earlier version of the prompt named `crux submit` while the binary was
-    installed only under a flag, so 26 of 89 trials ran a command that did not
-    exist. Whether the file is there is worth one stat call.
+    If the prompt names a command the image does not have, every trial pays for
+    it; whether the file is there is worth one stat call.
     """
     from crux import terminus_agent
 
@@ -353,9 +339,8 @@ def _check_agent_tools(rep: Report) -> None:
 def _check_compose_patch(rep: Report) -> None:
     """The harbor file this project edits, and whether it still parses.
 
-    It has been corrupted once, by a shell expansion inside an unquoted
-    heredoc, and the symptom was every container create and destroy failing
-    with `could not find expected ':'` -- across every run at once.
+    A corrupted compose file fails every container create and destroy at once,
+    with `could not find expected ':'` as the only symptom.
     """
     try:
         import harbor

@@ -1,21 +1,10 @@
-"""pi, with the prompt sections this project measured.
+"""Crux on pi: the harbor agent that runs pi inside a task container.
 
-Two things pushed the work here rather than onto crux's own Terminus base.
-
-pi already has what crux does not: an interactive terminal UI, session resume,
-and a clean split between agent core, model layer and front-end. Building that
-onto a benchmark scaffold means fighting its design -- Terminus's `run()` starts
-a fresh Chat every call, so multi-turn would need the chat construction
-monkeypatched.
-
-And pi exposes `--append-system-prompt`, which makes a prompt change a one
-variable experiment: the same base, the same model, the same tasks, with and
-without the sections. Comparing crux against pi compares two codebases at once
-and cannot attribute anything.
-
-harbor's own Pi agent declares only a `thinking` flag, so the flag is added the
-same way crux extends Terminus -- by subclassing at the supported extension
-point, not by patching harbor.
+pi brings a terminal UI, session resume, and a clean split between agent core,
+model layer and front-end, and it exposes `--append-system-prompt`, so a prompt
+change is a single-variable experiment on the same base, model and tasks.
+harbor's own Pi agent is extended at its supported extension points rather
+than patched.
 """
 
 from __future__ import annotations
@@ -66,21 +55,10 @@ _EXIT_CODE = re.compile(r"exit (\d+)")
 def _was_killed(exc: Exception) -> bool:
     """Whether this failure is the kind resuming can actually help.
 
-    Resuming was built for a container out-of-memory kill: the process is
-    destroyed mid-task with the work still on disk, so picking it back up is
-    free progress. A plain non-zero exit is a different animal -- the run
-    decided to stop -- and retrying it three times costs three more agent runs
-    and buys nothing.
-
-    It also costs the diagnosis. When trials started failing en masse, the
-    exception they carried was the *resumed* command, `pi --print ... --continue
-    -- 'Your previous process was killed partway through'`, and the original
-    exit code was three layers back. The real cause was containers being removed
-    out from under a running arm, and the resume machinery had papered over
-    every trace of it.
-
-    An unparseable message is treated as not-killed: retrying is the action with
-    a cost, so it needs the evidence.
+    Resuming is for an out-of-memory kill: the process is destroyed mid-task with
+    the work still on disk, so picking it back up is free progress. A plain
+    non-zero exit means the run decided to stop, and retrying it costs runs and
+    hides the original cause. An unparseable message is treated as not-killed.
     """
     match = _EXIT_CODE.search(str(exc))
     if not match:
@@ -174,9 +152,8 @@ def _final_answer(pi_log: Path) -> str:
 # so it has to exist before the agent command runs.
 _REMOTE_PROMPT_PATH = "/tmp/crux-sections.md"
 
-# A prebuilt $HOME/.nvm holding node and pi, so a trial does not have to reach
-# the network to get its agent. Built once with `crux bake-pi`; see
-# `_install_offline` for what it is worth.
+# A prebuilt $HOME/.nvm holding node and pi, so a trial does not reach the
+# network to get its agent. Built once with `crux bake-pi`.
 _PI_BUNDLE = os.environ.get("CRUX_PI_BUNDLE", "/scratch/crux/pi-nvm.tar.gz")
 _REMOTE_BUNDLE = "/tmp/pi-nvm.tar.gz"
 
@@ -217,20 +194,10 @@ def _harbor_agent_limit_sec(task_dir: Path, trial_dir: Path) -> float | None:
 def _time_budget(configured: str | None, limit_sec: float | None) -> str | None:
     """`PI_TIME_BUDGET_SEC` for one trial, given harbor's limit on it.
 
-    A fixed 7200 was the budget on every task, and harbor's limit is not:
-    over Terminal-Bench 2.1 at an 8x multiplier it is 80 or 100 minutes on two
-    tasks, 120 on 48, and 160 to 1,600 on the other 39. So on two tasks pi was
-    killed before its own deadline arrived -- no warning, no wind-down -- on 48
-    its deadline and the kill were the same instant, and on 39 it stopped
-    itself with harbor's time still on the table: 19 failed trials over four
-    arms ran into the 120-minute budget on tasks that allowed 160 to 960
-    (train-fasttext four times, at 480).
-
-    A number is now capped at the limit, less a margin, which only ever
-    shortens it -- arms run before and after stay comparable. `task` takes the
-    whole limit instead. That lengthens a run as well as a trial, since a job
-    lasts as long as its longest task, so it is a setting rather than the
-    default.
+    harbor's limit varies by task (the task's own timeout times the multiplier),
+    so a fixed budget either overruns it or stops short of it. A configured number
+    is capped at the limit less a margin, which only ever shortens it, so runs
+    stay comparable; `task` takes the whole limit.
     """
     if limit_sec is None:
         return None if configured == "task" else configured
@@ -247,12 +214,10 @@ def _time_budget(configured: str | None, limit_sec: float | None) -> str | None:
 
 
 class CruxPiAgent(Pi):
-    """pi with crux's measured prompt sections appended.
+    """pi with Crux's prompt sections appended.
 
-    `sections` selects them, comma separated, and an empty string runs stock pi
-    -- which is the control arm, and has to be reachable through the same code
-    path as the treatment so that a difference between the two is the sections
-    and not the plumbing.
+    `sections` selects them, comma separated; an empty string runs stock pi, so
+    the control and treatment go through the same code path.
     """
 
     CLI_FLAGS = Pi.CLI_FLAGS + [
@@ -270,19 +235,14 @@ class CruxPiAgent(Pi):
     def __init__(self, *args, sections: str | None = None,
                  bundle: str | None = None, pi_env: str | None = None,
                  no_thinking: str | None = None, **kwargs):
-        # Settings for the pi process itself, as `KEY=value,KEY=value`. They
-        # cannot be passed through the environment of the run: harbor builds
-        # that env from the model connection alone, so a variable exported on
-        # the runner reaches nothing inside the container -- the same shape as
-        # a tmux `-e` that the container's tmux rejects, and it looks armed
-        # either way. See `_deliver_pi_env`.
+        # Settings for the pi process itself, as `KEY=value,KEY=value`. harbor builds
+        # the run's environment from the model connection alone, so they are delivered
+        # into the container instead; see `_deliver_pi_env`.
         self._pi_env = dict(
             kv.split("=", 1) for kv in (pi_env or "").split(",") if "=" in kv
         )
-        # Which prebuilt install to unpack. Passing it as a kwarg rather than
-        # reading the env means a control arm and a treatment arm reach the
-        # same code by the same path, and differ only in the bundle -- which is
-        # the whole point of running them against each other.
+        # Which prebuilt install to unpack. A kwarg rather than an env var, so two
+        # arms reach the same code by the same path and differ only in the bundle.
         self._bundle_path = bundle or _PI_BUNDLE
         # Whether to turn the model's reasoning off at the chat template.
         # Off unless asked for; see `_build_custom_models_json`.
@@ -317,25 +277,9 @@ class CruxPiAgent(Pi):
     async def install(self, environment: BaseEnvironment) -> None:
         """Unpack a prebuilt node+pi instead of fetching one per trial.
 
-        Upstream installs the agent from scratch in every container:
-
-            curl raw.githubusercontent.com/nvm-sh/nvm/.../install.sh | bash
-            nvm install 22
-            npm install -g @earendil-works/pi-coding-agent@latest
-
-        Three network fetches per trial, under `set -euo pipefail`, at whatever
-        concurrency the run uses. Any one of them failing raises
-        `NonZeroAgentExitCodeError` before the agent has run, and the trial is
-        scored zero.
-
-        Measured on Terminal-Bench 2.1: **24 of pi's 89 trials died here**, all
-        of them in `curl ... nvm/install.sh`, none with a single tool call
-        recorded. That is 27% of the benchmark decided by a download, and it is
-        why pi's headline 53.9% was not a number about pi.
-
-        The bundle is the same install, done once. If it is missing the
-        network path still runs, because a missing file should cost a slower
-        setup and not the run.
+        Upstream installs nvm, node and pi from the network in every container, and
+        any failed download fails the trial before the agent has run. The bundle is
+        the same install, done once. If it is missing, the network path still runs.
         """
         bundle = Path(getattr(self, "_bundle_path", _PI_BUNDLE))
         if not bundle.is_file():
@@ -347,22 +291,14 @@ class CruxPiAgent(Pi):
             return
 
         await environment.upload_file(source_path=bundle, target_path=_REMOTE_BUNDLE)
-        # `exec_as_agent`, not `environment.exec`: the latter runs as root, so
-        # on an image whose agent user is not root the bundle lands in root's
-        # home and the agent -- which harbor starts with `. ~/.nvm/nvm.sh` --
-        # never sees it. That is what "pi: command not found" meant on the
-        # SWE-Atlas images while the same bundle worked on Terminal-Bench.
-        # Upstream's install uses the same helper; matching it is the point.
+        # `exec_as_agent`, not `environment.exec`: the latter runs as root, so on an
+        # image whose agent user is not root the bundle would land in root's home.
         result = await self.exec_as_agent(
             environment,
             command=(
                 "set -eu; "
-                # `tar` is not everywhere. Nine of forty SWE-Atlas trials failed
-                # here with exit 127 -- command not found -- and the network
-                # fallback could not run either, because those images have no
-                # curl. Python's tarfile module needs neither a package manager
-                # nor the network, and an image holding a Python repository has
-                # Python.
+                # `tar` is not on every image; Python's tarfile needs neither a package
+                # manager nor the network.
                 f'if command -v tar >/dev/null 2>&1; then tar xzf {_REMOTE_BUNDLE} -C "$HOME"; '
                 f'elif command -v python3 >/dev/null 2>&1; then '
                 f'python3 -m tarfile -e {_REMOTE_BUNDLE} "$HOME"; '
@@ -376,13 +312,9 @@ class CruxPiAgent(Pi):
                 # that failed it.
                 'b=$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | head -1); '
                 '[ -n "$b" ] || { echo "no node bin dir after unpack" >&2; exit 1; }; '
-                # The bundled node is glibc-linked, and three of eleven
-                # SWE-Atlas images are Alpine: musl reports the mismatch as
-                # `env: can't execute 'node': No such file or directory`, which
-                # reads like a missing binary rather than an incompatible one.
-                # pi's package is pure JavaScript, so one package and two node
-                # binaries cover both; the musl build simply replaces the one in
-                # place.
+                # The bundled node is glibc-linked; on musl (Alpine) images the musl build
+                # replaces it in place. pi's package is pure JavaScript, so one package and two
+                # node binaries cover both.
                 'if [ -e /lib/ld-musl-x86_64.so.1 ] && [ -x "$HOME/.nvm/crux-musl/node" ]; then '
                 '  cp "$HOME/.nvm/crux-musl/node" "$b/node"; echo CRUX_PI_LIBC=musl; '
                 'else echo CRUX_PI_LIBC=glibc; fi; '
@@ -390,34 +322,20 @@ class CruxPiAgent(Pi):
                 # node` shebang, which needs node on PATH -- the thing this
                 # install is in the middle of arranging.
                 '"$b/node" "$b/pi" --version; '
-                # And the PATH written into the file harbor's run line sources,
-                # which is stronger than the /usr/local/bin symlink below: it
-                # does not depend on nvm selecting a version, on that directory
-                # being writable, or on it being on the PATH the run inherits.
-                # Two SWE-Atlas trials installed cleanly and still died on
-                # `pi: command not found` at run time with the symlink in place.
+                # The PATH is written into the file harbor's run line sources, so it does not
+                # depend on nvm selecting a version or on the PATH the run inherits.
                 'f="$HOME/.nvm/nvm.sh"; grep -q "# crux-pi-path" "$f" 2>/dev/null || '
                 'printf \'%s\\n\' "# crux-pi-path" "export PATH=\\"$b:\\$PATH\\"" >> "$f"; '
-                # Recorded because three SWE-Atlas trials installed cleanly and
-                # still died at run time on `pi: command not found`, with both
-                # the symlink and the PATH in place. The remaining explanation
-                # is that install and run do not share a HOME, and that is not
-                # answerable from a trial directory after the fact.
+                # Recorded so the trial directory shows where pi was installed.
                 'echo "CRUX_PI_BIN=$b"; '
                 'echo "CRUX_PI_WHO=$(id -un 2>/dev/null) HOME=$HOME PATH=$PATH"'
             ),
         )
         out = (getattr(result, "stdout", "") or "") + (getattr(result, "stderr", "") or "")
         if getattr(result, "return_code", 1) == 0:
-            # Put the binaries somewhere that does not depend on nvm resolving a
-            # default version, on `$HOME` being what install saw, or on the run
-            # shell being bash. harbor starts the agent with
-            # `. ~/.nvm/nvm.sh; ... pi ...` -- a semicolon, so a missing nvm.sh
-            # is only a message -- and on the SWE-Atlas images that line found
-            # no `pi` even after the bundle had unpacked and reported 0.85.1.
-            # A symlink on the default PATH is the one thing all of those agree
-            # on. Root, because /usr/local/bin is root-owned; best effort,
-            # because a working nvm path must not be lost to a failed link.
+            # Also link the binaries into /usr/local/bin, the one location that does not
+            # depend on nvm, `$HOME` or the run shell. Best effort: a working nvm path must
+            # not be lost to a failed link.
             bin_dir = ""
             for line in out.splitlines():
                 if line.startswith("CRUX_PI_BIN="):
@@ -500,21 +418,10 @@ class CruxPiAgent(Pi):
                   context) -> None:
         """Deliver the agent's final answer to the file the task named.
 
-        SWE-Atlas scores by reading `/logs/agent/answer.txt`; its instruction
-        ends with "write your complete final answer to /logs/agent/answer.txt
-        wrapped in <<FINAL_ANSWER>> tags". Terminus complies -- its whole loop
-        is typing into a terminal, so writing a file is the natural move, and
-        its trajectories mention the path eighteen times. pi in `--print` mode
-        answers the person who asked: across 31 SWE-Atlas trials it read the
-        instruction, mentioned the path three times, and **never issued a
-        single tool call touching it**. Every one scored zero on
-        `No answer file at /logs/agent/answer.txt, scoring 0`.
-
-        This copies what the agent already said into the path the task named.
-        It writes nothing the agent did not produce, and it does not run when
-        the agent wrote the file itself or when the instruction never asked for
-        one. That keeps it plumbing: the difference between an answer that was
-        never given and one that was given to the wrong channel.
+        Some benchmarks score an answer file named in the instruction. pi in `--print`
+        mode answers in its output, so this copies what the agent already said into
+        that path. It writes nothing the agent did not produce, and it does not run
+        when the agent wrote the file itself or the instruction asked for none.
         """
         self._pace_to_harbor(environment)
         await self._deliver_pi_env(environment)
@@ -540,50 +447,16 @@ class CruxPiAgent(Pi):
         logger.info("delivered the agent's final message to %s (%d chars)", path, len(answer))
 
     def _build_custom_models_json(self, access, model_id):
-        """Declare what the model can do, so pi stops clamping the flag away.
+        """Declare what the model can do, so pi does not clamp it away.
 
-        harbor registers a custom endpoint as `{"id": model_id}` and nothing
-        else. pi reads `model.reasoning` as false, `getSupportedThinkingLevels`
-        returns `["off"]`, and `clampThinkingLevel` turns every `--thinking`
-        into `off` before a request is built. Both arms of the round that was
-        meant to test the reasoning level recorded `"thinkingLevel":"off"` in
-        their own session logs -- the kwarg was passed, accepted, and discarded
-        one layer below where anyone was looking, and the arms it produced were
-        the same configuration run twice.
+        harbor registers a custom endpoint as `{"id": model_id}` and nothing else, so
+        pi would read the model as non-reasoning and turn every `--thinking` into
+        `off`. This declares reasoning, the served context window and an output
+        ceiling.
 
-        Measured against this deployment (SGLang, Qwen3.8-27B), three samples
-        each on one reasoning-heavy prompt, reasoning_content characters:
-
-            baseline                       9333  10481   9423
-            reasoning_effort=low           4171   4686   6216
-            thinking_budget=128            9492   9364  10566
-            chat_template enable_thinking  false: 0 0 0
-
-        `reasoning_effort` halves it with no overlap between the groups.
-        `thinking_budget` is ignored by this server, so pi's
-        `thinkingTokenBudgetField` has nothing to talk to here. A first reading
-        of a single short prompt said `reasoning_effort` was ignored too; it was
-        noise, and three samples on a prompt that actually needs reasoning is
-        what the question required.
-
-        This matters because reasoning and the answer share one `max_tokens`
-        here: 50 of 441 trials contain two or more consecutive turns of 20,000+
-        thinking characters that emit nothing the loop can run, and 41 of those
-        50 failed.
-
-        Declaring it is not sufficient on its own. pi reads a reasoning model as
-        an OpenAI reasoning model, so `useDeveloperRole` becomes
-        `model.reasoning && compat.supportsDeveloperRole`, and
-        `supportsDeveloperRole` is auto-detected from the base URL -- a bare
-        `host:port` reads as standard OpenAI, so it is true. The system prompt
-        then goes out as `role: "developer"`, which this server rejects:
-
-            {"message":"Unexpected message role.","type":"BadRequest"} -> 400
-
-        Every turn, so a smoke run of three tasks died at turn one with an
-        empty assistant message and no exception -- the shape that reaches the
-        scoreboard as three ordinary zeros. The compat override is what keeps
-        the role at `system` while the model still counts as reasoning.
+        It also keeps the system prompt on the `system` role: pi treats a reasoning
+        model as an OpenAI reasoning model and would send `developer`, which
+        OpenAI-compatible servers such as SGLang reject.
         """
         models_json = super()._build_custom_models_json(access, model_id)
         if not models_json:
@@ -593,69 +466,23 @@ class CruxPiAgent(Pi):
             for model in provider.get("models", []):
                 model["reasoning"] = True
                 if window:
-                    # Tell pi what the window actually is. harbor registers a
-                    # custom endpoint as `{"id": ...}`, so pi falls back to a
-                    # default that has nothing to do with this server, and on a
-                    # 32K deployment that default is catastrophic in two ways at
-                    # once: the loop does not compact until the input is already
-                    # too big, and `escalatedMaxTokens` reads the window as
-                    # roomy and raises the ceiling into space that is not there.
-                    # Both arrive as the same opaque failure:
-                    #
-                    #   400: 32899 = 16515 from the input and 16384 for the
-                    #        completion, against a limit of 32768
-                    #
-                    # Read from the server rather than configured, because a
-                    # number typed here is a number that goes stale.
+                    # Tell pi the window the server actually serves, read from the server rather
+                    # than configured: compaction and the output-ceiling escalation both depend on
+                    # it, and a default unrelated to this server would let requests overflow.
                     model["contextWindow"] = window
-                    # A quarter of the window, capped at 32K.
-                    #
-                    # `min(16384, window // 2)` was written when the window was
-                    # 32768, where half of it was the only sane answer. Served at
-                    # the model's own 262144 the 16384 is what binds, and it binds
-                    # on the wrong thing: output truncation measured 4.3% of turns
-                    # at the larger window, and every truncated turn costs a
-                    # recovery cycle. A quarter still leaves three quarters of the
-                    # window for the history that produced the answer.
+                    # A quarter of the window, capped at 32K: room for long answers while
+                    # leaving three quarters of the window for the history that produced them.
                     model.setdefault("maxTokens", min(32768, max(4096, window // 4)))
                 compat = model.setdefault("compat", {})
                 compat.setdefault("supportsDeveloperRole", False)
-                # This server does not need the model's own reasoning sent back
-                # to it -- the answer and the tool calls are the conversation.
-                # Measured over one 88-task run, reasoning was 39.7% of every
-                # character living in the replayed conversation, and 89% of it
-                # on `regex-chess`. The trials that failed sat at a median
-                # maximum context of 31,948 against a 32,768 window; the ones
-                # that solved sat at 20,787.
+                # The answer and the tool calls are the conversation; replaying the model's
+                # own reasoning would only spend context.
                 compat.setdefault("replaysReasoning", False)
                 if self._no_thinking:
-                    # `reasoning_effort` biases this model, it does not cap it.
-                    # Measured on the five tasks where reasoning is what loses
-                    # the run: with effort=low the median thinking block is
-                    # still 41,888-54,778 characters, against 47,291-56,964
-                    # without it, and every run still ends on `length`. The
-                    # output ceiling makes it worse rather than better, exactly
-                    # as designed -- 8,192 truncates, the loop silently raises
-                    # to 16,384, and the model spends that on thinking too.
-                    # More room was the wrong lever.
-                    #
-                    # Which wire format, measured against this server, two
-                    # samples each on one reasoning-heavy prompt (characters of
-                    # reasoning_content):
-                    #
-                    #   baseline                                  9730  11358
-                    #   chat_template_kwargs{enable_thinking:0}      0      0
-                    #   ... plus preserve_thinking                   0      0
-                    #   chat_template_args{enable_thinking:0}     9211   9046
-                    #   top-level enable_thinking:false           9011   8828
-                    #
-                    # So `chat_template_args` and the top-level flag are both
-                    # ignored here, which rules out pi's "baseten" and "qwen"
-                    # formats. The first version of this shipped the `baseten`
-                    # field, the probe ran with reasoning fully on, and only
-                    # counting thinking blocks in its own trajectories caught
-                    # it -- the models.json inside the container was exactly
-                    # what it was meant to be.
+                    # `reasoning_effort` biases this model rather than capping it, so turning
+                    # reasoning off goes through the chat template. On SGLang only
+                    # `chat_template_kwargs` reaches the template; `chat_template_args` and a
+                    # top-level `enable_thinking` are ignored.
                     compat["thinkingFormat"] = "chat-template"
                     kwargs = compat.setdefault("chatTemplateKwargs", {})
                     kwargs.setdefault("enable_thinking", False)
@@ -666,24 +493,9 @@ class CruxPiAgent(Pi):
     async def exec_as_agent(self, environment, command, **kwargs):
         """Pick a killed run back up instead of scoring it a zero.
 
-        pi runs inside the trial container; Terminus drives the same container
-        from outside. That is not a stylistic difference -- a cgroup out-of-
-        memory kill takes every process in the group, so a task that exhausts
-        memory ends Terminus's command and ends pi's *run*. Measured over 501
-        trials, seven died on exit 137 across `rstan-to-pystan`,
-        `install-windows-3.11` and `mcmc-sampling-stan`; the trajectories show
-        two causes and neither is pi's own footprint, which is 89 MB against a
-        2 GiB limit. Some are `-j$(nproc)` inside a container where `nproc`
-        reports the host's 192 cores, and some are the agent's own `pkill -f`
-        matching the shell that issued it -- pi diagnosed both, in its own
-        words, in the run that then died.
-
-        `pi --continue` restores the session, verified end to end: a run told
-        to write BANANA into one file, then resumed with a second instruction
-        that never repeats the word, writes BANANA into the second file and
-        keeps one session file. So the recovery is real rather than a fresh
-        agent that happens to share a directory.
-
+        pi runs inside the trial container, so a cgroup out-of-memory kill -- from a
+        build using every host core, or a broad `pkill -f` -- ends the whole run, not
+        just a command. `pi --continue` restores the session, so the work carries on.
         Only the main pi invocation is retried, and only three times.
         """
         if _PI_MAIN not in command:
@@ -735,24 +547,7 @@ class CruxPiAgent(Pi):
                 f"--append-system-prompt {_REMOTE_PROMPT_PATH}",
                 f"--append-system-prompt {shlex.quote(_REMOTE_PROMPT_PATH)}",
             )
-        # `--` ends option parsing, so a task whose text begins with a hyphen is
-        # read as the prompt rather than as a flag. harbor builds the command as
-        # `pi --print ... '<instruction>'` with no terminator, and pi's parser
-        # rejects any single-hyphen argument:
-        #
-        #     Error: Unknown option: - You are given a PyTorch state dictionary
-        #
-        # `pytorch-model-recovery` states its task as a markdown list, so its
-        # first character is "-". Every pi trial on it died before taking an
-        # action, in every arm, while six other scaffolds solved it. pi already
-        # honours `--`; nothing was passing it one.
-        #
-        # The first version of this appended `"-- "` to a string that does not
-        # end in one, which glued the terminator to the previous argument:
-        #
-        #     --append-system-prompt /tmp/crux-sections.md--  '- You are given'
-        #
-        # so the flag took a path that does not exist, no terminator was ever
-        # parsed, and the task died exactly as before -- three more trials, same
-        # zero, from the fix. rstrip-then-join is the whole correction.
+        # `--` ends option parsing, so a task whose text begins with a hyphen (a
+        # markdown list, say) is read as the prompt rather than as a flag. The flags
+        # are right-stripped first, so the terminator stands as its own argument.
         return f"{flags.rstrip()} -- " if flags.strip() else "-- "

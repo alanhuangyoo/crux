@@ -1,16 +1,9 @@
 """The benchmarked agent, running on this machine.
 
-`crux solve` shelled out to mini-swe-agent while every number in this repo comes
-from the Terminus base -- so the CLI shipped the scaffold the measurements
-rejected. On the same tasks the Terminus base scores about 3 points higher, and
-the one-command-per-turn base cannot express entering an ssh session or a REPL
-at all, which makes some tasks unsolvable by construction.
-
-`LocalEnvironment` and `approval` were written to close that gap and then never
-wired to anything. This is the wiring: the benchmarked agent, the benchmarked
-prompt, pointed at a local shell, with the one thing a benchmark does not need
-and a CLI cannot do without -- a gate in front of commands that are expensive
-to get wrong.
+`crux solve` and `crux repl` run the same Terminus-based agent and prompt that
+the benchmark scores, pointed at a local shell instead of a task container,
+with the one thing a benchmark does not need and a CLI cannot do without: a
+gate in front of commands that are expensive to get wrong.
 """
 
 from __future__ import annotations
@@ -59,10 +52,9 @@ class LocalCruxAgent(CruxTerminusAgent):
         self._interactive = interactive
         self._confirm = confirm or _prompt_yes_no
         self._blocked: list[tuple[str, str]] = []
-        # Where the terminal front end listens. A benchmark trial passes
-        # nothing and the calls become no-ops, which keeps the scored path and
-        # the interactive path the same code -- the requirement this project
-        # started from.
+        # Where the terminal front end listens. A benchmark trial passes nothing and
+        # the calls become no-ops, so the scored path and the interactive path stay the
+        # same code.
         self._on_event = on_event or (lambda *a, **k: None)
         self._turn_commands = 0
         self._turn_steps = 0
@@ -70,16 +62,13 @@ class LocalCruxAgent(CruxTerminusAgent):
     async def _claim_session_name(self, environment) -> None:
         """Take a free tmux session name, so a second window is not blocked.
 
-        Upstream names the session `self.name()`, a constant, so a second
-        `crux repl` fails with "duplicate session: crux-local" before its first
-        turn. Two terminals open on two projects is ordinary use, not an edge
-        case.
-
-        The name stays exactly `crux-local` whenever it is free, so a lone
-        session is still findable by `tmux attach -t crux-local`; only a
-        genuine collision gets a suffix. Assigning it on the instance shadows
-        the staticmethod for `self.name()` without touching `cls.name()`,
-        which harbor calls unbound on its handoff path.
+        Upstream names the session `self.name()`, a constant, so a second `crux repl`
+        would fail with "duplicate session". The name stays exactly `crux-local`
+        whenever it is free, so a lone session is still findable by
+        `tmux attach -t crux-local`; only a genuine collision gets a suffix.
+        Assigning it on the instance shadows the staticmethod for `self.name()`
+        without touching `cls.name()`, which harbor calls unbound on its handoff
+        path.
         """
         base = type(self).name()
         probe = await environment.exec("tmux ls -F '#{session_name}' 2>/dev/null")
@@ -169,10 +158,9 @@ class LocalCruxAgent(CruxTerminusAgent):
     async def _query_llm(self, *args, **kwargs):
         """Announce what the model said before its commands start running.
 
-        Terminus puts the model's own account of the turn in the `Analysis:`
-        prefix, and until now nothing displayed it: the screen went from the
-        prompt straight to the answer, with the reasoning only reachable by
-        reading the trajectory afterwards.
+        Terminus puts the model's own account of the turn in the `Analysis:` prefix;
+        showing it keeps the reasoning on screen instead of only in the
+        trajectory.
         """
         response = await super()._query_llm(*args, **kwargs)
         emit = getattr(self, "_on_event", None)

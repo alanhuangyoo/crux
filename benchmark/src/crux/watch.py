@@ -1,26 +1,19 @@
-"""Watch runs while they happen, and read them the way that survives contact.
+"""Live progress, stall detection and paired comparison for running evaluations.
 
-Written after a night of doing this by hand. Four throwaway scripts got written
-to answer the same four questions -- how far along, how fast, is anything stuck,
-who is winning -- and each of them got the answer wrong at least once in a way
-that took a while to notice:
+Reading a run while it is still going has four traps, and each number printed
+here is qualified against them:
 
-  * A score read from a partly finished run is biased upward, always. Failed
-    trials take about twice as long as solved ones, so the trials that have
-    finished are enriched for success: SWE-bench read 96% at 26 of 99 and 84%
-    at 68.
-  * Two runs of the same configuration disagree on 15-16% of tasks. A single
-    89-task run resolves about ±5 points, so a lead smaller than that is not a
-    lead.
-  * Comparing totals compares different task sets. Arms do not finish the same
-    tasks at the same time, and the finished subset has run several points
-    harder than the full set for hours at a stretch.
-  * A trial whose container died is recorded completed-with-error and never
-    retried, so the denominator shrinks quietly and the run looks done.
+  * A partial score is biased upward. Failed trials take longer than solved
+    ones, so the trials that have finished are enriched for success.
+  * Two runs of one configuration disagree on a fraction of tasks, which sets
+    a noise floor below which a lead is not a lead.
+  * Arms do not finish the same tasks at the same time, so totals compare
+    different task sets.
+  * A trial whose container died is recorded as completed-with-error and never
+    retried, so the denominator shrinks quietly.
 
-So every number this prints carries what qualifies it: how much is left, how
-biased it still is, and what the noise floor is. `--compare` is paired on shared
-tasks with a sign test, never total against total.
+`--compare` is therefore paired on shared tasks with a sign test, never total
+against total.
 """
 
 from __future__ import annotations
@@ -36,10 +29,8 @@ from pathlib import Path
 
 from crux import ui
 
-# Two runs of the same configuration on this benchmark disagree on this
-# fraction of tasks. Measured, not assumed: crux-jobs vs crux-w-jobs, 85 shared
-# tasks, 14 flips, identical scores (53 vs 53); crux-m-jobs vs crux-v-jobs, 89
-# shared, 13 flips.
+# Fraction of tasks on which two runs of the same configuration disagree,
+# taken from repeated runs of an identical setup.
 NOISE_FLIP_RATE = 0.155
 
 
@@ -51,9 +42,8 @@ def _latest(jobs_dir: str) -> Path | None:
 def outcomes(jobs_dir: str) -> dict[str, bool]:
     """Task -> solved, from the newest result.json under a jobs dir.
 
-    Keyed by stripping only the trailing trial hash. Splitting on the first
-    `__` instead -- the obvious thing -- collapses every `django__django-NNNN`
-    into one key and silently reports 8 of 9 for a run of a hundred.
+    Keyed by stripping only the trailing trial hash: splitting on the first `__`
+    would collapse every `django__django-NNNN` into one key.
     """
     files = sorted(glob.glob(os.path.join(jobs_dir, "*/result.json")), key=os.path.getmtime)
     if not files:
@@ -103,13 +93,9 @@ def _rate(jobs_dir: str, window_sec: float = 3600) -> float:
 def _stalled(jobs_dir: str, quiet_sec: float = 1800) -> list[tuple[str, float, int]]:
     """Live trials whose trajectory has not been touched in a while.
 
-    Live is the whole point: a trial that has already ended is not stalling,
-    and reporting it as quiet is a false alarm that grows louder for as long as
-    the run continues. A verifier directory was the only end-marker checked,
-    which misses every trial that died before the verifier ran -- the exact
-    population this display exists to surface, so five dead trials sat in it
-    for four hours announcing a stall that had already been recorded as an
-    error above them.
+    A trial that has already ended is not stalling, so only trials without a
+    result are considered. A verifier directory is not enough as an end marker:
+    trials that die before the verifier runs are exactly the ones to surface.
     """
     run = _latest(jobs_dir)
     if run is None:
@@ -159,13 +145,9 @@ def planned(jobs_dir: str) -> list[str]:
 def remaining(jobs_dir: str, all_tasks: list[str] | None = None) -> list[str]:
     """What a resume has to re-run: everything asked for that has no score.
 
-    Not `unscored`, which is the different question of which *started* trials
-    lack one. Resuming from it silently drops every task the run never reached:
-    an 89-task run stopped at 6 scored had created 17 directories, so `unscored`
-    reported 11 to redo and the other 72 were lost without a word.
-
-    The task list comes from the run's own config; pass `all_tasks` when the
-    run took a whole dataset and recorded no filter.
+    Unlike `unscored`, this includes tasks the run never reached. The task list
+    comes from the run's own config; pass `all_tasks` when the run took a whole
+    dataset and recorded no filter.
     """
     scored = set(outcomes(jobs_dir))
     asked = list(all_tasks or []) or planned(jobs_dir)
@@ -177,20 +159,18 @@ def remaining(jobs_dir: str, all_tasks: list[str] | None = None) -> list[str]:
 
 
 def unscored(jobs_dir: str) -> list[str]:
-    """Trials that started and have no score -- the denominator that shrank.
+    """Trials that started and have no score.
 
-    This is a question about a *finished* run: which of the trials it actually
-    ran came back without a reward. For resuming an interrupted run use
-    `remaining`, which counts the tasks it never reached as well.
+    A question about a finished run. For resuming an interrupted run use
+    `remaining`, which also counts the tasks it never reached.
     """
     run = _latest(jobs_dir)
     if run is None:
         return []
     scored = set(outcomes(jobs_dir))
     out = []
-    # os.path.join, not `run / "*/"`: pathlib drops the trailing slash, so the
-    # glob matches result.json alongside the trial directories and reports it
-    # as a trial that never scored.
+    # os.path.join, not `run / "*/"`: pathlib drops the trailing slash, so the glob
+    # would also match result.json and report it as an unscored trial.
     for d in sorted(glob.glob(os.path.join(str(run), "*", ""))):
         name = Path(d.rstrip("/")).name.rsplit("__", 1)[0]
         if name in scored:
@@ -204,13 +184,9 @@ def unscored(jobs_dir: str) -> list[str]:
 def unscored_split(jobs_dir: str) -> tuple[list[str], list[str]]:
     """Split `unscored` into trials that finished empty and trials still going.
 
-    `unscored` answers a question about a finished run, and its docstring says
-    so; the live display asked it anyway and warned that every trial currently
-    running "will not be retried". On a fresh 89-task run at concurrency 15
-    that is fifteen healthy trials reported as losses.
-
     `result.json` is written when a trial ends, whatever the outcome, so its
-    presence is the line between the two.
+    presence is the line between the two. The live display warns only about the
+    first group.
     """
     run = _latest(jobs_dir)
     if run is None:
@@ -228,20 +204,13 @@ def unscored_split(jobs_dir: str) -> tuple[list[str], list[str]]:
 def partial(jobs_dir: str) -> dict[str, tuple[int, int]]:
     """Task -> (tests passed, tests total), from the graders' own reports.
 
-    The binary reward is all-or-nothing and that is the score the leaderboards
-    use, but it throws away almost everything the grader measured. A task where
-    68 of 69 tests pass and one where 0 of 69 pass are both a zero, and the
-    difference between two agents lives mostly in that gap.
+    The binary reward is all-or-nothing, which throws away most of what the
+    grader measured: 68 of 69 tests passing and 0 of 69 are both a zero. A paired
+    comparison on test fractions uses the same trials and resolves differences
+    that a binary score at this task count cannot.
 
-    It matters here because of resolution. Two runs of one configuration
-    disagree on 15-16% of tasks, so an 89-task binary run resolves about ±8
-    points -- wide enough that a real five-point difference cannot be seen.
-    A paired comparison on test fractions uses the same trials and the same
-    GPU hours and is not throwing away the gradient.
-
-    Three shapes are read, because the three benchmarks in use report
-    differently: pytest's CTRF summary, SWE-bench's FAIL_TO_PASS/PASS_TO_PASS
-    report, and SWE-Atlas's rubric count.
+    Three report shapes are read: pytest's CTRF summary, SWE-bench's
+    FAIL_TO_PASS/PASS_TO_PASS report, and SWE-Atlas's rubric count.
     """
     run = _latest(jobs_dir)
     if run is None:
@@ -315,15 +284,10 @@ def _wilcoxon_sign(diffs: list[float]) -> tuple[int, int, float]:
 def commands_of(trajectory_path: str) -> list[str]:
     """Every command the agent actually sent, and nothing else.
 
-    Exists because the obvious thing is wrong three times over. Grepping a
-    trajectory file for a command counts the system prompt, which documents the
-    tools; for `crux todo add ... --verify` that reports every trial as having
-    used it, including trials that never got past exploring. The same mistake
-    read the prompt's own regex example as a bound check, and its placeholder
-    `cmd` as a command.
-
-    So: step 0 is the prompt and is skipped, and only tool_calls keystrokes are
-    read. Anything asking "did the agent do X" should come through here.
+    Grepping a trajectory file also matches the system prompt, which documents the
+    tools and their examples. Step 0 is the prompt and is skipped, and only
+    tool_calls keystrokes are read; anything asking "did the agent do X" should
+    come through here.
     """
     try:
         steps = json.load(open(trajectory_path)).get("steps", [])
@@ -407,10 +371,8 @@ def render(jobs: list[str], show_stalled: bool = True) -> str:
             r = _resolution(p["total"])
             lines.append(ui.hint(
                 f"    a single {p['total']}-task run resolves about ±{r:.1f} points"))
-        # A live run has unscored trials by construction -- they are the ones
-        # currently running. Saying "will not be retried" about those reads as
-        # an alarm about the healthy state. Only a trial that finished and
-        # produced no reward is worth the warning.
+        # A live run has unscored trials by construction: the ones currently running.
+        # Only a trial that finished without a reward is worth the warning.
         dead, live = unscored_split(jd)
         if dead:
             lines.append(ui.warn(

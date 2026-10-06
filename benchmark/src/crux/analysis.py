@@ -1,24 +1,18 @@
 """Turn a Harbor job directory into an answer to "why did we score that?".
 
-A leaderboard number tells you nothing about what to fix. Every improvement in
-this project came from a distinction the score does not make:
+A pass rate alone does not say what to fix. This module separates what the
+score does not:
 
-* Trials that never reached the agent at all. Three consecutive full runs
-  scored 0.000 for environment reasons — a GPU validation error that aborted
-  the job, then overlayfs-on-btrfs corrupting every image build. Reading those
-  as "the agent is bad" would have sent us tuning prompts for days.
-* How close a failure was. Terminal-Bench scores per task all-or-nothing, but
-  the verifiers underneath keep a weighted breakdown. Reading it showed 30 of
-  70 tasks past 60% of their checks with 3 scored, which is what motivated
-  telling the model that partial credit does not exist.
-* Whether the agent thought it was finished. It claimed completion 28 times
-  and was right 3 times; an 89% false-positive rate is a different problem from
-  running out of turns, and they are indistinguishable from the mean.
+* Trials that never reached the agent -- environment, harness or endpoint
+  failures -- from failures of the agent itself.
+* How close a failure was: verifiers keep a weighted breakdown under the
+  all-or-nothing score, so near misses are visible.
+* Whether the agent thought it was finished: a false completion and running out
+  of turns are different problems with the same score.
 
-Verifier output is not uniform: some tasks are plain pytest suites, others run
-a scoring harness whose pytest layer is a single always-passing wrapper over a
-weighted breakdown. Trusting the pytest counts on the latter overstates
-progress badly — one task showed 1/1 tests passed and 0.0/1.05 points.
+Verifier output is not uniform: some tasks run plain pytest suites, others a
+scoring harness whose pytest layer is a single always-passing wrapper, so the
+weighted breakdown is preferred where it exists.
 """
 
 from __future__ import annotations
@@ -60,16 +54,9 @@ ENVIRONMENT_EXCEPTIONS = {
     "VerifierTimeoutError",
     "CancelledError",
     "DockerException",
-    # The trial never got a fair run: the box, the harness or the endpoint
-    # failed around it. Counted as zero for a leaderboard, the same as anything
-    # else that does not pass -- but never attributed to the agent when two
-    # arms are compared, because which arm they land on is chance.
-    #
-    # Corpus counts for the ones added here: 89 InternalServerError from the
-    # model endpoint, 9 AgentSetupTimeoutError, 7 EnvironmentStartTimeoutError,
-    # 4 RewardFileNotFoundError, 3 AddTestsDirError, 2 RateLimitError. All 114
-    # were falling through to `out_of_turns` -- read as the agent running out
-    # of steps, which is a statement about the agent and the opposite of true.
+    # The trial never got a fair run: the box, the harness or the endpoint failed
+    # around it. Counted as zero for a leaderboard, like anything else that does not
+    # pass, but never attributed to the agent when two arms are compared.
     "InternalServerError",
     "RateLimitError",
     "AgentSetupTimeoutError",
@@ -106,11 +93,8 @@ class Trial:
 
     @property
     def category(self) -> str:
-        # Solved wins over everything the agent did on the way there. Harbor
-        # records an agent timeout and runs the verifier anyway, so a trial can
-        # be cut off and still pass — ranking the timeout first hid two solved
-        # tasks in the first pi/crux comparison and made the counts disagree
-        # with the solved list printed beside them.
+        # Solved wins over everything the agent did on the way there: harbor runs the
+        # verifier after an agent timeout, so a trial can be cut off and still pass.
         if self.solved:
             return "solved"
         # The verifier never ran its tests, so the zero says nothing about
@@ -118,22 +102,10 @@ class Trial:
         # the reward is an ordinary 0.0 -- so nothing below would catch it.
         if not self.verifier_ran:
             return "environment"
-        # An exception with no agent activity at all: the trial never got to
-        # the agent, whatever the exception is called. This is how pi's
-        # baseline gets a fair reading -- 16 of its 89 trials died in
-        # `curl ... nvm/install.sh` and were counted as pi failing the task,
-        # under an exception named NonZeroAgentExitCodeError, which sounds
-        # like the agent's fault and is not.
-        #
-        # **Output tokens, not steps.** The first version of this rule asked
-        # whether the trial had steps, which is a Terminus-shaped question: pi
-        # writes `agent/pi` and `agent/pi.txt` and records no step count at
-        # all, so the rule read zero for all 89 of its trials and would have
-        # excused its 7 genuine agent timeouts along with the 16 real setup
-        # deaths -- inflating the score of the very baseline it was written to
-        # be fair to. Every agent's token counts are recorded by harbor, and on
-        # this corpus the split is exact: the 16 setup deaths have zero output
-        # tokens and nothing else does.
+        # An exception with no agent activity at all: the trial never reached the
+        # agent, whatever the exception is called. Activity is judged by output tokens,
+        # which harbor records for every agent, rather than by steps, which some agents
+        # do not record.
         if self.exception and not self.n_output_tokens and not self.n_steps:
             return "environment"
         if self.exception in ENVIRONMENT_EXCEPTIONS:
@@ -175,11 +147,7 @@ class Job:
     def median_tokens(self) -> tuple[int, int]:
         """Median input and output tokens over trials that actually ran.
 
-        Score alone cannot tell "did nothing" from "did what it promised at
-        five times the price", and the second is the worse result. Interleaved
-        thinking reads as +2.50 against claude-code, inside the noise like
-        everything else -- and costs 3.85M input tokens a trial against plain
-        crux's 782k.
+        Score alone cannot tell a cheap result from an expensive one.
         """
         ran = [t for t in self.trials if t.n_output_tokens]
         if not ran:
@@ -242,11 +210,9 @@ class Job:
         )
 
 
-# Suites that describe the scoring machinery rather than the task. Some
-# verifiers wrap a weighted scorer in a single pytest that passes whenever the
-# scorer ran at all, and some ship self-checks for the verifier itself. Both
-# report 100% for trials that scored nothing -- three tasks in one run looked
-# fully solved on this basis and had an empty reward file.
+# Suites that describe the scoring machinery rather than the task: a single
+# pytest wrapping a weighted scorer, or self-checks for the verifier. Both pass
+# whenever the scorer ran, whatever it scored.
 _WRAPPER_SUITES = ("test_scoring.py", "test_verifier_hygiene.py")
 
 
@@ -303,19 +269,12 @@ _VERIFIER_NEVER_RAN = (
 def _verifier_ran(trial_dir: Path) -> bool:
     """Whether the verifier's tests started at all.
 
-    A task's `test.sh` installs its own runner -- curl, then uv, then
-    `uvx pytest` -- from the network, at verification time, after the agent
-    has finished. When that install fails the tests never start, `reward.txt`
-    says 0, and harbor records no exception. Over 356 trials of four arms
-    this was 14 zeros: `qemu-startup` and `qemu-alpine-ssh` in every arm
-    (the image's package index is stale, `apt-get install curl` returns 404),
-    and six more in the one arm that ran through a GitHub outage, where
-    `uv`'s download failed. That arm read 0.697 against 0.775 and looked like
-    a regression; over the trials whose tests ran it was 0.765.
-
-    Both conditions are required. No result file alone is not enough -- a
-    task with its own scoring harness may write only `reward.txt` -- and the
-    runner's absence alone is not either, when some tests did report.
+    A task's `test.sh` installs its own test runner from the network at
+    verification time. When that install fails the tests never start, the reward
+    is 0, and harbor records no exception -- an environment failure that would
+    otherwise be charged to the agent. Both conditions are required: no result
+    file (a task with its own scoring harness may write only a reward), and the
+    runner's absence in the verifier's output.
     """
     verifier = trial_dir / "verifier"
     if (verifier / "ctrf.json").exists() or (verifier / "breakdown.json").exists():
@@ -378,14 +337,8 @@ def load_trial(trial_dir: Path) -> Trial | None:
 def _run_dir(job_dir: Path) -> Path:
     """The directory the trials are actually in.
 
-    harbor writes `<jobs-dir>/<timestamp>/<trial>/`, and `<jobs-dir>` is what
-    every command in this project is given -- it is the argument to
-    `--jobs-dir`. Reading the jobs dir as if it held trials finds none and
-    reports a comparison of zero against zero, with a delta of +0.00% and a
-    p-value of 1.000: three numbers that look like an answer.
-
-    A directory that already holds trials is used as-is, so a run dir still
-    works when passed directly.
+    harbor writes `<jobs-dir>/<timestamp>/<trial>/`, and commands are given the
+    jobs dir; a directory that already holds trials is used as-is.
     """
     if any((c / "result.json").exists() for c in job_dir.iterdir() if c.is_dir()):
         # Could be either level; prefer the one whose children hold trials.
@@ -430,10 +383,8 @@ def completion_histogram(job: Job, bins: int = 5) -> list[tuple[str, int]]:
 def _sign_test(a: int, b: int) -> float:
     """Two-sided sign test over discordant pairs.
 
-    The paired form is the only one that means anything here: two runs share a
-    task list, most tasks agree, and what carries information is which way the
-    disagreements fall. Comparing two whole-run means over different task sets
-    is the mistake this module used to make in `compare` itself.
+    Two runs share a task list, most tasks agree, and what carries information is
+    which way the disagreements fall.
     """
     import math
 
@@ -448,23 +399,11 @@ def _sign_test(a: int, b: int) -> float:
 def compare(baseline: Job, candidate: Job) -> dict:
     """Compare two runs task by task.
 
-    The aggregate delta is the headline, but the regressions matter more: a
-    change that solves two new tasks and breaks two others has not helped, and
-    the means alone would call that a tie.
-
-    Two things this reports that it used to hide.
-
-    **The scores are over the shared tasks.** They were the whole-job means,
-    which is a delta between two different denominators — the exact total-vs-
-    total comparison this project rules out everywhere else. `full_*_score` is
-    still here, named for what it is.
-
-    **A task that never reached the agent is not a regression.** `confirm_gate`
-    set an environment variable that tmux 3.1c rejects, so both qemu tasks died
-    in setup on every gated run; they appeared in `lost` beside real ones, and
-    a mechanism was judged on two tasks it had silently deleted. `broke_setup`
-    separates them, because the two call for opposite responses: one is a
-    finding about the agent, the other a bug in the harness.
+    The regressions matter as much as the delta: a change that solves two new tasks
+    and breaks two others has not helped. Scores are computed over the shared tasks,
+    and a task that never reached the agent on one side is reported separately as
+    `broke_setup` rather than counted as a regression. `full_*_score` keeps the
+    whole-run means.
     """
     base = {t.task: t for t in baseline.trials}
     cand = {t.task: t for t in candidate.trials}
@@ -493,13 +432,9 @@ def compare(baseline: Job, candidate: Job) -> dict:
         if abs((cand[t].completion or 0) - (base[t].completion or 0)) > 0.05
     ]
 
-    # The same task set the wins and losses are counted over. Leaving a
-    # setup-broken task out of `lost` but inside the mean is incoherent, and
-    # not by a little: on one real pair it turned +4.0% into -1.19%, because
-    # the four tasks excluded from the attribution were four zeros still
-    # sitting in one side's denominator. If they are not evidence about the
-    # agent, they are not evidence in the score either. `full_*_score` keeps
-    # the leaderboard view, where an errored trial is a zero like any other.
+    # The same task set the wins and losses are counted over: a task excluded from
+    # the attribution is excluded from the score too. `full_*_score` keeps the
+    # leaderboard view, where an errored trial is a zero like any other.
     scored = [t for t in shared if t not in set(broke_setup)]
 
     def _mean(job_by_task):
@@ -528,10 +463,8 @@ def compare(baseline: Job, candidate: Job) -> dict:
         "broke_setup": broke_setup,
         "broke_setup_side": broke_setup_side,
         "completion_moved": sorted(moved, key=lambda m: m[2] - m[1], reverse=True),
-        # The delta alone says nothing about whether it survives the noise.
-        # Two runs of one configuration disagree on 15-16% of tasks here, so an
-        # 89-task run resolves about +-8 points; the sign test over the tasks
-        # that actually moved is the instrument that respects that.
+        # The sign test over the tasks that moved says whether the delta survives the
+        # run-to-run noise.
         "p_value": _sign_test(len(gained), len(lost)),
         # Scores cross scaffolds; process metrics do not, and this project got
         # that wrong three times in one day. A claude-code trajectory step is a

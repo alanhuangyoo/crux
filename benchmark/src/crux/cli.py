@@ -1,9 +1,7 @@
-"""crux — the command line entry point.
+"""crux-bench: the command line entry point.
 
-Three things a person actually does with this project, behind one command:
-solve a task in a directory, run the benchmark, and understand a run that has
-already happened. They share the prompt and the toolkit, so they stay in one
-place rather than drifting between scripts.
+Solve a task in a directory, run the benchmark, and understand a run that has
+already happened, behind one command sharing one prompt and toolkit:
 
     crux solve "make the failing test pass"
     crux bench --tasks 12 --variant stock
@@ -45,37 +43,25 @@ VARIANTS = ('default', 'lean', 'no_apply_patch', 'no_grading', 'no_toolkit', 'st
 RESOURCES = Path(__file__).parent / "resources"
 HELPERS = {"apply_patch": "apply_patch.py", "crux-tools": "crux_tool.py"}
 
-# The board at tbench.ai is Terminal-Bench 4.0 -- 66 tasks, a flat 8h agent
-# budget, scored at -k 5. Opus 5 with Claude Code leads it at 51.8%. 2.1 is the
-# older 89-task set the widely quoted figures came from, and terminal-bench-pro
-# is a different benchmark entirely (Alibaba's, 400 tasks, its own board), not a
-# version of this one.
+# The tbench.ai board runs Terminal-Bench 4.0 (66 tasks, 8h agent budget,
+# scored at -k 5); 2.1 is the earlier 89-task set. terminal-bench-pro is a
+# separate benchmark with its own board, not a version of this one.
 DEFAULT_DATASET = "terminal-bench/terminal-bench@4.0.0"
 LEGACY_DATASET = "terminal-bench/terminal-bench-2-1"
 FRONTIER_DATASET = "terminal-bench/terminal-bench@latest"
-# The model is self-hosted -- Qwen3.8-27B FP8 on four H20s, served by sglang and
-# addressed through OPENAI_BASE_URL. Every number in this repo came from it, so
-# it is the default; a run that silently used something else would not be
-# comparable to any of them.
-#
-# Tokens are therefore free and wall clock is the constraint, which inverts the
-# old advice to iterate on a cheap model and confirm on an expensive one. What
-# costs now is the four cards, and the engine's aggregate throughput stops
-# climbing at about 48 concurrent streams.
+# The default model is the self-hosted endpoint addressed through
+# OPENAI_BASE_URL, so a run cannot silently use a different model from the
+# rest. Wall clock rather than tokens is the constraint on self-hosted
+# hardware.
 DEFAULT_AGENT = "crux.terminus_agent:CruxTerminusAgent"
 DEFAULT_MODEL = "openai/qwen3.8-27b"
 # Hosted models, for a cross-check that the result is not an artefact of this
 # particular deployment.
 HOSTED_MODELS = ("deepseek/deepseek-v4-flash", "openrouter/stealth/ox-alpha")
 
-# These declare gpus=1. harbor's docker environment declares no GPU capability
-# at all (environments/capabilities.py, `gpus: bool = False`), so the validation
-# error does not just fail those trials — it propagates and aborts the whole
-# job, taking every other trial in flight with it. Only modal, daytona, beam and
-# opensandbox can allocate a GPU, and all of them are paid cloud sandboxes.
-#
-# The names are per dataset version, so they cannot be one flat list: 2.1 has
-# these four, 4.0 dropped exam-pdf-eval and keeps the other three.
+# Tasks that declare gpus=1. harbor's docker environment has no GPU capability,
+# and the validation error aborts the whole job rather than one trial, so they
+# are excluded. The names differ per dataset version.
 GPU_TASKS_BY_ORG = {
     "terminal-bench": (
         "exam-pdf-eval",
@@ -86,30 +72,8 @@ GPU_TASKS_BY_ORG = {
 }
 
 
-# Tasks whose budget is shortened because they never solve and burn it anyway.
-#
-# **Empty, and why it is empty matters more than the list did.**
-#
-# It held `regex-chess` (0 of 4, stalled 6 of 11) and
-# `adaptive-rejection-sampler` (0 of 6, stalled 4 of 10), measured over 432
-# scored trials in 21 runs, with this justification: ten explanations for the
-# stall had been checked and eliminated, the cause was unknown, so capping was
-# loss control rather than a fix.
-#
-# The cause was `_LLM_CALL_TIMEOUT_SEC = 600`, set in this repository against a
-# 900-second budget and carried unchanged into the 8x budget every run since
-# has used. The trials died three attempts deep:
-#
-#     litellm.Timeout: timeout value=600.0, time taken=1801.36 seconds
-#
-# So "these tasks never solve" was a measurement of a constant of mine, and the
-# cap was a policy built on it. The ceiling now scales with the budget; see
-# `_llm_timeout_for` in terminus_agent.py.
-#
-# The mechanism stays, because a task that genuinely burns its budget for
-# nothing is a real category. Nothing goes back into this list without a run
-# under the fixed ceiling that shows it -- which is the standard the old
-# entries were admitted under and did not meet.
+# Tasks whose budget is shortened because they reliably burn it without
+# solving. Empty: nothing is added without a run that shows it.
 STALL_CAPPED_TASKS: dict[str, tuple[str, ...]] = {}
 
 # 30 minutes covers p90 of every solved trial in the corpus.
@@ -124,10 +88,8 @@ def stall_capped_for(dataset: str) -> tuple[str, ...]:
 def gpu_tasks_for(dataset: str) -> tuple[str, ...]:
     """The GPU-requiring task names to exclude, for this dataset's org.
 
-    A task name is qualified by org, so a hardcoded `terminal-bench/` prefix
-    matches nothing on any other dataset while still printing "skipped=..." --
-    which is how 88 trials of a terminal-bench-pro run went by with an exclusion
-    that was a no-op. Returning an empty tuple makes the caller say so honestly.
+    Task names are qualified by org, so an unknown org gets an empty tuple and the
+    caller says so, rather than printing an exclusion that matches nothing.
     """
     return GPU_TASKS_BY_ORG.get(dataset.split("/", 1)[0], ())
 
@@ -158,15 +120,9 @@ def _install_helpers(target: Path) -> list[str]:
 def cmd_solve(args) -> int:
     """Run the benchmarked agent against a task in a local directory.
 
-    This used to shell out to mini-swe-agent while every number in the repo came
-    from the Terminus base, so the CLI shipped the scaffold the measurements had
-    rejected -- about 3 points lower on the same tasks, and unable to express
-    entering an ssh session or a REPL at all.
-
-    Now it runs the same agent the benchmark runs, against `LocalEnvironment`
-    instead of a container, with an approval gate in front of commands that are
-    expensive to get wrong. A benchmark trial can afford `rm -rf`; the user's
-    working directory cannot.
+    The same agent the benchmark runs, against `LocalEnvironment` instead of a
+    container, with an approval gate in front of commands that are expensive to
+    get wrong: a benchmark trial can afford `rm -rf`, a working directory cannot.
     """
     import asyncio
 
@@ -190,9 +146,8 @@ def cmd_solve(args) -> int:
     approval = Approval(args.approval)
 
     env = LocalEnvironment(cwd=cwd)
-    # BaseAgent writes its trajectory and pane dump under logs_dir. In a
-    # benchmark that is the trial directory; here it goes beside the session so
-    # a run can be read back afterwards.
+    # BaseAgent writes its trajectory under logs_dir; here it goes beside the
+    # session so a run can be read back afterwards.
     logs_dir = Path(env.trial_paths.agent_dir)
     agent = LocalCruxAgent(
         logs_dir=logs_dir,
@@ -236,11 +191,8 @@ def cmd_solve(args) -> int:
 def running_harbor_jobs(exclude_pid: int | None = None) -> list[str]:
     """Other `harbor run` processes on this machine, as short descriptions.
 
-    A second job is invisible from the inside: every status check reads one job
-    directory, so a run that has quietly lost half the engine to a neighbour
-    looks exactly like a run that is merely slow. Two arms at concurrency 24 put
-    ~48 streams on an engine whose aggregate throughput peaks near 48 and then
-    falls -- measured at 1109 tok/s for 24 and 507 for 48.
+    A second job sharing the engine is invisible from inside one job directory,
+    and makes a run look merely slow.
     """
     import re
 
@@ -300,10 +252,9 @@ def live_containers() -> int | None:
 def running_concurrency(jobs: list[str] | None = None) -> int:
     """Containers other harbor jobs are already holding.
 
-    Prefers the live container count; falls back to the concurrency the other
-    jobs declared, which is an upper bound. An unparseable entry counts as zero
-    rather than guessing: this feeds an audit that warns about crossing a
-    measured inflection, and a made-up number would make it fire on nothing.
+    Prefers the live container count; falls back to the concurrency the other jobs
+    declared, an upper bound. An unparseable entry counts as zero rather than a
+    guess.
     """
     import re
 
@@ -321,13 +272,8 @@ def running_concurrency(jobs: list[str] | None = None) -> int:
 def _write_provenance(jobs_dir: str, command: list[str]) -> Path | None:
     """Record what code produced a run, beside the run.
 
-    A job directory says what was measured but not what was measuring. Tonight a
-    baseline went out with a prompt change that had never been scored, and
-    nothing in its output would have said so -- the difference between an
-    experiment and a number you find later and cannot place.
-
-    Best effort: a run must not fail because git is missing or the tree is not a
-    repository.
+    A job directory says what was measured but not what was measuring. Best effort:
+    a run must not fail because git is missing or the tree is not a repository.
     """
     import hashlib
     import json
@@ -393,12 +339,9 @@ def cmd_bench(args) -> int:
     # on local disk, not on a shared network mount.
     jobs_dir = args.jobs_dir or ("/scratch/crux-jobs" if Path("/scratch").is_dir() else "jobs")
 
-    # Every measurement in this repo came from the Terminus base; the
-    # mini-swe-agent one that used to be hardcoded here scores about 3 points
-    # lower and cannot express entering an ssh session at all. `--agent` exists
-    # so a comparison arm -- claude-code, pi -- runs through the same command
-    # with the same dataset, concurrency and attempts, which is the only shape
-    # in which the difference between two runs means the scaffold.
+    # `--agent` lets a comparison arm (claude-code, pi) run through the same
+    # command with the same dataset, concurrency and attempts, so the difference
+    # between two runs is the scaffold.
     command = [
         "harbor", "run",
         "--dataset", args.dataset,
@@ -420,20 +363,15 @@ def cmd_bench(args) -> int:
         command += ["--upload"]
     if args.agent_timeout_multiplier != 1.0:
         command += ["--agent-timeout-multiplier", str(args.agent_timeout_multiplier)]
-    # A separate budget because a separate thing is running. SWE-Atlas grades
-    # with an LLM judge against a 900s default, and every one of its trials came
-    # back "Verifier execution timed out after 900" -- with the agent already
-    # finished and its answer written.
+    # A separate verifier budget: LLM-judged benchmarks such as SWE-Atlas need
+    # longer than the default to grade a finished answer.
     if getattr(args, "verifier_timeout_multiplier", 1.0) != 1.0:
         command += [
             "--verifier-timeout-multiplier",
             str(args.verifier_timeout_multiplier),
         ]
-    # Datasets registered as a bare name -- aider-polyglot, livecodebench --
-    # carry unqualified task ids, and prefixing them with the dataset name
-    # matches nothing. harbor reports that as "no tasks matched the filter(s)"
-    # and lists the available names, which look identical to the ones you asked
-    # for; the prefix is only visible in the filter half of the message.
+    # Datasets registered under a bare name carry unqualified task ids, so the
+    # dataset prefix is only added where the ids are qualified.
     org = args.dataset.split("/", 1)[0] if "/" in args.dataset else ""
     for task in getattr(args, "task", None) or []:
         command += ["--include-task-name", f"{org}/{task}" if org else task]
@@ -446,12 +384,9 @@ def cmd_bench(args) -> int:
         for task in gpu_tasks:
             command += ["--exclude-task-name", f"{org}/{task}" if org else task]
 
-    # The budget multiplier harbor takes is one number for the whole run, so a
-    # task that reliably burns its budget can only be given a shorter one by
-    # being run separately. `--split-stall-capped` prints that second command
-    # rather than running it: which tasks are worth their wall-clock is a
-    # judgement about a specific corpus, and it should be visible at the point
-    # it is made, not buried in a flag.
+    # harbor's budget multiplier is one number per run, so a task can only get a
+    # shorter budget by running separately; `--split-stall-capped` prints that
+    # second command rather than running it.
     capped = [t for t in stall_capped_for(args.dataset) if not args.task or t in args.task]
     if capped and args.agent_timeout_multiplier > STALL_CAP_MULTIPLIER:
         print(
@@ -465,11 +400,8 @@ def cmd_bench(args) -> int:
             file=sys.stderr,
         )
 
-    # Every tuned constant in this project was measured in some regime, and
-    # three of them have now been carried into a regime where they were wrong
-    # -- costing two tasks a run, a reversed verdict, and 12 slot-hours. The
-    # audit is here rather than in `doctor` because this is the moment the
-    # regime is chosen, and a warning after the run has started is a finding.
+    # Tuned constants are checked against the regime this run is about to use,
+    # before it starts.
     from crux.calibration import Run as _CalRun, audit as _audit
 
     for line in _audit(_CalRun(
@@ -530,15 +462,8 @@ QUICK_CONTESTED = (
 def cmd_quick(args) -> int:
     """Run the development slice rather than the whole benchmark.
 
-    A preset over `crux bench`, not a third way of building the same command
-    line. The two earlier copies drifted from each other and from this one: all
-    three hardcoded a `terminal-bench/` prefix, and this one still named
-    crux.agent:CruxAgent -- the base the measurements rejected -- while pointing
-    at a default dataset whose task names its canary list does not contain, so
-    `--include-task-name` would have matched nothing at all.
-
-    The slice is pinned to 2.1 because that is where the canaries were chosen
-    and measured; the names do not exist in 4.0.
+    A preset over `crux bench`, pinned to 2.1, where the slice's tasks were
+    chosen.
     """
     slice_args = argparse.Namespace(**vars(args))
     slice_args.dataset = LEGACY_DATASET
@@ -585,23 +510,16 @@ def cmd_report(args) -> int:
         verdict = "separates" if p < 0.05 else "inside the noise"
         print(f"  gained {len(result['gained'])}, lost {len(result['lost'])}"
               f"   sign test p={p:.3f}  ({verdict})")
-        # The delta has to be read against what this many tasks can resolve.
-        # Two runs of one configuration disagree on 15-16% of tasks here, so a
-        # lead smaller than the resolution is a direction, not a result -- and
-        # every lead measured in this project so far has been smaller.
+        # The delta is read against what this many tasks can resolve: a lead smaller
+        # than the run-to-run noise is a direction, not a result.
         from crux.watch import _resolution
 
         r = _resolution(result["shared_tasks"])
         if r:
             print(f"  {result['shared_tasks']} tasks resolve about "
                   f"±{r:.1f} points")
-        # What it cost, beside what it bought. A change that does what it
-        # promised at five times the compute reads identically to one that did
-        # nothing, if only the score is printed -- and it is the worse result.
-        # Where each side's non-solves went. Every misreading in this project
-        # came from an infrastructure failure being read as an agent one --
-        # 114 trials in the corpus, then pi's 16 -- and a delta printed without
-        # this is a number whose provenance the reader cannot check.
+        # What it cost beside what it bought, and where each side's non-solves went,
+        # so an infrastructure failure is never read as an agent one.
         ba, ca = job.by_category(), other.by_category()
         keys = [k for k in ("solved", "environment", "agent_timeout", "killed",
                             "context_exceeded", "format_error", "false_completion",
@@ -805,12 +723,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help="run only this task, repeatable (unqualified; the dataset's org is added when it has one)",
     )
-    # 2.1 gives a ~900s median, and on this hardware 76% of its failures are
-    # wall clock rather than wrong answers -- tuning against it mostly measures
-    # the engine's 129 tok/s. Opening the agent budget makes the score reflect
-    # the agent. It also makes the run non-submittable: harbor requires the
-    # multiplier to be 1.0, so anything measured this way is an internal
-    # comparison and has to be reported as one.
+    # Opening the agent budget makes the score reflect the agent rather than the
+    # engine's throughput. harbor requires a multiplier of 1.0 for submission, so
+    # results measured this way are internal comparisons.
     p.add_argument(
         "--agent-timeout-multiplier",
         type=float,

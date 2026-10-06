@@ -1,25 +1,16 @@
 """A conversation with the agent the benchmark scores.
 
-`crux solve` runs one instruction to completion and exits. That is what a
-benchmark trial is, and it is not what using a tool is like: the second thing
-you want to say is almost always shaped by what just happened.
+`crux solve` runs one instruction to completion and exits; a conversation
+needs both sides to persist between turns. The shell side already does --
+harbor reuses the agent instance across `run()` calls, so the tmux session
+keeps its cwd, environment and background processes -- and
+`CruxTerminusAgent.carry_context` keeps the model's side, so this is a loop
+around `run()` rather than a reimplementation of it.
 
-Two kinds of continuity are needed, and only one was missing. The shell already
-survives -- harbor reuses the agent instance across `run()` calls, so the tmux
-session keeps its cwd, its environment and its background processes. What did
-not survive was the model's side: Terminus assigns a fresh Chat as the second
-statement of every run(). `CruxTerminusAgent.carry_context` closes that, so this
-is a loop around `run()` rather than a reimplementation of it.
-
-Deliberately not a full-screen TUI. Output is appended, never repainted, so a
-session survives a pipe, a scrollback search and a 40-column pane. What it does
-have is everything needed to not open a second terminal: the commands as they
-run, the model's own account of why, the counters, and history that outlives
-the process.
-
-The one hard rule this file obeys is the project's: what runs here is the same
-class the benchmark scores. Every addition below is a display or an input
-convenience. None of them changes what the agent does.
+Deliberately not a full-screen TUI: output is appended, never repainted, so a
+session survives a pipe, a scrollback search and a narrow pane. What runs here
+is the same class the benchmark scores; every addition below is a display or
+an input convenience and none of them changes what the agent does.
 """
 
 from __future__ import annotations
@@ -177,11 +168,8 @@ _AT = re.compile(r"(?<![\w/])@([\w./~-]+)")
 def _expand_files(text: str, root: Path) -> tuple[str, list[str]]:
     """Inline `@path` references, and say which ones were inlined.
 
-    The alternative is telling the agent to read the file, which costs a turn
-    and a round trip on a model that generates 67 tokens a second under load.
-    Missing paths are left as written -- `@` is ordinary text in an email
-    address or a decorator, and silently deleting it would be worse than
-    passing it through.
+    This saves the agent a turn spent reading the file. Missing paths are left as
+    written: `@` is ordinary text in an email address or a decorator.
     """
     used: list[str] = []
 
@@ -481,10 +469,9 @@ def cmd_repl(args) -> int:
 
     async def main() -> int:
         await env.start()
-        # setup() is what creates the tmux session Terminus drives; run() raises
-        # "Session is not set" without it. In a benchmark trial harbor calls it,
-        # so it is easy to leave out of a hand-written loop -- and it fails on
-        # the first turn rather than at import, which is how it got missed here.
+        # setup() creates the tmux session Terminus drives; run() raises "Session is not
+        # set" without it. harbor calls it in a benchmark trial, so a hand-written loop
+        # has to call it explicitly.
         await agent.setup(env)
         prompt = f"{ui.CYAN}crux>{ui.RESET} " if ui._COLOR else "crux> "
         cont = f"{ui.GREY}....{ui.RESET} " if ui._COLOR else ".... "

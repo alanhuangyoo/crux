@@ -1,13 +1,9 @@
-"""Prompt templates for Crux.
+"""Prompt sections for Crux.
 
-Crux is mini-SWE-agent with a modified prompt. The base agent is on the public
-Terminal-Bench leaderboard at 76.2%; the loop, the parser, the trajectory
-export, and the format contract are all upstream's and are left alone. What
-changes here is only what a full run of our own showed the model getting wrong.
-
-The format contract — one ```mswea_bash_command``` block per turn, and
-`echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` to finish — is upstream's parser
-talking, so it is reproduced exactly.
+Sections are appended to the base agent's system prompt and selected by name.
+For the mini-SWE-agent and Terminus bases, the upstream format contract (one
+command block per turn, and the completion sentinel) is reproduced exactly;
+only the guidance around it changes.
 """
 
 # Unchanged from upstream except for the last paragraph. The base agent's
@@ -16,11 +12,9 @@ SYSTEM_TEMPLATE = """\
 You are a helpful assistant that can interact with a computer.
 """
 
-# The grading paragraph is the substantive change. A full 70-task run finished
-# with 30 tasks at 60% or more of their checks and only 3 scored, because the
-# scoring is per-task all-or-nothing and the model has no way to know that. It
-# stops when the work looks basically done, which is exactly where the points
-# are lost.
+# The grading paragraph: scoring is per task and all-or-nothing, and the model
+# cannot know that, so it tends to stop when the work looks basically done --
+# exactly where the points are lost.
 GRADING_SECTION = """\
 ## How this is graded
 
@@ -52,10 +46,8 @@ observes, rather than a judgement you make about yourself — which is the \
 judgement this agent gets wrong most often.
 """
 
-# apply_patch is offered instead of sed because it measurably works better.
-# Across 601 calls in one full run it succeeded 97.5% of the time; the failures
-# were bad paths and stale context, not mangled files. sed edits fail silently
-# by matching the wrong line, which the model then has to notice.
+# apply_patch rather than sed: a failed patch changes nothing and fails loudly,
+# while a sed edit that matches the wrong line reports success.
 APPLY_PATCH_SECTION = """\
 ### Edit files with apply_patch (preferred over sed)
 
@@ -83,12 +75,9 @@ adds. Give about three lines of context on each side, and use \
 relative. A failed patch changes nothing, so it is safe to correct and retry.
 """
 
-# A shell-only agent reads with `sed -n`, searches with `grep`, and edits with
-# `sed -i`. Each has a failure mode the model cannot see: reads come back
-# without line numbers to refer to, an unbounded `cat` evicts the context it
-# needed, and a sed edit that matches the wrong line reports success. These
-# tools are the same set the mature terminal agents converge on (opencode, pi,
-# Codex), delivered through the only channel available here.
+# Structured file tools for a shell-only agent: reads with line numbers, bounded
+# output, and edits that refuse an ambiguous anchor -- the set mature terminal
+# agents converge on (opencode, pi, Codex).
 FILE_TOOLS_SECTION = """\
 ### File tools — prefer these over cat/grep/sed
 
@@ -345,64 +334,12 @@ def build_instance_template(
 # --- Terminus-path sections -------------------------------------------------
 #
 # Composed onto upstream's template at runtime rather than shipped as a copy of
-# it. A frozen copy was in the tree and matched upstream exactly, which is the
-# problem: it would go on matching a prompt harbor had since changed, silently.
+# it, so a change upstream is picked up rather than silently diverged from.
 
-# Measured against claude-code on the same 89 tasks, same model. Segments per
-# command, counting `&&` and `;`:
-#
-#                    every command   the first command
-#     claude-code         3.0              3.0
-#     crux                2.0              1.0
-#
-# crux's opening move is one segment -- `ls` -- where the other agent's is
-# three. Its first commands look like
-#
-#     ls -la /app && head -5 /app/data.csv && wc -l /app/data.csv
-#     ls -la /app/ && file /app/a.out
-#     python3 --version && which python3 && ls -la /app
-#
-# and that is the whole of the 1.85x step count and 2.8x tool calls measured
-# between the two: fewer things per step means more steps. Unlike the file
-# tools, this asks the model to adopt nothing new -- only to put what it was
-# going to run anyway into one command.
-#
-# Probed before spending a run on it: five first commands from the real prompt
-# against the real endpoint, thinking off.
-#
-#     default            [1, 1, 1, 1, 1]   median 1.0
-#     batch_section=1    [3, 2, 1, 1, 1]   median 1.0
-#
-# Two of five move; the median does not. That is the same shape as the file
-# tools -- uptake 0.3% to 4.3%, and a score of 81.1% against 78.4% at p=0.77 --
-# so this is written down and left off rather than given an arm. A section
-# nudges a strong prior and does not replace it.
-# Read the artifact before describing it.
-#
-# From claude-code's trajectories: on `chess-best-move` its first move is
-# `Read /app/chess_board.png`; on the four tasks it still wins its openers are
-#
-#     ls -la /app && head -5 /app/data.csv && wc -l /app/data.csv
-#     ls -la /app/ && file /app/a.out
-#
-# Every one of them touches the data on the first command. crux opens with a
-# bare `ls -la /app` in 35 of 39 runs and does not read anything until later --
-# and in the file-tools arms the first structured read lands at 41% of the way
-# through the trajectory.
-#
-# Probed before spending a run: six first commands, counting whether any of
-# them opens a file rather than listing one.
-#
-#     default          [0, 0, 0, 0, 0, 0]   all `ls -la /app`
-#     look_section=1   [0, 0, 0, 0, 0, 0]   all `ls -la /app`
-#
-# Nothing moved -- weaker even than the batching section, which moved one draw
-# in five. Three prompt sections have now been written against this same habit
-# and all three bounce off it. The opening `ls` is not something the prompt is
-# competing with; it is what the model does when it has read nothing yet, and a
-# paragraph asking otherwise is read after that decision is already made.
-#
-# Kept, off, and unmeasured. One minute of probing rather than six hours of GPU.
+# Optional sections, off by default: batching several checks into one command
+# (`batch`), and reading the data before describing it (`look`). Both target an
+# opening `ls` with nothing read yet; the model's prior there is strong, so they
+# are kept selectable rather than on.
 TERMINUS_LOOK_SECTION = """## Look at the thing itself, first
 
 Your first command should show you the data, not just its name. A directory
@@ -568,26 +505,10 @@ the line you had in mind, and reports nothing when it matches four.
 Write a whole file with a heredoc when you are creating it. To change one that
 already exists, patch it."""
 
-# Two lines lifted from Claude Code's own system prompt
-# (`src/constants/prompts.ts`, the `# Doing tasks` section), because each one
-# names a failure measured in pi on this benchmark rather than a mechanism
-# reasoned out here.
-#
-# **Verify before reporting done.** 18 of pi's 24 failed Terminal-Bench trials
-# ended with `agent_settled` -- the agent deciding it was finished -- and 69 of
-# 73 trials never ran a command that looks like a check at all. Claude Code
-# tells the model to run the test, and to say so when it cannot.
-#
-# **Diagnose before abandoning.** On the tasks it failed, stock pi issued a
-# median of 7 tool calls across 5 turns and stopped; Claude Code issued 40.
-# Its prompt asks for a focused fix after reading the error, and explicitly
-# rules out both blind retries and giving up after one failure.
-#
-# Claude Code's section runs to some eighty lines and most of it is about being
-# Claude Code -- slash commands, feedback channels, its own tool names. These
-# two are the ones with a measurement behind them here, so these two are what
-# gets ported. Everything else in that section is a guess about this benchmark
-# until something says otherwise.
+# Two directives from Claude Code's `# Doing tasks` system-prompt section
+# (`src/constants/prompts.ts`): verify before reporting done -- run the test, and
+# say so when it cannot be run -- and diagnose a failure before abandoning an
+# approach, rather than retrying blindly or giving up after one error.
 CC_FINISH_SECTION = """\
 ## Finishing
 
@@ -602,28 +523,10 @@ blindly, and do not abandon a viable approach after a single failure. The task
 is not over because the first thing you tried did not work.
 """
 
-# Two directives from Claude Code's own `# Doing tasks` system-prompt section
-# (`src/constants/prompts.ts`, getSimpleDoingTasksSection), carried over because
-# they name the two failures measured in pi on this benchmark and nothing in
-# pi's prompt addresses either.
-#
-#   - Eighteen of pi's twenty-four failed Terminal-Bench 2.1 trials ended with
-#     the agent declaring itself done and the verifier disagreeing.
-#   - Four more stopped after two to four actions.
-#
-# Claude Code answers the first with "verify it actually works: run the test,
-# execute the script, check the output ... if you can't verify, say so
-# explicitly rather than claiming success", and the second with "don't retry
-# the identical action blindly, but don't abandon a viable approach after a
-# single failure either".
-#
-# Worth being precise about what this is evidence for. Eight prompt sections
-# written for this project were measured on Terminal-Bench and every one landed
-# inside the noise, so the prior on a prompt section is poor. What is different
-# here is not the wording but the provenance: this is the text a scaffold that
-# leads by 17 points on the same model actually ships, and it is the largest
-# untested difference between the two -- every arm so far ran pi with no
-# appended prompt at all.
+# The same two directives, as Claude Code words them in
+# `getSimpleDoingTasksSection`: "verify it actually works", and "don't retry the
+# identical action blindly, but don't abandon a viable approach after a single
+# failure either".
 CC_DOING_TASKS_SECTION = """\
 # Finishing and persisting
 
@@ -642,26 +545,9 @@ modified, read it first.
 
 # The task-solving substance of Claude Code's `# Doing tasks` section
 # (`src/constants/prompts.ts`, getSimpleDoingTasksSection), ported at its real
-# size rather than as two lines.
-#
-# Why size is the point. pi's core system prompt is 4,169 characters. Claude
-# Code's is 27,960, of which roughly 12,600 could bear on a benchmark trial at
-# all -- the rest is communication style for a human who is watching, a
-# confirm-before-risky-actions policy that a `bypassPermissions` trial has
-# nobody to honour, MCP and deferred-tool discovery, and an autonomous-tick
-# mode that is feature-gated off. So the real ratio of task guidance is about
-# three to one, and `getSimpleDoingTasksSection` is 7,145 characters of it.
-#
-# Nine prompt sections have been measured in this project and all nine landed
-# inside the noise. Every one was a few hundred characters. That makes nine null
-# results weak evidence about prompts in general: none of them tested a prompt
-# at the size of the one being compared against.
-#
-# Dropped from the port, deliberately: the product bullets (/help, /issue,
-# /share, the feedback channel), the time-estimate and knowledge-cutoff rules,
-# the accountability-and-tone bullet, and the "default to helping" safety
-# framing. None of them can move a benchmark trial, and carrying them would
-# make this a test of length rather than of content.
+# size rather than as two lines. Product bullets (/help, /issue, feedback),
+# time-estimate and knowledge-cutoff rules and tone guidance are left out, since
+# they cannot bear on an unattended task.
 CC_DOING_FULL_SECTION = """\
 # Doing tasks
 
@@ -718,22 +604,10 @@ CC_DOING_FULL_SECTION = """\
 """
 
 
-# The one directive in Claude Code's `getUsingYourToolsSection` that bears on a
-# trial: prefer the dedicated file tools over their shell equivalents, and keep
-# the shell for shell work.
-#
-#     Prefer dedicated tools over Bash equivalents (e.g., Read over cat, Edit
-#     over sed, Glob over find, Grep over grep). Reserve Bash for shell
-#     operations: package installs, test runners, build commands, git
-#     operations.
-#
-# Measured on this benchmark: pi routes 86.1% of its tool calls through bash
-# against Claude Code's 73.2%, and the rest of that section is about tool
-# discovery, deferred tools and MCP, none of which exists in a trial.
-#
-# The Glob and Grep half is dropped because pi has neither tool, and Claude Code
-# called them zero times in 89 trials -- an instruction to prefer a tool that is
-# not there would only cost tokens.
+# The directive in Claude Code's `getUsingYourToolsSection` that bears on an
+# unattended task: prefer the dedicated file tools over their shell equivalents,
+# and keep the shell for shell work. The Glob and Grep half is dropped, since pi
+# has neither tool.
 CC_TOOLS_SECTION = """\
 # Using your tools
 
@@ -749,23 +623,11 @@ commands, git.
 
 # What the model sees of its own past turns, said plainly.
 #
-# This harness sets `replaysReasoning: false` (see pi_agent.py): a turn's
-# reasoning is not sent back, so the next turn sees the tool calls, their
-# results, and the visible text -- nothing of why. Measured over 25,871
-# tool-call turns in 356 Terminal-Bench 2.1 trials, the visible text beside a
-# tool call has a median length of 0 characters; about three turns in four
-# carry under 40. The reasoning beside them runs to a median of 1,000-1,350
-# characters, and all of it is gone on the next request. The model does not
-# know this: a turn that says "I have the full disassembly reconstructed in my
-# head" is followed by one that reconstructs it again.
-#
-# Both reference agents ask for a line of visible text around tool calls, for
-# the user's benefit: Codex's "brief preamble ... no more than 1-2 sentences
-# ... connect the dots with what's been done so far", Claude Code's short
-# updates "when you find something load-bearing". Here the reader that
-# matters is the model's next turn. The rare notes it already writes are the
-# right kind -- "Two issues: initialization explores only one mode, so the
-# bimodal case slips through undetected."
+# This harness sets `replaysReasoning: false` (see pi_agent.py), so a turn's
+# reasoning is not sent back and the next turn sees only the tool calls, their
+# results and the visible text. Short notes beside tool calls -- what Codex's
+# preambles and Claude Code's progress updates ask for -- carry the findings that
+# would otherwise be lost with the reasoning.
 NOTES_SECTION = """\
 # Keep your notes where you can see them
 
@@ -795,11 +657,9 @@ _SECTION_ORDER = ("scoring", "harness", "submit", "finish", "doing", "doing_full
 def build_sections(names) -> str:
     """The requested sections, in a fixed order, as one appended block.
 
-    Order is fixed rather than following the caller so two runs asking for the
-    same set produce the same bytes; otherwise an A/B could differ by section
-    order with nothing recording it. An unknown name raises, because a typo that
-    quietly runs the control arm while claiming the treatment is the failure
-    this project keeps finding elsewhere.
+    Order is fixed rather than following the caller, so the same set always
+    produces the same bytes. An unknown name raises, so a typo cannot silently run
+    the control configuration.
     """
     wanted = set(names)
     unknown = wanted - set(PROMPT_SECTIONS)
@@ -829,31 +689,12 @@ def build_terminus_template(
     batch: bool = False,
     look: bool = False,
 ) -> str:
-    """Insert the crux sections into upstream's Terminus template.
+    """Insert the Crux sections into upstream's Terminus template.
 
-    `file_tools` defaults off, and the reason recorded for that was not true.
-    It said the model did not take the tools up -- "over 206 tool calls,
-    read/grep/edit/write together accounted for under 2%" -- but this function
-    had no `file_tools` parameter at all, so the Terminus prompt never named
-    `crux read`, `crux grep`, `crux files`, `crux edit` or `crux write`. The
-    binaries were installed and never mentioned. 0% uptake was a statement
-    about the prompt.
-
-    What that costs is measurable. Across both finished runs, 70-83% of every
-    command crux issues is a file operation and 0-1% of them go through a
-    structured tool; reading a file alone is 41-49% of all commands, one slice
-    at a time. claude-code finishes the same 89 tasks in 4,013 tool calls
-    against 6,826, for the same score.
-
-    Still off by default: it is now reachable and unmeasured, which is an arm,
-    not a change to the one being scored.
-
-    `submit` is separable from `scoring` because they are not the same claim.
-    The scoring section states a fact about the grader -- partial work scores
-    zero -- which nothing has contradicted. The submit section directs the model
-    through `crux submit`, and across a full run that gate passed on all nine
-    wrong answers and caught none of them, so it needs to be testable on its
-    own.
+    `file_tools` names the structured `crux` file tools in the prompt and is off
+    by default. `submit` is separate from `scoring`: the scoring section states a
+    fact about the grader, while the submit section routes completion through
+    `crux submit`, so each can be selected on its own.
     """
     head, sep, tail = upstream.partition(_TERMINUS_FOOTER)
     if not sep:
@@ -872,14 +713,9 @@ def build_terminus_template(
     if edit:
         parts += [TERMINUS_EDIT_SECTION.strip(), ""]
     if file_tools:
-        # Braces doubled. Upstream runs `.format(instruction=..., terminal_state=...)`
-        # over this template, and the `crux edit` example in this section is a
-        # JSON object -- `{"edits": [...]}` -- which format() reads as a field
-        # name and raises KeyError('"edits"') on. That took out 16 of 89 trials
-        # on the first run of this arm.
-        #
-        # The mini-swe-agent path does not need this: it substitutes with
-        # str.replace and never formats.
+        # Braces doubled: upstream runs `.format(...)` over this template, and the JSON
+        # example in this section would otherwise be read as a field name. The
+        # mini-swe-agent path substitutes with str.replace and does not need this.
         parts += [_escape_braces(FILE_TOOLS_SECTION.strip()), ""]
     parts += [sep + tail]
     return "\n".join(parts)

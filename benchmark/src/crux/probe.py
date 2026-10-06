@@ -1,32 +1,14 @@
 """Ask whether a change moves the model at all, before it costs a run.
 
-Six mechanisms were given a full arm on this benchmark and six came back inside
-the noise. Two of them could have been ruled out in under a minute:
+A full benchmark arm costs hours of GPU; a handful of calls costs a minute and
+answers the prior question -- does the model behave differently at all --
+which decides whether the score question is worth asking. A mechanism that
+does not move behaviour cannot move the score.
 
-    file tools      uptake 0.3% of commands -> 4.3%, score 81.1% vs 78.4% (p=0.77)
-    batching        first command [1,1,1,1,1] -> [3,2,1,1,1], median unmoved
-
-Both are real nudges against a strong prior, and both are far too small to read
-against a benchmark whose own noise flips 15-16% of tasks. An arm costs six
-hours of GPU; five calls cost a minute and answer the prior question -- *does
-the model behave differently at all* -- which is the one that decides whether
-the score question is worth asking.
-
-This is not a substitute for measuring the score. It is the filter in front of
-it: a mechanism that does not move behaviour cannot move the score, and one
-that moves behaviour a little will move the score less than the noise.
-
-**It measures a ceiling, not an effect.** The probe reads turn one, where the
-model has read nothing and has no habits yet. On file tools it reports two
-draws in four reaching for `crux read`; across 160 real trajectories the tools
-are used in 37%, and the first use lands at 41% of the way through -- only 4 of
-59 inside the first tenth. The opening command is `ls -la /app` 35 times out of
-39.
-
-So the model can be moved and mostly is not, and the gap between those two is
-where the score went: a mechanism that saves actions cannot save them after the
-actions are spent. A probe that says "worth an arm" is saying the ceiling is
-above zero, which is the least it could usefully say.
+It is a filter in front of measuring the score, not a substitute for it, and
+it measures a ceiling rather than an effect: the probe reads turn one, where
+the model has read nothing and has no habits yet. A probe that says "worth an
+arm" is saying the ceiling is above zero.
 """
 
 from __future__ import annotations
@@ -40,16 +22,13 @@ from dataclasses import dataclass, field
 from crux import ui
 
 # The model answers in Terminus's XML, and the opening tag carries attributes:
-# `<keystrokes duration="0.1">`. Matching the bare tag finds nothing, which
-# reads as "the probe got no commands" rather than "the pattern is wrong".
+# `<keystrokes duration="0.1">`. Matching the bare tag would find nothing.
 _KEYS = re.compile(r"<keystrokes[^>]*>(.*?)</keystrokes>", re.S)
 
 # `&&` and `;` join independent probes; a trailing `;` does not.
 _SEGMENTS = re.compile(r"&&|;(?!\s*$)")
 
-# A blank terminal, which is what the agent sees on its first turn -- the turn
-# where the corpus difference against claude-code is largest (1.0 segments
-# against 3.0).
+# A blank terminal, which is what the agent sees on its first turn.
 _FRESH_TERMINAL = "root@probe:/app# \n"
 
 _DEFAULT_TASK = (
@@ -74,13 +53,8 @@ SIGNALS: dict[str, tuple[str, str]] = {
 }
 
 # Everything else changes something this cannot see on turn one, and says so
-# instead of printing a number.
-#
-# `interleaved_thinking` is the instructive case: it was listed here with a
-# prompt-length signal, and reported 9268 == 9268 -- correctly, because on the
-# first turn there is no prior reasoning to carry. The effect is real and
-# measured (context grows 555 tokens a step, reasoning is 26% shorter) and it
-# begins on turn two. A probe that reads turn one can only mislead about it.
+# instead of printing a number. `interleaved_thinking`, for example, carries
+# prior reasoning forward, and on the first turn there is none to carry.
 NO_FIRST_TURN_SIGNAL = {
     "interleaved_thinking": "acts from turn two, when there is reasoning to carry",
     "submit_gate": "fires at the end of a run",
