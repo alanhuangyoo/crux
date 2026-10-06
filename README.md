@@ -80,25 +80,17 @@ this repository is paired to account for it.
 ## Architecture
 
 ```mermaid
-flowchart LR
-    task["Task"] --> loop
-    subgraph agent["Agent (packages/)"]
-        loop["Agent loop<br/>LoopState · recovery · budget pacing"]
-        ctx["Context engine<br/>window-fitted compaction · verbatim task"]
-        tools["Tools<br/>bash · read · edit · write"]
-        loop <--> ctx
-        loop <--> tools
+flowchart TB
+    subgraph agent["Agent · packages/"]
+        direction LR
+        ctx["Context engine<br/>window-fitted compaction<br/>verbatim task"] <--> loop["Agent loop<br/>state machine · recovery<br/>budget pacing"] <--> tools["Tools<br/>bash · read · edit · write<br/>stream watchdog"]
     end
-    loop <--> model["Model endpoint<br/>stream watchdog · retry"]
-    tools <--> box[("Container")]
-    subgraph harness["Evaluation system (benchmark/)"]
-        pre["Preflight<br/>endpoint · launcher · checksum"]
-        verify["Verifier"]
-        analysis["Analysis<br/>failure taxonomy · paired sign tests"]
+    subgraph evals["Evaluation system · benchmark/"]
+        direction LR
+        pre["Preflight"] --> run["Containerized runs"] --> attr["Failure attribution"] --> stats["Paired sign tests"]
     end
-    pre --> loop
-    box --> verify --> analysis
-    analysis -. "next change" .-> loop
+    agent --> run
+    stats -. "next change" .-> agent
 ```
 
 ## Core engineering

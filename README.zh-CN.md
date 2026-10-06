@@ -71,25 +71,17 @@ z = +2.00。最终配置两次独立运行分别为 0.773 和 0.793。我们直�
 ## 架构
 
 ```mermaid
-flowchart LR
-    task["任务"] --> loop
-    subgraph agent["Agent（packages/）"]
-        loop["Agent 循环<br/>LoopState · 恢复 · 预算节奏"]
-        ctx["上下文引擎<br/>适配窗口的压缩 · 题目原文保留"]
-        tools["工具<br/>bash · read · edit · write"]
-        loop <--> ctx
-        loop <--> tools
+flowchart TB
+    subgraph agent["Agent · packages/"]
+        direction LR
+        ctx["上下文引擎<br/>适配窗口的压缩<br/>题目原文保留"] <--> loop["Agent 循环<br/>状态机 · 恢复<br/>预算节奏"] <--> tools["工具<br/>bash · read · edit · write<br/>流式看门狗"]
     end
-    loop <--> model["模型端点<br/>流式看门狗 · 重试"]
-    tools <--> box[("容器")]
-    subgraph harness["评测体系（benchmark/）"]
-        pre["预检<br/>端点 · 启动配置 · 校验和"]
-        verify["判分器"]
-        analysis["分析<br/>失败归因 · 配对符号检验"]
+    subgraph evals["评测体系 · benchmark/"]
+        direction LR
+        pre["预检"] --> run["容器内运行"] --> attr["失败归因"] --> stats["配对符号检验"]
     end
-    pre --> loop
-    box --> verify --> analysis
-    analysis -. "下一项改动" .-> loop
+    agent --> run
+    stats -. "下一项改动" .-> agent
 ```
 
 ## 核心工程
