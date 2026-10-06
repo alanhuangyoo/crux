@@ -87,10 +87,9 @@ flowchart TB
     end
     subgraph evals["Evaluation system · benchmark/"]
         direction LR
-        pre["Preflight"] --> run["Containerized runs"] --> attr["Failure attribution"] --> stats["Paired sign tests"]
+        pre["Preflight"] --> run["Containerized runs"] --> attr["Failure attribution"] --> stats["Paired sign tests<br/>→ next change"]
     end
     agent ==> evals
-    evals -. "next change" .-> agent
 ```
 
 ## Core engineering

@@ -78,10 +78,9 @@ flowchart TB
     end
     subgraph evals["评测体系 · benchmark/"]
         direction LR
-        pre["预检"] --> run["容器内运行"] --> attr["失败归因"] --> stats["配对符号检验"]
+        pre["预检"] --> run["容器内运行"] --> attr["失败归因"] --> stats["配对符号检验<br/>→ 下一项改动"]
     end
     agent ==> evals
-    evals -. "下一项改动" .-> agent
 ```
 
 ## 核心工程
