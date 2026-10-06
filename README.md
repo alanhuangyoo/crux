@@ -84,8 +84,6 @@ flowchart TB
 ## Core engineering
 
 Each capability below is tied to the trajectory evidence that motivated it.
-[`benchmark/docs/reference-comparison.md`](benchmark/docs/reference-comparison.md)
-maps each one to the reference agent it was drawn from.
 
 ### Context engine
 
@@ -144,9 +142,6 @@ maps each one to the reference agent it was drawn from.
 - **Preflight gating.** Every launch is checked for endpoint, launch settings
   and harness checksum before it spends GPU hours.
 
-The full record, including every design evaluated and ruled out, is in
-[`benchmark/docs/`](benchmark/docs/README.md).
-
 ## Repository layout
 
 ```
@@ -154,7 +149,6 @@ packages/          the agent: core loop, model layer, tools, CLI (built on pi)
 benchmark/         the evaluation system
   src/crux/        harbor agent, prompt sections, failure analysis
   scripts/         launchers, preflight, paired comparison, health checks
-  docs/            engineering reports and the design record
   tests/           486 tests
 ```
 
@@ -167,9 +161,8 @@ harbor run --dataset terminal-bench/terminal-bench-2-1 \
 ```
 
 `benchmark/scripts/preflight.sh <launcher>` validates the endpoint, the launch
-settings and the harness checksum before a run.
-[`benchmark/docs/ENVIRONMENT.md`](benchmark/docs/ENVIRONMENT.md) covers the
-evaluation host.
+settings and the harness checksum before a run. See
+[`benchmark/README.md`](benchmark/README.md) for the evaluation system.
 
 ## Acknowledgements
 

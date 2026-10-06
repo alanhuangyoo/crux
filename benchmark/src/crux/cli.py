@@ -61,7 +61,7 @@ FRONTIER_DATASET = "terminal-bench/terminal-bench@latest"
 # Tokens are therefore free and wall clock is the constraint, which inverts the
 # old advice to iterate on a cheap model and confirm on an expensive one. What
 # costs now is the four cards, and the engine's aggregate throughput stops
-# climbing at about 48 concurrent streams (see docs/ABLATION.md).
+# climbing at about 48 concurrent streams.
 DEFAULT_AGENT = "crux.terminus_agent:CruxTerminusAgent"
 DEFAULT_MODEL = "openai/qwen3.8-27b"
 # Hosted models, for a cross-check that the result is not an artefact of this

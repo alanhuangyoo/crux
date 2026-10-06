@@ -5,7 +5,7 @@
 #
 #   storage-driver btrfs      overlayfs on btrfs corrupts writes; apt signature
 #                             checks fail and 67 of 70 trials never reach the
-#                             agent (docs/ENVIRONMENT.md)
+#                             agent
 #   default-address-pools     Docker's default carves a /12 into 16 networks,
 #                             and every trial creates one. At 24 concurrent the
 #                             pool is exhausted and trials die on

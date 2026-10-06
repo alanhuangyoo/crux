@@ -77,8 +77,6 @@ flowchart TB
 ## 核心工程
 
 下面每一项能力都对应促成它的轨迹证据。
-[`benchmark/docs/reference-comparison.md`](benchmark/docs/reference-comparison.md)
-记录了每一项借鉴自哪个参考 Agent。
 
 ### 上下文引擎
 
@@ -132,9 +130,6 @@ flowchart TB
   难度的影响。
 - **预检闸门**：每次启动前检查端点、启动配置和评测代码校验和，避免浪费 GPU 时间。
 
-完整记录（包括每一个被评估并否决的设计）见
-[`benchmark/docs/`](benchmark/docs/README.md)。
-
 ## 目录结构
 
 ```
@@ -142,7 +137,6 @@ packages/          Agent 本体：核心循环、模型层、工具、CLI（基�
 benchmark/         评测体系
   src/crux/        harbor agent、提示词段落、失败分析
   scripts/         启动脚本、预检、配对比较、健康检查
-  docs/            工程报告与设计记录
   tests/           486 个测试
 ```
 
@@ -155,8 +149,7 @@ harbor run --dataset terminal-bench/terminal-bench-2-1 \
 ```
 
 `benchmark/scripts/preflight.sh <launcher>` 会在运行前校验端点、启动配置和评测代码
-校验和。[`benchmark/docs/ENVIRONMENT.md`](benchmark/docs/ENVIRONMENT.md) 介绍评测
-主机环境。
+校验和。评测体系的说明见 [`benchmark/README.md`](benchmark/README.md)。
 
 ## 致谢
 
