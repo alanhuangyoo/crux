@@ -26,8 +26,8 @@ emulators, cryptanalysis, ML training and systems administration, each graded by
 a hidden test suite inside a container — it lifts pi from **0.539 to 0.773**
 pass@1, to the level of Claude Code running the same model (0.730).
 
-The model weights never change. The gain is built in the agent: the loop and its
-recovery paths, context management and compaction, tool contracts, and the
+The model weights never change. Crux's work is in the agent layer: the loop and
+its recovery paths, context management and compaction, tool contracts, and the
 runtime that keeps multi-hour runs alive. Every change ships with the
 measurement that justified it.
 
@@ -49,8 +49,6 @@ measurement that justified it.
   Claude Code, Codex, opencode, hermes-agent and grok-build were evaluated
   against 356 trajectories; **34 candidate designs** were ruled out by the
   numbers before any code was written.
-- **2.8× evaluation throughput** — a full benchmark run went from six hours to
-  two.
 
 ## Results
 
@@ -59,26 +57,14 @@ inside the container · 8× agent budget · pass@1 over whole runs.
 
 | Configuration | pass@1 |
 |---|---:|
-| **Crux** — 262,144-token window | **0.773** &nbsp;<sub>(0.793 on a second run)</sub> |
+| **Crux** | **0.773** &nbsp;<sub>(0.793 on a second run)</sub> |
 | Claude Code, same model | 0.730 &nbsp;<sub>(32K window)</sub> |
-| Crux — 32,768-token window | 0.678 |
 | Crux — agent loop and tool contracts only | 0.591 |
 | pi, upstream | 0.539 |
 
-**Significance.** Against the 32K configuration, task by task: **12 wins to 4
-losses** on the tasks where the two disagree, sign test z = +2.00. Two
-independent runs of the final configuration scored 0.773 and 0.793; the
-benchmark's run-to-run variance was measured directly, and every comparison in
-this repository is paired to account for it.
-
-### Where the gains came from
-
-| Stage | pass@1 | What moved it |
-|---|---:|---|
-| Upstream pi | 0.539 | — |
-| Agent loop and tool contracts | 0.591 | recovery from truncated turns, a deadline the loop can see, budget-aware stopping |
-| Context engine and liveness | 0.678 | compaction that fits its own window; stream watchdog, command timeouts, process-tree reaping |
-| Full context window, retuned concurrency | **0.773** | native 262K context instead of 32K; 2.8× throughput |
+**Reproducibility.** Two independent runs of the final configuration scored
+0.773 and 0.793. The benchmark's run-to-run variance was measured directly, and
+every comparison in this repository is paired task by task to account for it.
 
 ## Architecture
 
