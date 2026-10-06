@@ -43,3 +43,6 @@ plans/
 .pi/hf-sessions-backup/
 collect.sh
 packages/agent/docs/extensions/pi-server-artifact/index.md
+
+# harbor job output from local runs
+/jobs/
