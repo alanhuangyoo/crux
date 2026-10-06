@@ -1,12 +1,13 @@
 <h1 align="center">Crux</h1>
 
 <p align="center">
-  <b>面向长程终端任务的编码 Agent，以及决定每一项改动能否进入主干的评测体系。</b>
+  <b>把开源的 pi 编码 Agent 提升到 Claude Code 水平——模型权重不变，重构 Agent 本身。</b>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Terminal--Bench_2.1-0.773_pass@1-2ea44f" alt="pass@1 0.773">
-  <img src="https://img.shields.io/badge/vs_upstream-%2B23.4_pts-2ea44f" alt="相对上游 +23.4 分">
+  <img src="https://img.shields.io/badge/pi_%E2%86%92_Crux-0.539_%E2%86%92_0.773-2ea44f" alt="pi 0.539 到 Crux 0.773">
+  <img src="https://img.shields.io/badge/Claude_Code%2C_same_model-0.730-555555" alt="同一模型下 Claude Code 0.730">
   <img src="https://img.shields.io/badge/tests-4%2C399_passing-2ea44f" alt="4399 个测试">
   <img src="https://img.shields.io/badge/model-self--hosted_Qwen3.8--27B-8a2be2" alt="自部署模型">
   <img src="https://img.shields.io/badge/base-pi_(Earendil_Works)-blue" alt="基于 pi">
@@ -18,18 +19,20 @@
 
 ---
 
-Crux 是基于 [pi](https://pi.dev) 构建的终端编码 Agent，以
-[Terminal-Bench](https://www.tbench.ai/) 2.1 为目标持续优化。该基准包含 89 道
-真实任务，覆盖编译器、模拟器、密码分析、机器学习训练和系统运维，每道题都在容器
-内由隐藏测试集判分。
+Crux 以开源编码 Agent [pi](https://pi.dev) 为基础，针对长程终端任务重构了它的
+Agent 层。在 [Terminal-Bench](https://www.tbench.ai/) 2.1 上（89 道真实任务，覆盖
+编译器、模拟器、密码分析、机器学习训练和系统运维，每道题都在容器内由隐藏测试集
+判分），它把 pi 的 pass@1 从 **0.539 提升到 0.773**，达到同一模型下 Claude Code
+的水平（0.730）。
 
-模型保持不变，所有提升都来自模型之外的那层脚手架：Agent 循环、上下文管理、工具
-契约，以及保证长时间运行稳定的运行时。每一项改动都附带支撑它的测量数据。
+模型权重始终不变，提升全部来自 Agent 本身：循环与恢复机制、上下文管理与压缩、
+工具契约，以及让数小时长任务稳定运行的运行时。每一项改动都附带支撑它的测量数据。
 
 ## 亮点
 
-- **pass@1 0.773**：在自部署的 27B 模型上运行 Terminal-Bench 2.1，相比上游 pi
-  （0.539）同权重提升 **23.4 分**，独立复跑结果为 0.793。
+- **同一权重，从 pi 提升到 Claude Code 水平**：在自部署的 27B 模型上运行
+  Terminal-Bench 2.1，pass@1 从 **0.539 提升到 0.773**（+23.4 分）；同一模型下
+  Claude Code 为 0.730。独立复跑结果为 0.793。
 - **高压下依然可靠的上下文引擎**：上下文压缩成功率从 **14% 提升到 100%**，输出
   截断率从 **18.0% 降到 0.7%**；单任务长会话按完整结构摘要，题目原文在每次压缩
   中一字不改地保留。
@@ -50,9 +53,9 @@ Crux 是基于 [pi](https://pi.dev) 构建的终端编码 Agent，以
 | 配置 | pass@1 |
 |---|---:|
 | **Crux** —— 262,144 token 窗口 | **0.773** &nbsp;<sub>（复跑 0.793）</sub> |
+| Claude Code，同一模型 | 0.730 &nbsp;<sub>（32K 窗口）</sub> |
 | Crux —— 32,768 token 窗口 | 0.678 |
 | Crux —— 仅 Agent 循环与工具契约 | 0.591 |
-| Claude Code，同一模型 | 0.730 &nbsp;<sub>（32K 窗口）</sub> |
 | pi，上游 | 0.539 |
 
 **显著性**：与 32K 配置逐题配对，在两者结果不同的题上 **12 胜 4 负**，符号检验

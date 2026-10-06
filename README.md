@@ -1,12 +1,13 @@
 <h1 align="center">Crux</h1>
 
 <p align="center">
-  <b>A coding agent for long-horizon terminal tasks — and the evaluation system that decides every change that goes into it.</b>
+  <b>Taking the open-source pi coding agent to Claude Code-level performance on Terminal-Bench — same model weights, re-engineered agent.</b>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Terminal--Bench_2.1-0.773_pass@1-2ea44f" alt="pass@1 0.773">
-  <img src="https://img.shields.io/badge/vs_upstream-%2B23.4_pts-2ea44f" alt="+23.4 points over upstream">
+  <img src="https://img.shields.io/badge/pi_%E2%86%92_Crux-0.539_%E2%86%92_0.773-2ea44f" alt="pi 0.539 to Crux 0.773">
+  <img src="https://img.shields.io/badge/Claude_Code%2C_same_model-0.730-555555" alt="Claude Code on the same model 0.730">
   <img src="https://img.shields.io/badge/tests-4%2C399_passing-2ea44f" alt="4399 tests">
   <img src="https://img.shields.io/badge/model-self--hosted_Qwen3.8--27B-8a2be2" alt="self-hosted model">
   <img src="https://img.shields.io/badge/base-pi_(Earendil_Works)-blue" alt="built on pi">
@@ -18,21 +19,23 @@
 
 ---
 
-Crux is a terminal coding agent built on [pi](https://pi.dev) and engineered
-against [Terminal-Bench](https://www.tbench.ai/) 2.1 — 89 real tasks spanning
-compilers, emulators, cryptanalysis, ML training and systems administration,
-each graded by a hidden test suite inside a container.
+Crux takes [pi](https://pi.dev), an open-source coding agent, and re-engineers
+its agent layer for long-horizon terminal work. On
+[Terminal-Bench](https://www.tbench.ai/) 2.1 — 89 real tasks spanning compilers,
+emulators, cryptanalysis, ML training and systems administration, each graded by
+a hidden test suite inside a container — it lifts pi from **0.539 to 0.773**
+pass@1, to the level of Claude Code running the same model (0.730).
 
-The model is held fixed. Every point of improvement comes from the scaffold
-around it: the agent loop, context management, tool contracts and the runtime
-that keeps long runs alive. Every change ships with the measurement that
-justified it.
+The model weights never change. The gain is built in the agent: the loop and its
+recovery paths, context management and compaction, tool contracts, and the
+runtime that keeps multi-hour runs alive. Every change ships with the
+measurement that justified it.
 
 ## Highlights
 
-- **0.773 pass@1** on Terminal-Bench 2.1 with a self-hosted 27B model —
-  **+23.4 points** over upstream pi (0.539) on the same weights, reproduced at
-  0.793 on an independent run.
+- **pi → Claude Code-level, same weights.** pass@1 from **0.539 to 0.773**
+  (+23.4 points) on Terminal-Bench 2.1 with a self-hosted 27B model; Claude Code
+  on the same model scores 0.730. Reproduced at 0.793 on an independent run.
 - **A context engine that holds up under pressure.** Compaction success taken
   from **14% to 100%**; output truncation cut from **18.0% to 0.7%**; single-task
   sessions summarized in full, with the task's exact wording carried through
@@ -57,9 +60,9 @@ inside the container · 8× agent budget · pass@1 over whole runs.
 | Configuration | pass@1 |
 |---|---:|
 | **Crux** — 262,144-token window | **0.773** &nbsp;<sub>(0.793 on a second run)</sub> |
+| Claude Code, same model | 0.730 &nbsp;<sub>(32K window)</sub> |
 | Crux — 32,768-token window | 0.678 |
 | Crux — agent loop and tool contracts only | 0.591 |
-| Claude Code, same model | 0.730 &nbsp;<sub>(32K window)</sub> |
 | pi, upstream | 0.539 |
 
 **Significance.** Against the 32K configuration, task by task: **12 wins to 4
