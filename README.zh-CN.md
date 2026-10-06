@@ -80,8 +80,8 @@ flowchart TB
         direction LR
         pre["预检"] --> run["容器内运行"] --> attr["失败归因"] --> stats["配对符号检验"]
     end
-    agent --> run
-    stats -. "下一项改动" .-> agent
+    agent ==> evals
+    evals -. "下一项改动" .-> agent
 ```
 
 ## 核心工程

@@ -89,8 +89,8 @@ flowchart TB
         direction LR
         pre["Preflight"] --> run["Containerized runs"] --> attr["Failure attribution"] --> stats["Paired sign tests"]
     end
-    agent --> run
-    stats -. "next change" .-> agent
+    agent ==> evals
+    evals -. "next change" .-> agent
 ```
 
 ## Core engineering
