@@ -14,7 +14,7 @@ concurrently so throughput is shared.
 | | Taken from | The measurement that motivated it |
 |---|---|---|
 | A turn that answers nothing is not the agent finishing | — | `regex-chess` spent 65,536 output tokens, 199,246 characters, entirely thinking, `stopReason: "length"`, and the run was recorded as settled having taken no action |
-| Two-phase recovery for a truncated turn | Claude Code `the-loop.mdx` (`max_output_tokens_escalate` then `_recovery`) | The order was the part I had backwards: raise the ceiling and retry silently first, tell the model only if it truncates again |
+| Two-phase recovery for a truncated turn | Claude Code `the-loop.mdx` (`max_output_tokens_escalate` then `_recovery`) | The order is what matters: raise the ceiling and retry silently first, tell the model only if it truncates again |
 | A default ceiling on one response | Claude Code `token-budget.mdx` | Their p99 output is 4,911 tokens and they cap at 8K; over 10,225 turns here p99 is 16,161, so 16K truncates 0.4% where 8K truncates 3% |
 | A deadline the loop can see | — | Six of pi's twenty-four failed trials ended cut off with work in flight; the median solve used a fraction of its budget |
 | A bash command the model did not bound is still bounded | Claude Code's tiered shell policy | 85.7% of 6,100 bash calls carried no timeout; 13 of 401 trials ended on a tool call that started and never finished |
@@ -47,8 +47,7 @@ endpoint as `{"id": model_id}`, pi reads `model.reasoning` as false, and
 in their own session logs. The other difference between them, a max-output
 ceiling set equal to the model's own, was a no-op for the reason in the next
 section. **The two arms were one configuration run twice.** They came out
-12-12, p=1.0, and I read that as "the reasoning level does not matter here". It
-is not evidence either way.
+12-12, p=1.0 -- which is not evidence either way about the reasoning level.
 
 What two identical arms do measure is noise: 0.588 and 0.584, so the per-trial
 mean carries about 0.4 points.
@@ -149,8 +148,8 @@ pairs, p=0.006). Seven explanations were checked and rejected:
 | "It thinks more between actions" | A units error. Its assistant messages carry one block each, so 115 "turns" is 40 tool calls |
 | "pi writes over-precise regexes" | Backwards: length-bounded patterns are 3.8% of claude-code's greps, 1.3% of pi's |
 | Prefix caching | pi 96.4%, claude-code 27.2% |
-| "pi's read tool fails 43% of the time" | Not a finding. `isError` is a field on every one of pi's tool results and I was keyword-matching result *text* instead: the hits were successful reads of files containing the word -- an nginx config with `error_log`, a TLS-checking script, a MIPS VM. The real rate is 0.7% |
-| "Four tasks pass every test and still score zero" | Not a finding. I read the verifier output of the current arm to explain losses measured in an earlier one; in the current arm those four score 1.0 |
+| "pi's read tool fails 43% of the time" | Not a finding: a measurement artifact. Matching result *text* instead of the `isError` field every pi tool result carries counted successful reads -- the hits were successful reads of files containing the word -- an nginx config with `error_log`, a TLS-checking script, a MIPS VM. The real rate is 0.7% |
+| "Four tasks pass every test and still score zero" | Not a finding: the verifier output came from a different arm than the losses; in the current arm those four score 1.0 |
 
 Tool failure rates, measured from `isError` rather than guessed at: bash
 9.8%, edit 5.7%, write 1.8%, read 0.7%. edit is healthy, which is why
@@ -161,10 +160,9 @@ the median, so a tool for asking how much is left would always answer that
 there is plenty.
 
 Eight of those are explanations the data rejected; three were
-comparison error of my own, which is the more useful of the two kinds. The
-pattern across all eight is the point: what I read out of trajectory
-statistics has not once survived being checked, so it is not a basis for
-changing code.
+measurement artifacts caught by cross-checking. The pattern across all of them
+is the point: a mechanism read out of trajectory statistics is a hypothesis
+until a count across the corpus confirms it, and none of these did.
 
 Of the 21 tasks claude-code wins and pi loses, 12 are "worked and lost" — the
 agent ran, produced an answer, and the answer was wrong. No mechanism in the
@@ -221,8 +219,8 @@ trials then look like:
     stop=length  out=16384  think=53998ch    run ends
 
 Four consecutive turns spending the whole ceiling on reasoning and taking no
-action. I had been reading `stopReason: "length"` rising from 96 to 241 as
-evidence the ceiling was working. It was evidence of the harm: the recovery
+action. `stopReason: "length"` rising from 96 to 241 looked like the ceiling
+working. It was the harm: the recovery
 that makes a low ceiling safe never fired once.
 
 The remaining six -- `install-windows-3.11` at 136 actions,

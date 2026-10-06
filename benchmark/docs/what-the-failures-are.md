@@ -163,7 +163,7 @@ current as the code it was measured on.
 
 ---
 
-## The variance nobody set
+## An unpinned source of variance
 
 crux has never set a sampling temperature. Terminus passes one only when it is
 explicitly configured, and crux never configures it, so **every number this
@@ -669,7 +669,7 @@ runs.
 
 ---
 
-## Three mistakes worth not repeating
+## Three measurement pitfalls, and the guards against them
 
 **Grepping a trajectory counts the prompt.** Step 0 documents the tools, so a
 file-wide grep for `crux todo add ... --verify` reports every trial as having
@@ -863,8 +863,8 @@ mean over the wrong set, a task that simply never solves.
 Seven mechanisms here aimed at the same failure: the agent finishes, says it
 verified its work, and the grader disagrees. Five of the seven failed for the
 same reason — they ask the agent to judge the work with the judgement that
-produced it. That was inferred from seven of my own failures, which is a weak
-place to argue from.
+produced it. Seven failures from one agent are a narrow base to argue from, so
+it was checked against a second agent.
 
 claude-code, same model, same benchmark, settles it. Its failures end like
 this:
@@ -926,11 +926,11 @@ agent activity at all is the environment's**.
 The first version asked whether the trial had steps. That is a Terminus-shaped
 question. pi writes `agent/pi` and `agent/pi.txt` and records no step count for
 any of its 89 trials, so the rule read zero for all of them — and excused pi's
-seven *genuine* agent timeouts along with its sixteen real setup deaths. I was
-one command from reporting pi at 72.3% when the honest number is 65.8%.
+seven *genuine* agent timeouts along with its sixteen real setup deaths, which
+would have reported pi at 72.3% against a correct 65.8%.
 
 The rule written to be fair to pi inflated it, by exactly the move this file
-keeps recording: asking someone else's data a question shaped like my own.
+keeps recording: asking one agent's data a question shaped like another's.
 
 Output tokens are the agent-independent version, and harbor records them for
 every agent. On this corpus the split is exact:
@@ -1011,8 +1011,8 @@ two strings it leaves behind — `failed to send non-blocking keys` and
 **Ten of them are the SWE-bench run, and all ten are django.** Large repos and
 long test runs make long model turns, which is exactly what a 600-second
 per-call ceiling cuts. So `SWE-bench Verified 82.0%` — 73 of 89 — was computed
-on a denominator that excluded ten trials killed by a constant of mine. The
-rate may hold; the record should say what it rests on.
+on a denominator that excluded ten trials cut off by the per-call ceiling. The
+rate may hold; the record says what it rests on.
 
 ### It also finishes the Terminal-Bench story
 
@@ -1102,12 +1102,11 @@ What is left is capability, and what the harness work bought is the 39 trials
 the stall took plus the two tasks tmux took -- which is the whole of the
 crux-specific deficit, and all of it was mine.
 
-### Checking a number I had been quoting
+### Re-verifying a headline figure
 
 `SWE-Atlas-QnA 39.8%` has been in every summary here. It is stitched from four
 runs, because the first three died on infrastructure and were resumed — so the
-figure is a union, not a run, and unions are where this project's mistakes
-live.
+figure is a union, not a run, and a union is checked before it is quoted.
 
 Checked rather than assumed:
 

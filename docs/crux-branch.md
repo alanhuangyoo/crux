@@ -69,11 +69,10 @@ code's 7.5%), codex's `apply_patch` grammar (pi's edit fails 5.7%), codex's
 blocking stop hook -- which pi already has, as `getFollowUpMessages` fed by the
 queue `sendUserMessage` writes to.
 
-Three more died as measurement errors of mine rather than as findings,
-including a claim that pi's read tool fails 43% of the time. `isError` is a
-field on every one of pi's tool results; I was keyword-matching result text,
-and the hits were successful reads of files containing the word. The real rate
-is 0.7%.
+Three more were caught as measurement artifacts before they became findings,
+including an apparent 43% failure rate for pi's read tool. `isError` is a field
+on every one of pi's tool results; matching on result text instead counted
+successful reads of files containing the word. The real rate is 0.7%.
 
 ## What this branch does not show
 

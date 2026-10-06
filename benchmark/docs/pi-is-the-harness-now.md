@@ -20,7 +20,7 @@ so throughput is shared.
 Same model, same tasks, same budget. The 18-point spread between stock pi and
 Claude Code is not the model answering wrong -- Claude Code solves those tasks
 with the same weights behind it. It is scaffold, and the middle row is the
-proof: a wrapper I wrote scores 0.719 with nothing clever in it, only a lot of
+proof: a lightweight custom wrapper scores 0.719 with nothing exotic in it, only a lot of
 small interventions that pi's wrapper does not have.
 
 ## The seven changes, replicated

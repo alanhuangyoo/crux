@@ -1,4 +1,4 @@
-# Against the reference agents: what was ported, and what the corpus ruled out
+# Design review against the reference agents
 
 Each design below was taken from a reference agent — Claude Code, Codex,
 opencode, hermes-agent, grok-build — and checked against crux's own trajectories
@@ -23,7 +23,7 @@ Every adopted change has a unit test that fails without it.
 | A verifier that never ran is not the agent failing | — (measurement) | 14 zeros were the verifier's own runner failing to install. `qemu-startup` and `qemu-alpine-ssh` cannot score in this environment at all. `cedit` read as a regression, p = 0.057, through a GitHub outage; with those excluded, p = 0.73. |
 | The time budget follows harbor's limit for the task | — (harness) | harbor allows 80 to 1,600 minutes per task at 8×, not 120. 19 failed trials stopped themselves at 120 on tasks allowing 160–960. A number is now capped at the limit; `PI_TIME_BUDGET_SEC=task` takes all of it. |
 
-## Measured and rejected
+## Evaluated and not adopted
 
 | Design | From | What the corpus showed |
 |---|---|---|
@@ -38,7 +38,7 @@ Every adopted change has a unit test that fails without it.
 | Environment details in the system prompt | Claude Code, Codex | 0.33 turns per trial spent only on probing; probes ride along with real work. |
 | "`cedit`'s edit hint lowered the score" | — | 10 of its 11 losses never produced a failed edit, and six were the verifier outage above. |
 
-## Needs a live arm
+## Next experiments
 
 - **Yielding long commands back to the model**, as Codex does after at most 30
   seconds. It would free the 60 ten-minute waits, and turn the 161 long commands

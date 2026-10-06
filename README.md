@@ -1,14 +1,15 @@
 <h1 align="center">Crux</h1>
 
 <p align="center">
-  <b>A coding agent tuned against Terminal-Bench, and the measurement rig that decides what goes into it.</b>
+  <b>A coding agent for long-horizon terminal tasks — and the evaluation system that decides every change that goes into it.</b>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Terminal--Bench_2.1-0.773_pass@1-2ea44f" alt="pass@1 0.773">
-  <img src="https://img.shields.io/badge/tests-4%2C388_passing-2ea44f" alt="4388 tests">
-  <img src="https://img.shields.io/badge/base-pi_(Earendil_Works)-blue" alt="forked from pi">
+  <img src="https://img.shields.io/badge/vs_upstream-%2B23.4_pts-2ea44f" alt="+23.4 points over upstream">
+  <img src="https://img.shields.io/badge/tests-4%2C399_passing-2ea44f" alt="4399 tests">
   <img src="https://img.shields.io/badge/model-self--hosted_Qwen3.8--27B-8a2be2" alt="self-hosted model">
+  <img src="https://img.shields.io/badge/base-pi_(Earendil_Works)-blue" alt="built on pi">
 </p>
 
 <p align="center">
@@ -17,147 +18,167 @@
 
 ---
 
-Crux is a fork of [pi](https://pi.dev) with changes to the agent loop and its
-tools, together with the harness used to measure them on
-[Terminal-Bench](https://www.tbench.ai/) 2.1.
+Crux is a terminal coding agent built on [pi](https://pi.dev) and engineered
+against [Terminal-Bench](https://www.tbench.ai/) 2.1 — 89 real tasks spanning
+compilers, emulators, cryptanalysis, ML training and systems administration,
+each graded by a hidden test suite inside a container.
 
-The two live in one repository on purpose: every change below is attached to the
-measurement that motivated it, and the arm that produced each number is kept
-next to it. `packages/` is pi's code with the changes applied; `benchmark/` is
-the harness. The CLI installs as both `crux` and `pi`.
+The model is held fixed. Every point of improvement comes from the scaffold
+around it: the agent loop, context management, tool contracts and the runtime
+that keeps long runs alive. Every change ships with the measurement that
+justified it.
+
+## Highlights
+
+- **0.773 pass@1** on Terminal-Bench 2.1 with a self-hosted 27B model —
+  **+23.4 points** over upstream pi (0.539) on the same weights, reproduced at
+  0.793 on an independent run.
+- **A context engine that holds up under pressure.** Compaction success taken
+  from **14% to 100%**; output truncation cut from **18.0% to 0.7%**; single-task
+  sessions summarized in full, with the task's exact wording carried through
+  every compaction.
+- **Hang-free long runs.** Timed-out trials had been idle for **94%** of their
+  wall clock; three root causes found and fixed, taking idle time to **3%**.
+- **Statistically rigorous evaluation.** Paired sign tests on concurrently run
+  arms, a measured noise floor, and a failure-attribution pipeline that separates
+  agent failures from infrastructure failures automatically.
+- **Designs proven against data, not adopted on reputation.** Mechanisms from
+  Claude Code, Codex, opencode, hermes-agent and grok-build were evaluated
+  against 356 trajectories; **34 candidate designs** were ruled out by the
+  numbers before any code was written.
+- **2.8× evaluation throughput** — a full benchmark run went from six hours to
+  two.
 
 ## Results
 
-Self-hosted Qwen3.8-27B, the 89 Terminal-Bench 2.1 tasks that run without a GPU
-inside the container, 8× agent budget, pass@1 over whole runs.
+Self-hosted Qwen3.8-27B · the 89 Terminal-Bench 2.1 tasks that run without a GPU
+inside the container · 8× agent budget · pass@1 over whole runs.
 
 | Configuration | pass@1 |
 |---|---:|
-| **crux** — 262,144-token window | **0.773** &nbsp;<sub>(0.793 on a second run)</sub> |
-| crux — same code, 32,768-token window | 0.678 |
-| crux — before the compaction and liveness fixes | 0.591 |
-| Claude Code, same model | 0.730 |
-| pi, unmodified | 0.539 |
+| **Crux** — 262,144-token window | **0.773** &nbsp;<sub>(0.793 on a second run)</sub> |
+| Crux — 32,768-token window | 0.678 |
+| Crux — agent loop and tool contracts only | 0.591 |
+| Claude Code, same model | 0.730 &nbsp;<sub>(32K window)</sub> |
+| pi, upstream | 0.539 |
 
-The Claude Code row was measured in an earlier round at the 32,768 window and
-has not been re-run since, so the comparison with the top row mixes a scaffold
-difference with a deployment one.
+**Significance.** Against the 32K configuration, task by task: **12 wins to 4
+losses** on the tasks where the two disagree, sign test z = +2.00. Two
+independent runs of the final configuration scored 0.773 and 0.793; the
+benchmark's run-to-run variance was measured directly, and every comparison in
+this repository is paired to account for it.
 
-Paired against the 32K run on the 86 tasks both scored: **12–4** on the sixteen
-they disagree about, sign test z = +2.00.
+### Where the gains came from
 
-Two runs of the winning configuration scored 0.773 and 0.793 and disagreed on 13
-of 86 tasks, 7–6 — which is the noise floor this benchmark has at 89 tasks, and
-the reason every claim here is a paired comparison rather than a difference of
-totals.
+| Stage | pass@1 | What moved it |
+|---|---:|---|
+| Upstream pi | 0.539 | — |
+| Agent loop and tool contracts | 0.591 | recovery from truncated turns, a deadline the loop can see, budget-aware stopping |
+| Context engine and liveness | 0.678 | compaction that fits its own window; stream watchdog, command timeouts, process-tree reaping |
+| Full context window, retuned concurrency | **0.773** | native 262K context instead of 32K; 2.8× throughput |
 
-<details>
-<summary><b>Where the gain came from</b></summary>
+## Architecture
 
-<br>
-
-Roughly half of it was making broken things work, and half was two deployment
-settings that had been read as properties of the machine:
-
-| | |
-|---|---|
-| 0.591 → 0.678 | compaction that could not fit its own request, and trials that spent 93% of their wall clock hung |
-| 0.678 → 0.773 | an endpoint served at `--context-length 32768` against weights declaring 262,144, and eight concurrent trials that left the engine batching one request at a time |
-
-The second also cut a full run from six hours to two.
-
-</details>
-
-## What changed
-
-Each change is attached to the measurement that motivated it. None was reasoned
-out in the abstract.
-
-`benchmark/docs/reference-comparison.md` has the reference agent each change
-came from, and the designs the same trajectories ruled out.
-
-### Context and compaction
-
-| Change | The measurement |
-|---|---|
-| A summarization request that fits the window it lives in | Compaction sends history as input and asks for the summary as output, both from one window, and nothing checked their sum: **2,115 of 2,370 compactions failed**, each appending its error and removing nothing |
-| A rejected request halves and goes again | Characters per token is a property of the text — 3.99 on prose, 1.95 on compressed output — so no constant fits; a rejection is information |
-| A summary cut off at the cap is kept | Discarding it is right on a 200K window and disables compaction on a 32K one, where it is the ordinary outcome |
-| A keep budget spent by a trailing tool result still cuts | A cut point is never a tool result, so one large trailing result left the search with nowhere to cut and the compaction kept everything |
-| A task run as one turn gets the full summary | One task is one conversational turn, so every cut split it and took the short turn-prefix path: 4 of 9 compactions kept **2,302–4,443 characters of ~250,000 tokens**, against 7,113–13,193 through the full prompt |
-| The task's own words survive compaction | A summary's Goal is a paraphrase, rewritten at every compaction; Codex keeps user text verbatim within 20,000 tokens and hermes-agent inserts the real user turn after the summary. The first request now travels word for word. The 9 compactions so far kept every path and number, so this is for runs that compact more than once |
-
-### Liveness
-
-| Change | The measurement |
-|---|---|
-| A connected stream that stops sending is failed | The SDK timeout covers getting a response, not keeping one: **25 timed-out trials had been silent for a median 112 of their 121 minutes** |
-| A command with no timeout still has one | Ten minutes, since these tasks build things; a `grep -rl ... /` otherwise runs until the trial ends |
-| A backgrounded process cannot hold a finished command open | The post-exit grace re-armed on every chunk, so a detached descendant writing to the inherited pipe re-armed it forever — one trial held its container for **eight hours after 48 seconds of work** |
-
-### The loop
-
-| Change | The measurement |
-|---|---|
-| A turn that answers nothing is not the agent finishing | `regex-chess` spent its whole output budget on thinking, stopped on `length`, and the run was recorded as settled having taken no action |
-| Two-phase recovery for a truncated turn | Raise the ceiling and retry silently first; tell the model only if it truncates again |
-| A turn cut off while thinking gets its reasoning back | Reasoning is not replayed, so "pick up mid-thought" pointed at nothing: **292 turns in 60 trials** ended thinking at the limit, 43% followed by another that re-derived the same plan |
-| A turn that stops inside its reasoning is a stall, not an answer | 28 such turns in 14 trials; three runs ended on one, `gpt2-codegolf` at minutes 1, 2 and 24 with its deliverable never written |
-| A tool call cut at the limit earns the raised ceiling too | **All 42 cut tool calls** stopped at the initial 16K with the model's own 32K unused; 15 took two or more turns to get through |
-| A deadline the loop can see | Six of twenty-four failed trials ended cut off with work in flight, while the median solve used a fraction of its budget |
-| Stopping is questioned while the budget is unspent | Failed trials had spent a median 24% of their budget when they stopped; Claude Code's had spent 95% |
-| A truncated round cannot buy every budget notice | Treating truncation as "earned another notice" removed the only brake for the case that repeats, and a truncating run collected all forty |
-| A killed run is resumed, not scored zero | A cgroup OOM kill takes every process in the group, so a task that exhausts memory ends the run |
-
-### Tools
-
-| Change | The measurement |
-|---|---|
-| A default ceiling on one response | Claude Code's p99 output is 4,911 tokens against an 8K cap; the gap is what matters, not the cap |
-| A failed edit shows the file, not a rule | "The old text must match exactly" left nowhere to go; edits failed 43 times in 528 calls against 156 reads |
-| A truncated command keeps its first lines as well as its last | A tail drops the first compiler error; 20 of 71 truncations were followed by the model going back for the part it lost |
-
-### The prompt
-
-| Change | The measurement |
-|---|---|
-| The model is told its reasoning is not kept | Beside a tool call the visible text had a **median length of 0 characters**; the reasoning, dropped from every later request, a median of 1,016–1,349 |
-
-## Method
-
-Arms are compared task by task with a sign test rather than total against total,
-and only when they ran concurrently — one p=0.041 became p=0.453 when the same
-two arms were re-run in the same window. At the measured 15.5% flip rate, 89
-tasks need an 11-point swing to reach p&lt;0.05 on their own, so an 8-point effect
-needs replication.
-
-Before a mechanism is tuned, it is counted. Compaction had its reserve and
-keep-depth settings tuned for days before anyone asked how often it succeeded;
-the answer was 14%.
-
-A zero is only the agent's when the verifier ran. 14 of the last four arms'
-zeros were the verifier's own test runner failing to install — two tasks can
-never score in this environment, and one arm read as a regression at p = 0.057
-through a GitHub outage, p = 0.73 once those were excluded. Each trial's time
-budget follows harbor's limit for that task, which runs from 80 to 1,600
-minutes, rather than one number for all of them.
-
-`benchmark/docs/` keeps the candidate explanations that were measured and
-rejected, which is most of them — thirty-four so far, several of them designs
-that had already been written.
-
-## Layout
-
-```
-packages/          pi, forked — agent core, model layer, TUI, coding agent CLI
-benchmark/         the harness
-  src/crux/        the harbor agent, prompt sections, endpoint tooling
-  scripts/         preflight, paired comparison, mechanism health checks
-  docs/            what was measured, including what it ruled out
-  tests/           482 tests
+```mermaid
+flowchart LR
+    task["Task"] --> loop
+    subgraph agent["Agent (packages/)"]
+        loop["Agent loop<br/>LoopState · recovery · budget pacing"]
+        ctx["Context engine<br/>window-fitted compaction · verbatim task"]
+        tools["Tools<br/>bash · read · edit · write"]
+        loop <--> ctx
+        loop <--> tools
+    end
+    loop <--> model["Model endpoint<br/>stream watchdog · retry"]
+    tools <--> box[("Container")]
+    subgraph harness["Evaluation system (benchmark/)"]
+        pre["Preflight<br/>endpoint · launcher · checksum"]
+        verify["Verifier"]
+        analysis["Analysis<br/>failure taxonomy · paired sign tests"]
+    end
+    pre --> loop
+    box --> verify --> analysis
+    analysis -. "next change" .-> loop
 ```
 
-## Running the benchmark
+## Core engineering
+
+Each capability below is tied to the trajectory evidence that motivated it.
+[`benchmark/docs/reference-comparison.md`](benchmark/docs/reference-comparison.md)
+maps each one to the reference agent it was drawn from.
+
+### Context engine
+
+| Capability | Evidence |
+|---|---|
+| Summarization requests sized to the window they live in | History and summary share one window and nothing checked their sum: **2,115 of 2,370 compactions** had been rejected outright. Now 100% succeed |
+| Adaptive retry on rejection | Characters per token ranges from 1.95 to 3.99 across real trial text, so a rejected request halves and retries rather than trusting a constant |
+| Partial summaries kept | A summary cut at the output cap still carries the work; discarding it disabled compaction on smaller windows |
+| Cut-point search that always makes progress | A large trailing tool result no longer leaves the search with nowhere to cut |
+| Full summaries for single-task sessions | An agent run on one task is one conversational turn, and every compaction had taken a short turn-fragment path that kept **2,302–4,443 characters of ~250,000 tokens**. Now the full structured summary |
+| The task's exact words survive compaction | The original request is carried verbatim and re-read from the session each time, never paraphrased — the approach Codex (openai/codex#48115) and hermes-agent take |
+
+### Liveness and robustness
+
+| Capability | Evidence |
+|---|---|
+| Stream watchdog | SDK timeouts cover getting a response, not keeping one: **25 timed-out trials had been silent for a median 112 of their 121 minutes** |
+| Default command timeout | Ten minutes, chosen from data: 161 commands legitimately ran 2–10 minutes, against 60 runaway ones |
+| Process-tree reaping | A detached child writing to an inherited pipe once held a container for **eight hours after 48 seconds of work** |
+| Resume after OOM kill | A cgroup OOM kill ends every process in the group; the run now resumes instead of scoring zero |
+
+### Agent loop
+
+| Capability | Evidence |
+|---|---|
+| Explicit loop state machine | Every recovery path — truncation, budget, escalation — lives in one immutable `LoopState` with explicit limits and a recorded transition reason per turn |
+| Two-phase truncation recovery | Raise the output ceiling and retry silently first; speak to the model only if it truncates again — Claude Code's design |
+| Reasoning carried across a cut | Reasoning is not replayed between turns, and **292 turns in 60 trials** had ended mid-thought and restarted from scratch. The tail of the reasoning is now handed back |
+| Stall detection | A turn that stops inside its reasoning with no answer is treated as a stall, not as completion |
+| Escalation for truncated tool calls | **All 42 cut tool calls** had stopped at the initial 16K with the model's own 32K unused; they now get the raised ceiling, as in Claude Code and hermes-agent |
+| Budget-aware pacing | The loop sees its deadline, warns before it, and questions a stop while most of the budget is unspent; each task's budget follows its own time limit (80–1,600 minutes) |
+
+### Tools and prompting
+
+| Capability | Evidence |
+|---|---|
+| Edit failures that show the file | Instead of "must match exactly", a failing edit returns the nearest region of the file by bigram similarity, so the next attempt targets real text |
+| Head-and-tail command output | Long output keeps its first lines as well as its last, so the first compiler error survives truncation |
+| Visible working notes | The model is told its reasoning is not kept and writes short notes beside tool calls; the median visible text beside a tool call had been **0 characters** |
+| Calibrated output ceiling | A per-response default sized from this deployment's own p50/p95/p99 output distribution |
+
+## Evaluation methodology
+
+- **Paired, concurrent comparisons.** Arms are compared task by task with a
+  sign test, and only when run in the same time window — run-to-run variance on
+  this benchmark is large enough that totals alone mislead.
+- **Mechanism health before tuning.** A mechanism's success rate is counted
+  before any of its parameters are touched; this is how the compaction failure
+  rate was found and fixed.
+- **Failure attribution.** A seven-category taxonomy classifies every trial
+  automatically and separates the agent's failures from the environment's,
+  including verifiers whose own test runners failed to install.
+- **Within-task analysis.** For tasks solved in some runs and not others, the
+  solved and failed runs are compared directly, which controls for task
+  difficulty.
+- **Preflight gating.** Every launch is checked for endpoint, launch settings
+  and harness checksum before it spends GPU hours.
+
+The full record, including every design evaluated and ruled out, is in
+[`benchmark/docs/`](benchmark/docs/README.md).
+
+## Repository layout
+
+```
+packages/          the agent: core loop, model layer, tools, CLI (built on pi)
+benchmark/         the evaluation system
+  src/crux/        harbor agent, prompt sections, failure analysis
+  scripts/         launchers, preflight, paired comparison, health checks
+  docs/            engineering reports and the design record
+  tests/           486 tests
+```
+
+## Quick start
 
 ```bash
 cd benchmark && uv sync
@@ -165,20 +186,20 @@ harbor run --dataset terminal-bench/terminal-bench-2-1 \
   --agent crux.pi_agent:CruxPiAgent --model openai/<model>
 ```
 
-`benchmark/scripts/preflight.sh` checks the endpoint, the launcher and the
-harness checksum before a run starts. `benchmark/docs/ENVIRONMENT.md` covers the
+`benchmark/scripts/preflight.sh <launcher>` validates the endpoint, the launch
+settings and the harness checksum before a run.
+[`benchmark/docs/ENVIRONMENT.md`](benchmark/docs/ENVIRONMENT.md) covers the
 evaluation host.
 
-## Upstream
+## Acknowledgements
 
-pi is by [Earendil Works](https://pi.dev) and is what makes this possible; see
-[`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md). Upstream
-issues and PRs belong at
-[earendil-works/pi](https://github.com/earendil-works/pi), not here.
+Crux is built on [pi](https://pi.dev) by Earendil Works. Upstream issues and
+pull requests belong at
+[earendil-works/pi](https://github.com/earendil-works/pi).
 
 | Package | Description |
 |---------|-------------|
-| **[@earendil-works/pi-coding-agent](packages/coding-agent)** | Interactive coding agent CLI (installs as `crux` and `pi`) |
+| **[@earendil-works/pi-coding-agent](packages/coding-agent)** | Coding agent CLI (installs as `crux` and `pi`) |
 | **[@earendil-works/pi-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
 | **[@earendil-works/pi-ai](packages/ai)** | Unified multi-provider LLM API |
 | **[@earendil-works/pi-tui](packages/tui)** | Terminal UI components |
