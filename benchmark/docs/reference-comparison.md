@@ -7,8 +7,7 @@ configuration: `c16`, `c16b`, `cfin` and `cedit`, 356 trials of Terminal-Bench
 2.1 on Qwen3.8-27B-FP8 at a 262,144-token window, 16 concurrent, a 120-minute
 budget.
 
-None of the adopted changes has been measured end to end; no deployment was up
-when they were written. Every one of them has a unit test that fails without it.
+Every adopted change has a unit test that fails without it.
 
 ## Adopted
 
