@@ -253,15 +253,10 @@ function countOccurrences(content: string, oldText: string): number {
 /**
  * The part of the file the edit was probably aiming at.
  *
- * "The old text must match exactly" is true and useless: it says nothing about
- * what the file contains, so the model either guesses again or spends a turn
- * re-reading. Measured over 89 trials, edits failed 43 times in 528 calls, and
- * 23 of those were this error -- while `read` was called 156 times against
- * those 528 edits, so the file usually had not been looked at recently.
- *
- * Anchoring on the first non-blank line of `oldText` finds the intended region
- * in almost every real case, because an edit that is stale or mis-copied is
- * still aimed somewhere.
+ * "The old text must match exactly" says nothing about what the file contains,
+ * so the model either guesses again or spends a turn re-reading. Showing the
+ * nearest region lets the next attempt target real text: an edit that is stale
+ * or mis-copied is still aimed somewhere.
  */
 function nearestRegion(content: string, oldText: string): string | undefined {
 	const wanted = oldText

@@ -11,19 +11,11 @@ const BASH_CHECKPOINT_INTERVAL_MS = 2_000;
 /**
  * How long a command runs when the model does not say.
  *
- * The parameter is optional and documented as having no default, and models
- * mostly leave it out: across 6,100 bash calls on one benchmark corpus, 85.7%
- * carried no timeout. A command that then fails to return has no bound at all
- * except whatever kills the process from outside, and 13 of 401 trials ended
- * that way -- on a tool call that started and never finished, spread across ten
- * different tasks, so not a property of any one of them.
- *
- * Claude Code's shell tool uses a tiered policy for the same problem: the
- * model's timeout when given, otherwise a 120s default, with 600s as the
- * ceiling a caller may raise it to. This adopts the default; `MAX_TIMEOUT_SECONDS`
- * already serves as the ceiling here, and pi's `env.exec` reports a timeout as
- * a normal tool error the model can read and react to, which is the behaviour
- * that makes a default safe to have.
+ * Models mostly omit the optional timeout, and a command that never returns
+ * would then have no bound except whatever kills the process from outside. This
+ * follows Claude Code's tiered policy: the model's timeout when given, otherwise
+ * a 120s default, with `MAX_TIMEOUT_SECONDS` as the ceiling. A timeout comes back
+ * as an ordinary tool error the model can read and react to.
  */
 const DEFAULT_TIMEOUT_SECONDS = 120;
 

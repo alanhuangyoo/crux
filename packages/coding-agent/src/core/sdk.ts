@@ -174,31 +174,18 @@ function getDefaultAgentDir(): string {
 /**
  * A wall-clock budget for this process, from `PI_TIME_BUDGET_SEC`.
  *
- * Nothing inside pi knows how long it is allowed to run. A batch harness does
- * -- a benchmark trial is given a budget and killed at it -- and without a way
- * to say so, the run ends mid-tool-call with whatever was on disk at that
- * instant. An environment variable is how a harness that launches `pi --print`
- * can hand that number over without pi having to know what a harness is.
- *
- * Ignored when unset, zero, or unparseable, which is every interactive session.
+ * Lets a batch harness that launches `pi --print` hand over its time limit, so
+ * the loop can pace itself and finish on its own terms. Ignored when unset,
+ * zero, or unparseable, which is every interactive session.
  */
 /**
  * A default ceiling on one response, from `PI_MAX_OUTPUT_TOKENS`.
  *
- * A provider reserves inference capacity by `max_tokens`, so asking for a
- * large one costs queueing whether or not the tokens are used. Claude Code
- * caps its default at 8K against a p99 output of 4,911 tokens, accepts under
- * 1% of responses being truncated, and gives those a clean retry at the
- * model's ceiling -- the retry this loop now performs (see
- * `escalatedMaxTokens` in the agent loop).
- *
- * The number is deployment-specific and belongs to whoever is running the
- * model, which is why this is a setting and not a new default: measured over
- * 10,225 assistant turns on one self-hosted 27B deployment, p50 output is 461
- * tokens, p95 is 5,699, and p99 is 16,161 -- three times Claude Code's, so
- * their 8K would truncate 3% here where 16K truncates 0.4%.
- *
- * Unset leaves pi's behaviour exactly as it is.
+ * A provider reserves capacity by `max_tokens`, so a large default costs
+ * queueing whether or not the tokens are used. The right number follows the
+ * model's own output distribution, so it is a deployment setting rather than a
+ * new default; a truncated turn gets a retry at the model's ceiling (see
+ * `escalatedMaxTokens` in the agent loop). Unset leaves the behaviour as is.
  */
 /**
  * Whether to retry a turn that spent its whole output ceiling without acting,

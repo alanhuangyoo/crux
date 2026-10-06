@@ -36,13 +36,9 @@ const DEADLINE_WARNING_MS = 5 * 60 * 1000;
 /**
  * What the agent is told when the deadline is close, and when it has passed.
  *
- * The loop has had no notion of time. A benchmark harness enforces one from
- * outside -- harbor kills the trial at its budget -- so the run ends mid-tool-
- * call with whatever was on disk at that instant, and the agent never knew it
- * was against a wall. Measured on Terminal-Bench 2.1: six of pi's twenty-four
- * failed trials ended that way, cut off with work in flight, while the median
- * successful trial used a fraction of the budget it was given. Neither pacing
- * error is available to fix from inside a loop that cannot see a clock.
+ * A harness that enforces a time limit from outside would otherwise cut the run
+ * off mid-tool-call; the warning gives the agent a turn to save its work and
+ * write its answer.
  */
 function deadlineNotice(remainingMs: number): string {
 	if (remainingMs > 0) {
@@ -57,16 +53,12 @@ function deadlineNotice(remainingMs: number): string {
 }
 
 /**
- * Cap on completion notices, for the case where stopping costs no time.
+ * Cap on completion notices.
  *
- * Terminus's version is self-limiting because each round it buys is spent, so
- * the share climbs and the question stops being asked. pi's turns are cheap
- * enough that this does not hold: a smoke run took eight notices to move from
- * 3% of its budget to 10%, hitting the cap long before the share. So the cap
- * is loose and the real stop is productivity -- a notice that buys a round with
- * no tool call in it has found an agent with nothing left to do, and asking
- * again only spends turns. There is no default share: unset means the loop
- * takes the agent at its word, which is every interactive session.
+ * The real brake is productivity: a notice whose round makes no tool call has
+ * found an agent with nothing left to do, and asking again only spends turns.
+ * The cap is a loose backstop. With no share configured the loop takes the
+ * agent at its word, as in every interactive session.
  */
 const DEFAULT_MAX_COMPLETION_NOTICES = 40;
 
@@ -82,29 +74,12 @@ function humanDuration(ms: number): string {
 /**
  * What the agent is told when it stops with most of its budget unspent.
  *
- * The loop takes the agent at its word: no tool calls means done. Measured on
- * Terminal-Bench 2.1 over one 27B deployment, by the fraction of its own budget
- * a trial had spent at the moment it stopped:
- *
- *     pi            solved  6%   failed 24%   47 of 73 failures under half
- *     Terminus      solved 33%   failed 82%    8 of 25 failures under half
- *     Claude Code   solved 19%   failed 95%    7 of 24 failures under half
- *
- * The agents that score do not stop when they are done; they stop when the time
- * is gone. pi's failures end with three quarters of the run unused, on a check
- * the agent wrote for itself and then passed. Terminus already asks "are you
- * sure" here and its trajectories show a generic question earning a generic
- * yes, so what this adds is the one thing the agent cannot see: how much of its
- * run is left. The threshold is self-limiting -- each round it buys costs time,
- * so the share climbs and the notices stop.
- *
- * What the model is told carries no share of its own. It used to quote "6-33%"
- * for solved trials and "24-95%" for failed ones -- the spread of the three
- * agents' medians in the table above, read out as one measurement, and in units
- * of a budget that has since changed: at 14400 seconds on a long task every
- * share halves. The claim kept is the one that does not move with the budget,
- * re-measured on four arms at the 262,144 window: 44 of 83 failures stopped on
- * their own with over a fifth of the budget left.
+ * The loop treats "no tool calls" as done. This gives the agent what it cannot
+ * see on its own -- how much of its run is left -- and asks for one pass against
+ * the task's own wording rather than the checks it wrote for itself. The
+ * threshold is self-limiting: each round it buys spends budget, so the share
+ * climbs and the notices stop. The text quotes no share but the run's own, so
+ * it holds under any budget.
  */
 function budgetNotice(elapsedMs: number, budgetMs: number, steps: number, cutOff = false): string {
 	const remaining = Math.max(0, budgetMs - elapsedMs);
@@ -131,26 +106,13 @@ function budgetNotice(elapsedMs: number, budgetMs: number, steps: number, cutOff
 }
 
 /**
- * Recovery for a turn cut off at the output token limit, in the two phases
- * Claude Code's loop uses (`max_output_tokens_escalate`, then
- * `max_output_tokens_recovery`).
+ * Recovery for a turn cut off at the output token limit, in two phases (the
+ * order Claude Code uses): raise the ceiling and retry silently first, since a
+ * truncated turn usually means the model needed more room; only if it
+ * truncates again is the model told, a bounded number of times.
  *
- * The order matters and is not obvious. A truncated turn usually means the
- * model needed more room, not that it did anything wrong, so the first
- * response is to **raise the ceiling and retry silently** -- no message, no
- * scolding. Only if it truncates again with the ceiling raised is the model
- * told, and that telling is bounded.
- *
- * Why pi needs it at all: the loop ends when an assistant message carries no
- * tool calls, which is right for a message that answers and wrong for one that
- * was cut off mid-sentence. The loop already knows `stopReason === "length"`
- * is dangerous -- when such a message *does* carry tool calls it refuses to run
- * them and asks for a reissue -- but with no tool calls there is nothing to
- * attach that notice to, so the guard never fires and the run ends on a
- * sentence that stops mid-word. Measured on Terminal-Bench 2.1 with a 27B
- * reasoning model: `regex-chess` spent 65,536 output tokens, 199,246
- * characters, entirely thinking, `stopReason: "length"`, and was recorded as
- * settled having taken no action at all.
+ * Without it, a turn cut off mid-sentence with no tool call would be read as
+ * the agent finishing.
  */
 /**
  * Slack left between the escalated ceiling and the context window. The input
@@ -166,13 +128,9 @@ export const MAX_TRUNCATION_NOTICES = 3;
 
 /** What the model is told once the raised ceiling has also been used up. */
 /**
- * Claude Code's own recovery text, ported from its source rather than
- * paraphrased. The clause this was missing is the last one: telling the model
- * to resume is advice about the turn that just died, telling it to break the
- * work up is advice about the next one, and without that a resumed turn walks
- * into the same ceiling. Measured on 441 trials, a run that truncates once
- * usually truncates again -- `regex-chess` and `polyglot-rust-c` each spent
- * their whole trial doing it.
+ * Claude Code's recovery text. The last clause matters: resuming is advice about
+ * the turn that was cut, breaking the work up is advice about the next one,
+ * which would otherwise hit the same ceiling.
  */
 const OUTPUT_LIMIT_RECOVERY_NOTICE =
 	"Output token limit hit. Resume directly -- no apology, no recap of what you were doing. " +
@@ -181,38 +139,21 @@ const OUTPUT_LIMIT_RECOVERY_NOTICE =
 /** Most of a cut-off reasoning block that is quoted back, in characters. */
 export const CARRIED_REASONING_MAX_CHARS = 8000;
 
-/** For bounding the quote by the window; measured 1.95-3.99 on real trial text. */
+/** Characters per token, for bounding the quote by the window. */
 const CARRIED_REASONING_CHARS_PER_TOKEN = 2.5;
 
 /**
- * The end of a turn's reasoning, when reasoning is all it produced -- so the
+ * The end of a turn's reasoning, when reasoning is all it produced, so the
  * recovery can hand it back.
  *
- * "Pick up mid-thought" assumes the thought is still there. On Claude it is:
- * thinking has its own `budget_tokens` below `max_tokens`, so a cut lands in
- * visible text, and visible text stays in the conversation. On a server where
- * reasoning and answer share one `max_tokens` the cut lands inside the
- * reasoning, and nothing keeps it -- a message with no text and no tool call
- * is dropped when the request is built, and chat templates strip reasoning
- * before the last user message anyway. The model is told to resume a thought
- * it can no longer see.
+ * "Pick up mid-thought" assumes the thought survives. Where reasoning and answer
+ * share one `max_tokens`, a cut (or a stop) inside the reasoning leaves nothing
+ * the next request carries: a message with no text and no tool call is dropped,
+ * and chat templates strip earlier reasoning anyway. Without the quote the model
+ * re-derives its plan from scratch and tends to hit the same limit.
  *
- * Measured over 356 Terminal-Bench 2.1 trials on a 27B reasoning model: 292
- * turns ended this way, in 60 trials, and 43% of them were followed by another.
- * The next one opens by re-deriving the same plan -- "Let me stop dumping huge
- * outputs. I have enough info" twice, near verbatim -- while the one before
- * ended mid-calculation holding the numbers it needed. Nine trials ended on it
- * with 29-83% of their budget unspent. The reasoning is not a loop worth
- * cutting: 92-99% of its lines are distinct.
- *
- * The same drop happens without a cut. A turn can also *stop* inside its
- * reasoning -- `stopReason: "stop"`, no text, no tool call -- and it is dropped
- * the same way; see `EMPTY_ANSWER_NOTICE` for how often.
- *
- * The end is quoted, not the start: the start is the plan the model will
- * rebuild in a sentence, the end is the work it cannot. Bounded to a sixteenth
- * of the window so that on a small deployment a few recoveries cannot crowd
- * out the conversation they are recovering.
+ * The end is quoted rather than the start -- the start is the plan, the end is
+ * the work -- bounded to a sixteenth of the window.
  */
 export function strandedReasoning(message: AssistantMessage, contextWindow?: number): string | undefined {
 	const parts: string[] = [];
@@ -245,22 +186,10 @@ export function isEmptyAnswer(message: AssistantMessage): boolean {
 export const MAX_EMPTY_ANSWER_RECOVERIES = 2;
 
 /**
- * What the model is told when a turn stopped with neither an answer nor a tool
- * call.
- *
- * The loop reads "no tool call" as "done", and that is right for a turn that
- * says it is done. This one said nothing: it stopped inside its reasoning, on
- * `stopReason: "stop"`, mid-derivation. Over 356 Terminal-Bench 2.1 trials on a
- * 27B reasoning model there were 28 such turns in 14 trials, with a median of
- * 6,135 characters of reasoning each, all of it dropped from the next request.
- * Three runs ended on one -- `gpt2-codegolf` at minutes 1, 2 and 24, its
- * deliverable never written -- and the notice they got instead asked whether
- * the work had been verified.
- *
- * hermes-agent reads the same shape as a stall, not a completion, and nudges
- * before it gives up; so does this, twice in a row at most. The model is left
- * a way out in words, because an empty turn can also mean it thought it was
- * finished.
+ * What the model is told when a turn stopped inside its reasoning, with neither
+ * an answer nor a tool call. That is a stall, not a completion (hermes-agent
+ * treats it the same way), so the model gets its reasoning back and is asked to
+ * go on -- at most twice in a row -- or to say in words that it is finished.
  */
 const EMPTY_ANSWER_NOTICE =
 	"Your last turn ended inside your reasoning, with no answer and no tool call, so nothing was done and " +
@@ -290,17 +219,9 @@ function escalatedMaxTokens(config: AgentLoopConfig, inputTokens?: number): numb
 	if (!ceiling || ceiling <= 0) return undefined;
 	const current = config.maxTokens;
 	if (current !== undefined && current >= ceiling) return undefined;
-	// The ceiling has to fit next to what is already in the context, not just
-	// be a number the model accepts on its own. Claude Code escalates 8K into
-	// 64K against a 200K window, so the two never interact; on a 32K model they
-	// do, and the escalation turns a truncated turn into a rejected request:
-	//
-	//   400: You requested a total of 32918 tokens: 16534 from the input
-	//        messages and 16384 for the completion
-	//
-	// which is strictly worse than the truncation it was meant to recover --
-	// the turn produces nothing at all rather than something cut short. Room
-	// below the current setting is not room; escalating into it is pointless.
+	// The raised ceiling has to fit beside the context already in the window, not
+	// just be a number the model accepts; otherwise the retry becomes a rejected
+	// request, which is worse than the truncation it was meant to recover.
 	const window = config.model.contextWindow;
 	if (window && window > 0 && inputTokens !== undefined && inputTokens > 0) {
 		const room = window - inputTokens - CONTEXT_SAFETY_MARGIN_TOKENS;
@@ -324,20 +245,9 @@ function ceilingAfterCut(message: AssistantMessage, config: AgentLoopConfig, sta
 }
 
 /**
- * The loop's recovery state, carried as one value rather than as loose flags.
- *
- * Claude Code's query loop threads a `State` object through every iteration and
- * rebuilds it immutably on each `continue` -- `maxOutputTokensRecoveryCount`,
- * `hasAttemptedReactiveCompact`, `maxOutputTokensOverride`, `turnCount`,
- * `transition` -- so that a later iteration can see which recoveries have
- * already been spent and refuse to repeat one.
- *
- * pi's loop had grown the same information as four unrelated locals: a boolean,
- * a counter, another boolean, and a per-iteration `let`. Three of them were
- * added by this work, each in the shape that suited the change being made, and
- * nothing outside the function could read any of them. Collecting them makes
- * the loop's recovery behaviour one value that can be logged, asserted on, and
- * extended without adding a fifth flag.
+ * The loop's recovery state, carried as one immutable value rather than loose
+ * flags (the shape of Claude Code's query loop), so a later iteration can see
+ * which recoveries have been spent, and the state can be logged and asserted on.
  */
 interface LoopState {
 	/** The output ceiling has been raised once; a second truncation speaks. */
@@ -608,15 +518,9 @@ async function runLoop(
 			let retrySilently = false;
 			let transition: TurnTransition | undefined = pendingTransition;
 			pendingTransition = undefined;
-			// Claude Code recovers a truncated turn unconditionally -- its
-			// `isWithheldMaxOutputTokens` path escalates once and then sends the
-			// recovery message up to three times, with no setting behind it. pi
-			// gated the same behaviour on `escalateOnSpentCeiling` because the
-			// escalation half is a real behaviour change with a characterization
-			// test. The recovery half is not: a turn that stopped on `length`
-			// having called no tool has produced nothing the loop can use, and
-			// ending the run there is how `regex-chess` scores zero after two
-			// turns. So the gate now only governs whether the ceiling is raised.
+			// The recovery always applies: a turn that stopped on `length` with no tool
+			// call produced nothing usable. Raising the ceiling sits behind
+			// `escalateOnSpentCeiling`, since it changes what the model is asked for.
 			if (toolCalls.length === 0 && message.stopReason === "length") {
 				// The escalation half stays behind the setting: raising the
 				// ceiling changes what the model is asked for, and pi has a
@@ -637,10 +541,9 @@ async function runLoop(
 					transition = { reason: "output_limit_recovery", attempt: state.outputLimitRecoveries };
 				}
 			}
-			// Stopped, not cut off, inside its reasoning: a stall rather than an
-			// answer. Only with reasoning to hand back -- a turn with nothing at all
-			// is not the measured shape (27 of 28 had reasoning), and an extension
-			// that blanks a message must still end the run the way it did.
+			// Stopped (not cut off) inside its reasoning: a stall rather than an answer.
+			// Only with reasoning to hand back; a turn with nothing at all still ends the
+			// run as before.
 			const stranded =
 				message.stopReason === "stop" && state.emptyAnswerRecoveries < MAX_EMPTY_ANSWER_RECOVERIES
 					? strandedReasoning(message, config.model.contextWindow)
@@ -655,14 +558,8 @@ async function runLoop(
 				// every tool call in the message may carry truncated arguments. Fail
 				// them all instead of executing potentially borked calls.
 				//
-				// The ceiling is raised here too, on the same terms as a turn cut off
-				// with no tool call. Claude Code escalates whatever the cut response
-				// held, and hermes-agent retries a truncated tool call with a boosted
-				// max_tokens; pi raised it only when there was no call. Measured over
-				// 356 Terminal-Bench 2.1 trials: 42 tool calls were cut, all 42 at the
-				// initial 16K in runs that had never raised it, with the model's own
-				// 32K unused -- and 15 of them took two or more turns, up to 32, to
-				// get the same tool through.
+				// The ceiling is raised on the same terms as a cut turn with no tool call,
+				// as Claude Code and hermes-agent do, so the reissued call fits.
 				let raised = false;
 				if (message.stopReason === "length") {
 					const ceiling = ceilingAfterCut(message, config, state);
@@ -751,25 +648,14 @@ async function runLoop(
 			// A notice whose round ran no tool call bought nothing; a second one
 			// buys nothing either, and the turns come out of the same budget.
 			//
-			// Unless the round was cut off. A turn that stopped on `length` did
-			// not decline to act, it was truncated mid-sentence, and reading
-			// that as "nothing left to do" ends the run on the spot. Measured
-			// on the arm that introduced this gate: of 37 failures, 13 ended
-			// under ten tool calls, and 12 of those 13 ended on `length` --
-			// `regex-chess` ran two turns and zero tool calls, `polyglot-rust-c`
-			// the same. Claude Code, on the same model, ends 1 of 24 failures
-			// under ten tool calls; pi ends a third of them there.
+			// Unless the round was cut off: a turn that stopped on `length` did not
+			// decline to act, it was truncated, so it still earns a notice.
 			const cutOff = lastCompletedTurn?.message.stopReason === "length";
 			const bought = state.toolCallsAtLastNotice < 0 || state.toolCallsMade > state.toolCallsAtLastNotice;
-			// A truncated round bought the next notice, but not forever. `|| cutOff`
-			// on its own removed the brake for exactly the case that repeats: a run
-			// that keeps truncating satisfies it every time, so it collected all 40
-			// notices and spent 40 model calls producing nothing. On the failing
-			// trials that is what it looks like -- 93 turns against 55 tool calls,
-			// so something near 40 turns that never acted.
-			//
-			// Truncation therefore re-arms the notice at most MAX_TRUNCATION_NOTICES
-			// times in a row, and a round that does call a tool clears the count.
+			// A truncated round earns the next notice, but not forever: a run that keeps
+			// truncating would otherwise collect every notice and spend them producing
+			// nothing. Truncation re-arms the notice at most MAX_TRUNCATION_NOTICES
+			// times in a row; a round that calls a tool clears the count.
 			const truncationBudget = cutOff && state.truncationNotices < MAX_TRUNCATION_NOTICES;
 			if (used >= 0 && used < share && state.completionNotices < cap && (bought || truncationBudget)) {
 				state = {

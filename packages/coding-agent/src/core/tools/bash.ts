@@ -25,20 +25,11 @@ const MAX_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000;
 /**
  * What a command gets when it does not ask.
  *
- * There was no default, so a command that never returns takes the trial with
- * it. Measured across one pair of 89-task arms, 25 trials ended in
- * `AgentTimeoutError` and their agent event stream had stopped a median of 112
- * minutes before harbor killed them -- 93% of the wall clock with nothing
- * happening. Eight of those were a bash command that never came back:
- * `grep -rl ... /` over the whole filesystem, a `vncsnapshot` against a VM that
- * never booted, a node script reading a device. `install-windows-3.11` ran 48
- * seconds of agent turns and then held its container for eight hours.
- *
- * Claude Code ships a two-minute default here. Ten is the number for this
- * benchmark instead: its tasks build things, and killing a five-minute compile
- * would take away trials that currently pass, while ten minutes still turns an
- * eight-hour hang into one lost turn. A command that genuinely needs longer can
- * ask for it, and the timeout message says so.
+ * Without a default, a command that never returns (a filesystem-wide search, a
+ * client waiting on a server that never started) holds the run until it is
+ * killed from outside. Ten minutes leaves room for long builds and test runs
+ * while turning a hang into one lost turn; a command that needs longer can ask
+ * for it, and the timeout message says so.
  */
 export const DEFAULT_BASH_TIMEOUT_SECONDS = 600;
 
@@ -46,15 +37,10 @@ export const DEFAULT_BASH_TIMEOUT_SECONDS = 600;
  * Share of the output budget kept from the start when a command's output is
  * truncated; the rest stays with the tail.
  *
- * pi kept only the last 2,000 lines, which drops exactly what a long build or
- * test run prints first -- the first compiler error, the top of a traceback,
- * the head of a listing. The agents this was compared against both keep it:
- * Claude Code reads the first 30,000 bytes and persists the rest, Codex cuts
- * the middle and keeps both ends. Over 356 Terminal-Bench 2.1 trials, 71
- * outputs were truncated -- in 23% of the failed trials against 6% of the
- * solved -- and 20 of those 71 were followed by the model going back for the
- * part it lost, with `| head` or by opening the full output. A fifth keeps the
- * tail as the main view, since the end of a run is usually its verdict.
+ * A tail alone drops what a long build or test run prints first -- the first
+ * compiler error, the top of a traceback. Claude Code keeps the start and Codex
+ * keeps both ends; a fifth for the head keeps the tail as the main view, since
+ * the end of a run is usually its verdict.
  */
 export const BASH_OUTPUT_HEAD_SHARE = 0.2;
 
@@ -152,15 +138,9 @@ export function createLocalShellOperations(shellName: string, resolveShellConfig
 			};
 
 			try {
-				// The timeout ends the *wait*, not just the process.
-				//
-				// Killing `child.pid` is not enough, and on the case that found this
-				// it did nothing at all: `nohup python3 ocr5.py > log 2>&1 &` leaves a
-				// descendant that outlives the shell, so by the time the timeout fires
-				// the pid is already gone and the surviving process keeps the inherited
-				// pipe alive. `waitForChildProcess` was still pending, so the line that
-				// checks `timedOut` was never reached -- a trial sat silent for 318
-				// minutes on a tool call that had asked for 120 seconds.
+				// The timeout ends the *wait*, not just the process: a backgrounded
+				// descendant can outlive the shell and keep the inherited pipe open,
+				// so waiting on the child alone could hang past the timeout.
 				const raced = new Promise<"timeout">((resolve) => {
 					timeoutHandle = setTimeout(() => {
 						timedOut = true;

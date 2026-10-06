@@ -138,23 +138,11 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 /**
  * The same settings, made to fit a window they were not written for.
  *
- * The defaults are absolute token counts chosen against a large context, and
- * they collide on a small one: compaction fires at `contextWindow - reserve`,
- * which is 16,384 on a 32K window, and then keeps 20,000 -- more than the
- * threshold that triggered it. The cut cannot get back under the line.
- *
- * Only what a cut keeps moves, and only downward. Moving the trigger was tried
- * twice and was wrong both times. Shrinking the reserve to "fire earlier" fires
- * *later*, which a unit test caught. Then, deliberately later -- a quarter
- * reserved, trigger at three quarters -- to leave room between a cut and the
- * next one; measured on the same seven tasks, that put truncation back at
- * baseline (46% against 34%) and acts-per-turn back down (0.51 against 0.63),
- * with trials showing forty-odd truncations and *zero* compactions. Raising the
- * bar simply stopped compaction firing on the runs that needed it.
- *
- * So the trigger stays where upstream put it and the cut goes deeper: at most
- * half the threshold, so a compaction lands meaningfully below the line that
- * caused it. On a large window the ratio never binds.
+ * The defaults are absolute token counts chosen for a large context. On a small
+ * one they collide: compaction fires at `contextWindow - reserve` and would then
+ * keep more than the threshold that triggered it, so the cut could never get
+ * back under the line. The trigger stays where upstream put it; only what a cut
+ * keeps moves, and only downward. On a large window the ratio never binds.
  */
 export function fitCompactionToWindow(
 	settings: CompactionSettings,
@@ -163,15 +151,9 @@ export function fitCompactionToWindow(
 	if (!contextWindow || contextWindow <= 0) return settings;
 	const reserveTokens = Math.min(settings.reserveTokens, Math.floor(contextWindow / 2));
 	const threshold = contextWindow - reserveTokens;
-	// A quarter, not a half. `findCutPoint` walks back through *message* text,
-	// while the threshold that triggered it counts the whole prompt -- system
-	// prompt and tool schemas included, which are not messages. On a small
-	// window the messages estimate well below the trigger, so a keep budget of
-	// half the threshold is larger than everything there is to keep and the cut
-	// removes nothing. Measured over 1,109 compactions in one full run: median
-	// reduction 1,836 tokens, and 210 of them left the context the same size or
-	// larger, because the summary being written back cost more than the cut
-	// saved.
+	// A quarter of the threshold: `findCutPoint` counts message text, while the
+	// threshold counts the whole prompt, system prompt and tool schemas included,
+	// so a larger keep budget can leave nothing to cut on a small window.
 	const keepCeiling = Math.max(1024, Math.floor(threshold / 4));
 	if (settings.keepRecentTokens <= keepCeiling && reserveTokens === settings.reserveTokens) {
 		return settings;
@@ -479,21 +461,9 @@ export function findCutPoint(
 			// The closest valid cut point at or after this entry -- and when there
 			// is none, the last one there is.
 			//
-			// A cut point is a user or assistant message, never a tool result, so
-			// when the budget is spent by trailing tool results alone there is
-			// nothing at or after `i` to cut at. Falling through left `cutIndex` at
-			// `cutPoints[0]`, which keeps the conversation from its beginning: the
-			// compaction runs, reports success, and removes nothing. That is not a
-			// rare shape -- one `read` of a large file is thousands of tokens
-			// against a keep budget of a quarter of the threshold, which on a 32K
-			// window is 4,096.
-			//
-			// It is not the big one, though: measured over both arms, 2% and 4% of
-			// the compactions that *succeeded* removed nothing, so the 67% figure
-			// for one arm belongs almost entirely to compactions that failed
-			// outright, not to this. Keeping the least is the intent here; keeping
-			// everything is the opposite of it, and two characterization tests were
-			// already red because of it.
+			// A cut point is never a tool result, so a keep budget spent by trailing
+			// tool results alone has nothing at or after `i` to cut at. Falling back to
+			// the first cut point would keep everything; the last one keeps the least.
 			let found = false;
 			for (let c = 0; c < cutPoints.length; c++) {
 				if (cutPoints[c] >= i) {
@@ -726,19 +696,10 @@ function buildSummarizationContext(promptText: string): Context {
 /**
  * How many tokens a summary may occupy.
  *
- * The budget was `0.8 * reserveTokens`, and `reserveTokens` is an absolute
- * default sized for a large window. On a 32K model that is 13,107 tokens --
- * 40% of everything -- and the next compaction summarises *that*, so the
- * summary grows every round until it is the context.
- *
- * Measured on one such run: 63 turns, 49 compactions, and a context pinned at
- * 32,554-32,659 tokens against a 32,768 window. The last turns report
- * `output: 1` -- there was room for a single token. Compaction was running
- * constantly and reducing nothing.
- *
- * So the summary is also bounded by the window it has to live in. An eighth
- * leaves room for what compaction keeps and for the work that follows; on a
- * large window the fraction never binds and the old budget stands.
+ * Bounded by the reserve and also by the window the summary has to live in: the
+ * next compaction summarizes this one, so a summary sized for a large window
+ * would grow every round on a small one until it filled the context. An eighth
+ * leaves room for what compaction keeps and the work that follows.
  */
 export function summaryTokenBudget(model: Model<any>, reserveTokens: number, share: number): number {
 	const fromReserve = Math.floor(share * reserveTokens);
@@ -753,38 +714,25 @@ const MIN_SUMMARY_TOKENS = 512;
 /**
  * Characters per token, for deciding whether a request fits.
  *
- * `estimateTokens` uses 4, which is the usual English prose figure and is wrong
- * for what a coding agent accumulates. Measured against this deployment's own
- * tokenizer on five trials' worth of real conversation, 20,000 characters each:
- *
- *     adaptive-rejection-sampler   3.39      build-cython-ext   3.68
- *     bn-fit-modify                2.66      build-pmars        2.96
- *     break-filter-js-from-html    3.99
- *
- * So a prompt believed to be 16,000 tokens can really be 24,000, which is how
- * requests kept overflowing a window they had been fitted to. This figure is
- * below the worst case on purpose: fitting too conservatively costs a shorter
- * summary, and fitting too loosely costs the whole compaction.
+ * `estimateTokens` assumes 4, the usual figure for English prose; a coding
+ * agent's context (code, logs, tool output) runs denser, around 2.7-4.0 on this
+ * tokenizer. The figure sits below the typical case on purpose: fitting too
+ * conservatively costs a shorter summary, fitting too loosely costs the whole
+ * compaction.
  */
 const CHARS_PER_TOKEN = 2.5;
 
 /**
  * The session's first request, kept word for word through every compaction.
  *
- * A summary is the model's account of the conversation, and its "Goal" section
- * is a paraphrase of what was asked -- rewritten again on each later compaction
- * by the update prompt. The references keep the user's own words instead:
- * Codex carries user messages into the compacted history verbatim within 20,000
- * tokens, hermes-agent inserts a bounded snapshot of the real user turn after
- * the summary is generated, and Claude Code's summary prompt asks for every user
- * message. For an agent run on one task, the first request is the task, and its
- * exact wording -- the path, the format, "must not" -- is what the verifier
- * holds it to.
+ * A summary's "Goal" is a paraphrase, rewritten again by each later update. As
+ * in Codex and hermes-agent, the user's own words are kept instead: for an agent
+ * run on one task, the first request is the task, and its exact wording is what
+ * the result is checked against.
  *
- * Only the first: a benchmark loop's notices also arrive as user messages, and
- * keeping the newest ones first, as Codex does, would spend the budget on them
- * and drop the task. It is re-read from the session each time, never from the
- * previous summary, so no update pass can paraphrase it.
+ * Only the first request, since a benchmark loop's notices also arrive as user
+ * messages. It is re-read from the session each time, never from the previous
+ * summary, so no update pass can paraphrase it.
  */
 export const ORIGINAL_REQUEST_HEADING = "## Original request (verbatim)";
 const ORIGINAL_REQUEST_END = "<!-- end of original request -->";
@@ -839,22 +787,11 @@ const PARTIAL_SUMMARY_MIN_CHARS = 400;
 /**
  * Keep a summarization request inside the window it has to fit in.
  *
- * The prompt is the history being dropped and the completion is the summary of
- * it, and both come out of the same window -- but nothing checked their sum. On
- * a 32K model that is not a tuning problem, it is an impossibility: compaction
- * triggers once history reaches 16,384 tokens and then asks for a completion
- * out of the same 32,768. Measured across 89 trials, 2,115 of 2,370 compactions
- * failed, 1,440 of them with
- *
- *     400 ... you requested a total of 32,793 tokens: 16,409 from the input
- *     messages and 16,384 for the completion
- *
- * Every failure appended its error and left the history untouched, so the
- * context only grew: one trial compacted 91 times across 74 turns, climbing 106
- * tokens per attempt, until it pinned at the window and truncated 50 times.
- *
- * So the completion is bounded by the room the prompt leaves it, and when the
- * prompt cannot leave enough the prompt is what gives.
+ * The prompt (the history being dropped) and the completion (its summary) come
+ * out of the same window. On a small window an unchecked request overflows, the
+ * compaction fails, and the context keeps growing until it truncates. So the
+ * completion is bounded by the room the prompt leaves it, and when the prompt
+ * cannot leave enough, the prompt is what gives.
  */
 export function fitSummarizationRequest(
 	promptText: string,
@@ -902,17 +839,10 @@ const SUMMARIZATION_ATTEMPTS = 3;
 /**
  * The same request with half the prompt.
  *
- * Fitting by a character ratio cannot be made correct, only less wrong: the
- * ratio is a property of the text, and measured against this deployment's
- * tokenizer it runs from 3.99 on prose down to **1.95** on what
- * `write-compressor` accumulates and 2.17 on `model-extraction-relu-logits`.
- * A constant chosen for one of those overflows the other, and the next task
- * brings a density nobody sampled.
- *
- * So the constant is only the opening guess, and a rejection is information:
- * halving the prompt converges on something that fits without knowing anything
- * about the tokenizer. Three attempts take the prompt to an eighth, which cleared
- * every case measured here.
+ * A character ratio cannot fit every request: characters per token is a property
+ * of the text, from about 2 on dense output to 4 on prose. So the ratio is only
+ * the opening guess, and a rejection is information -- halving the prompt
+ * converges on something that fits without knowing the tokenizer.
  */
 function halveSummarizationRequest(request: { promptText: string; maxTokens: number }): {
 	promptText: string;
@@ -947,13 +877,9 @@ function couldFitInSmaller(response: AssistantMessage): boolean {
 /**
  * The summary to persist, or a throw.
  *
- * Upstream discards a length-stopped response outright -- partial text must not
- * become a session checkpoint -- which is right when hitting the cap means
- * something went wrong. On a 32K window it is the ordinary case: 2,242 of one
- * arm's 3,018 compactions ended this way, and each threw away a summary that
- * had already been generated and paid for, leaving the context exactly where it
- * was. A summary that stops early is still a summary. The alternative on offer
- * is no compaction at all.
+ * A summary that stopped at the output cap still carries the work, so it is
+ * kept rather than discarded; discarding it would leave the context where it
+ * was, with no compaction at all.
  */
 export function summaryText(response: AssistantMessage, label: string): string {
 	const text = contentText(response.content);
@@ -1195,18 +1121,9 @@ export async function compact(
 	let summaryUsage: Usage;
 
 	// A split turn with no history before it is the whole session so far -- one
-	// request and everything done about it -- and it gets the full summary.
-	//
-	// The turn-prefix path is for a turn too large to keep inside a longer
-	// conversation: a short three-part prompt at half the budget, beside a full
-	// summary of the turns before it. An agent run on one task has no turns
-	// before it, so every compaction lands here, and "No prior history" was the
-	// whole of the history section. Measured over 356 Terminal-Bench 2.1 trials:
-	// 4 of 9 compactions took this path and kept 2,302-4,443 characters of
-	// ~250,000 tokens of work; the 5 that cut at a turn boundary kept
-	// 7,113-13,193 through the full prompt. Claude Code and Codex summarize the
-	// history with one full prompt and do not distinguish the case. The full
-	// path also carries a previous summary forward, which this one never took.
+	// request and everything done about it -- so it gets the full structured
+	// summary rather than the short turn-prefix one, and carries any previous
+	// summary forward.
 	const prefixIsTheHistory = isSplitTurn && turnPrefixMessages.length > 0 && messagesToSummarize.length === 0;
 
 	if (isSplitTurn && turnPrefixMessages.length > 0 && !prefixIsTheHistory) {

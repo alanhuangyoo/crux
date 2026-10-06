@@ -152,13 +152,9 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	/**
 	 * Absolute epoch milliseconds after which the loop stops on its own.
 	 *
-	 * Without it the loop runs until something outside kills it, which is how a
-	 * benchmark trial ends mid-tool-call with whatever happened to be on disk.
-	 * With it the agent is told once, shortly before the end, that time is
-	 * running out, and the loop returns normally when it arrives -- so the last
-	 * turn is one the agent chose rather than one it was interrupted during.
-	 *
-	 * Omit for an interactive session, where the person is the deadline.
+	 * The agent is warned once shortly before, and the loop returns normally when
+	 * the deadline arrives, so the last turn is one the agent chose rather than one
+	 * it was interrupted during. Omit for an interactive session.
 	 */
 	deadline?: number;
 
@@ -176,17 +172,10 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * Ask the agent to reconsider stopping while this share of the budget is
 	 * still unspent, between 0 and 1.
 	 *
-	 * Measured on Terminal-Bench 2.1 with one 27B deployment, by the fraction of
-	 * its own budget a trial had used at the moment it stopped: pi's failed
-	 * trials had spent a median of 24% and two thirds of them stopped under half,
-	 * while Claude Code's failed trials had spent 95% and Terminus's 82%. Failure
-	 * here is not running out of time; it is stopping on a green light the agent
-	 * wrote for itself. The threshold is where that question stops being worth
-	 * asking, so it is also what bounds the notice: each round consumes time, so
-	 * the share rises and the notices end.
-	 *
-	 * Omit to leave pi's behaviour as it is -- an interactive session has a person
-	 * to decide when the work is done.
+	 * Stopping on a check the agent wrote for itself is a common way to fail a
+	 * task whose own tests are stricter. The share also bounds the notice: each
+	 * round consumes time, so the share rises and the notices end. Omit for an
+	 * interactive session, where a person decides when the work is done.
 	 */
 	stopBudgetShare?: number;
 
@@ -197,23 +186,13 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	maxCompletionNotices?: number;
 
 	/**
-	 * Retry a turn that spent its whole output ceiling and made no tool call,
-	 * by raising the ceiling once and then asking the model to resume.
+	 * Retry a turn that spent its whole output ceiling and made no tool call, by
+	 * raising the ceiling once and then asking the model to resume.
 	 *
-	 * Off by default, because pi's behaviour here is a decision and not an
-	 * oversight: `isRecoverableLength` is `usage.output < desiredMaxOutput`, so
-	 * a response clamped *below* the ceiling is recovered a layer up by
-	 * dropping it, compacting and retrying, while one that reached the ceiling
-	 * is read as the model spending the budget it was given. A
-	 * characterization test states that ("does not compact when a length stop
-	 * reaches the desired output limit"), and it still holds with this off.
-	 *
-	 * Worth turning on where the ceiling is not a considered value. A harness
-	 * that composes a provider from a URL and a model id inherits
-	 * `DEFAULT_UNDECLARED_MAX_TOKENS`; on one such deployment that 16,384 sat
-	 * inside the model's own output distribution (p99 16,161) and 36% of runs
-	 * ended on a turn cut off at it, three of them after 2, 4 and 9 actions on
-	 * tasks another scaffold solved in 76, 23 and 114.
+	 * Off by default: upstream reads a response that reached the ceiling as the
+	 * model spending the budget it was given, and a characterization test pins
+	 * that. Worth turning on where the ceiling is an inherited default rather
+	 * than a considered value.
 	 */
 	escalateOnSpentCeiling?: boolean;
 
@@ -484,19 +463,10 @@ export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any
  * Why the loop is about to run another turn, or `undefined` when the turn just
  * ended is the last one.
  *
- * Claude Code's query loop carries this on its State object and calls it
- * `transition`: each `continue` records the path that caused it, so a later
- * iteration can recognise a recovery it has already tried and refuse to loop on
- * it. pi's loop had grown four scattered booleans and counters doing that job
- * -- `escalated`, `outputLimitRecoveries`, `deadlineWarned`,
- * `unactionableTurns` -- which no consumer can see and no two of which agree on
- * a representation.
- *
- * Emitting it on `turn_end` also answers a question that was otherwise
- * unanswerable from outside: whether a recovery path fired at all. Attributing
- * an A/B result here meant grepping trial logs for the notice text a recovery
- * happens to print, which finds nothing for a recovery that prints nothing --
- * the silent ceiling escalation being exactly that case.
+ * Modelled on the `transition` field of Claude Code's query loop: each
+ * continuation records the path that caused it, so a recovery can be recognised
+ * and not repeated, and -- emitted on `turn_end` -- an observer can tell which
+ * recovery paths fired, including silent ones such as the ceiling escalation.
  */
 export type TurnTransition =
 	/** The assistant asked for tools; their results feed the next turn. */

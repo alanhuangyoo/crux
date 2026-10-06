@@ -1178,17 +1178,10 @@ function addCacheControlToTextContent(
 /**
  * How long a connected stream may say nothing before it is treated as dead.
  *
- * The SDK's `timeout` covers getting a response, not keeping one. A request that
- * connects, returns headers, and then stops sending chunks waits forever --
- * measured across one pair of 89-task arms, 25 trials ended in
- * `AgentTimeoutError` with their agent event stream stopped a median of 112
- * minutes before harbor killed them, and eight of those had `message_start` as
- * their final event: headers received, not one chunk after.
- * `install-windows-3.11` held its container for eight hours that way.
- *
- * Five minutes, because chunks arrive per token once generation starts and the
- * only legitimately long gap is prefill -- a 30K prompt on an engine carrying
- * sixteen concurrent streams, which is tens of seconds, not minutes.
+ * The SDK's `timeout` covers getting a response, not keeping one: a request that
+ * returns headers and then stops sending chunks would wait forever. Five
+ * minutes, because chunks arrive per token once generation starts and the only
+ * legitimately long gap is prefill.
  */
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000;
 
