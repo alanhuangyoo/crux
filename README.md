@@ -27,7 +27,7 @@
 | Agent | Terminal-Bench 2.1 pass@1 |
 |---|---:|
 | **Crux** | **0.773** <sub>0.793 on a rerun</sub> |
-| Claude Code, same model | 0.730 <sub>32K window</sub> |
+| Claude Code, same model | 0.730 |
 | pi, upstream | 0.539 |
 
 Self-hosted Qwen3.8-27B, identical weights for every agent · 89 tasks · pass@1

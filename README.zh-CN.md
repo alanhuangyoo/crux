@@ -27,7 +27,7 @@
 | Agent | Terminal-Bench 2.1 pass@1 |
 |---|---:|
 | **Crux** | **0.773** <sub>复跑 0.793</sub> |
-| Claude Code，同一模型 | 0.730 <sub>32K 窗口</sub> |
+| Claude Code，同一模型 | 0.730 |
 | pi，上游 | 0.539 |
 
 自部署 Qwen3.8-27B，所有 Agent 使用相同权重 · 89 道题 · 整轮 pass@1。
